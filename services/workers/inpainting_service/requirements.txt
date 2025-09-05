@@ -1,0 +1,38 @@
+# Inpainting Service Requirements
+
+# Common
+numpy
+scipy
+PyYAML
+requests
+tqdm
+opencv-python
+
+# LAMA specific (torch version is critical)
+# The base image should have a compatible torch version.
+
+# PROPAINTER specific
+av
+addict
+einops
+future
+matplotlib
+scikit-image
+imageio-ffmpeg
+timm
+yapf
+progressbar2
+gdown
+gitpython
+hickle
+tensorboard
+gradio
+openmim
+psutil
+omegaconf
+
+# Installed via git
+# -e git+https://github.com/sczhou/py-thin-plate-spline.git#egg=py-thin-plate-spline
+# -e git+https://github.com/facebookresearch/segment-anything.git#egg=segment-anything
+
+# STTN specific dependencies will be added after inspecting its environment.yml

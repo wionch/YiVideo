@@ -1,0 +1,65 @@
+# ===================================================================
+# Video2Subtitle Project - Python Dependencies
+# ===================================================================
+
+# -------------------------
+# Core AI Frameworks
+# -------------------------
+# PyTorch: 核心深度学习框架，用于WhisperX, VSR等
+torch
+torchvision
+torchaudio
+
+# PaddlePaddle: 核心深度学习框架，用于PaddleOCR
+# 我们指定-gpu版本，pip会根据环境中的CUDA版本自动选择合适的包
+# 锁定版本以确保与paddlex的兼容性
+paddlepaddle-gpu==2.5.2
+
+# -------------------------
+# OCR & Image Processing
+# -------------------------
+# PaddleOCR: 字幕识别库
+paddleocr>=2.7.0
+
+# PaddleX: PaddlePaddle模型部署工具，PaddleOCR的依赖
+# 显式锁定版本以解决API不兼容问题
+paddlex==2.2.1
+
+# OpenCV: 图像/视频帧处理
+opencv-python-headless
+
+# -------------------------
+# Audio & ASR (Speech-to-Text)
+# -------------------------
+# WhisperX: 语音转录，带词级时间戳和说话人分离
+# 注意: 安装此库可能需要在Dockerfile中预装git
+whisperx
+
+# audio-separator: 基于Demucs的人声/背景音分离
+audio-separator[gpu]
+
+# -------------------------
+# Video Processing & IO
+# -------------------------
+# yt-dlp: 视频下载工具
+yt-dlp
+
+# video-subtitle-remover: AI硬字幕去除工具
+
+# av: FFmpeg的Python绑定，用于音视频解码/编码
+av
+
+# -------------------------
+# TTS (Text-to-Speech)
+# -------------------------
+# IndexTTS: 工业级可控高效的文转语音系统
+# indextts
+
+# -------------------------
+# Utilities
+# -------------------------
+# PyYAML: 用于解析YAML配置文件
+PyYAML
+
+# numpy: 科学计算基础库
+numpy

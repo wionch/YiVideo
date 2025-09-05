@@ -1,0 +1,87 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Debug TTS Generator",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/video_tran/tts_generator/run.py",
+            "args": [
+                "--input-json",
+                "D:\\Python\\Project\\VideoTran\\workspace\\videotran_223_20250815_215023__etakox5\\translated.json",
+                "--ref-audio",
+                "D:\\Python\\Project\\VideoTran\\workspace\\videotran_223_20250815_215023__etakox5\\vocals.wav",
+                "--output-audio",
+                "D:\\Python\\Project\\VideoTran\\workspace\\videotran_223_20250815_215023__etakox5\\dubbed_vocals.wav",
+                "--temp-dir",
+                "D:\\Python\\Project\\VideoTran\\workspace\\videotran_223_20250815_215023__etakox5",
+                "--target-lang",
+                "zh"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Debug Translator",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/video_tran/translator/run.py",
+            "args": [
+                "--input-json",
+                "D:\\Python\\Project\\VideoTran\\videos\\223_new.json",
+                "--target-lang",
+                "zh",
+                "--output-json",
+                "D:\\Python\\Project\\VideoTran\\videos\\223_tran.json"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Debug TTS Generator with 223_tran.json",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/video_tran/tts_generator/run.py",
+            "args": [
+                "--input-json",
+                "D:\\Python\\Project\\VideoTran\\videos\\223_tran.json",
+                "--ref-audio",
+                "D:\\Python\\Project\\VideoTran\\videos\\223_vocal.wav",
+                "--output-audio",
+                "D:\\Python\\Project\\VideoTran\\videos\\223_vocal_tran.wav",
+                "--temp-dir",
+                "D:\\Python\\Project\\VideoTran\\workspace\\233",
+                "--target-lang",
+                "zh"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Debug Remove Subtitle V3",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/remove_subtitle_v3.py",
+            "args": [
+                "--video_input",
+                "D:\\Python\\Project\\VideoTran\\videos\\223.mp4",
+                "--subtitle_input",
+                "D:\\Python\\Project\\VideoTran\\videos\\223.json",
+                "--only_convert"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}

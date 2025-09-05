@@ -1,0 +1,17 @@
+# paddleocr_service dependencies
+
+# Celery for task queuing
+celery
+redis
+
+# # Config file parsing
+PyYAML
+
+# # Core AI/CV libraries (versions from root requirements.txt)
+# paddlepaddle-gpu==2.5.2
+# # paddlex==2.2.1
+paddleocr
+torch
+av
+numpy
+opencv-python-headless

@@ -1,0 +1,60 @@
+# Video2Subtitle 配置文件
+# -----------------------------------
+# 在运行 run_pipeline.py 时，可以通过 --config config.yml 参数来加载此文件中的配置。
+
+# 1. 解码器模块配置
+decoder:
+  # GPU解码时，一次性送入显存的帧数。更大的值可以加快解码速度，但会增加显存占用。
+  # 建议值: 16, 32, 64
+  batch_size: 32
+
+# 2. 字幕区域检测模块配置
+area_detector:
+  # 为了确定字幕区域，从整个视频中均匀采样的帧数。值越大，区域定位越准，但检测耗时越长。
+  # 建议值: 100 ~ 500
+  sample_count: 300
+  # 在采样帧中，被认为是有效文本的最小字符长度。用于计算权重，避免将单个噪点字符计入范围。
+  # 建议值: 2, 3
+  min_text_len: 2
+  # 用于并行分析视频帧以确定字幕位置的工作进程数。
+  # 默认值: min(CPU核心数, 4)
+  # 增加此值可以加快区域检测速度，但会消耗更多CPU和内存。
+  num_workers: 4
+
+# 3. 变化检测模块配置
+change_detector:
+  # 感知哈希(dHash)的大小。更高的值可以更精确地捕捉图像内容的细节，但也可能对微小噪点更敏感。
+  # 推荐值: 8, 16
+  dhash_size: 8
+  # 汉明距离阈值。相邻两帧的dHash差异超过此值，即被认为发生了变化。值越小，检测越灵敏。
+  # - 较低的值 (1-3): 非常灵敏，适合检测快速、细微的字幕变化，但可能产生更多非必要关键帧。
+  # - 较高的值 (4-7): 不太灵敏，适合忽略微小噪点或动画特效，专注于文本本身的显著变化。
+  # 建议值: 3
+  hamming_threshold: 3
+
+# 4. OCR识别模块配置
+ocr:
+  # 当使用本地 PaddleOCR 实例时 (即 ocr_server.enabled = false)，此语言设置生效。
+  # 当使用 ocr_server 时，语言模型在服务器端配置，此处设置被忽略。
+  lang: 'zh' # 英文en 中文ch
+  num_workers: 4
+
+# 5. OCR 服务端配置
+ocr_server:
+  # 是否启用 OCR 服务端模式。
+  # - true: 流水线将使用下面的 url 连接 OCR 服务，实现高并发处理。
+  # - false: 流水线将回退到在本地创建 PaddleOCR 实例的传统模式。
+  enabled: true
+  # PaddleOCR Hub Serving 服务的预测 URL。
+  # 如果 ocr-server 和主应用在同一个 docker-compose 网络中，可以直接使用服务名 "ocr-server"。
+  # 如果在宿主机上直接运行 python 脚本测试，请使用 "http://localhost:8868/predict/ocr_system"。
+  url: "http://ocr-server:8868/predict/ocr_system"
+  # 客户端向服务器发送请求时的批处理大小。
+  # 可根据服务端的能力和网络情况调整。
+  batch_size: 16
+
+# 5. 后处理器模块配置
+postprocessor:
+  # 一条字幕被认为是有效的最小持续时间（单位：秒）。用于过滤掉因检测错误而产生的快速闪现的无效字幕。
+  # 建议值: 0.1 ~ 0.5
+  min_duration_seconds: 0.2
