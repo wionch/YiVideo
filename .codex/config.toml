@@ -1,0 +1,8 @@
+model = "gpt-5"
+model_provider = "packycode"
+
+[model_providers.packycode]
+name = "packycode"
+base_url = "https://oai-api.fkclaude.com/v1"
+wire_api = "responses"
+env_key = "packycode"

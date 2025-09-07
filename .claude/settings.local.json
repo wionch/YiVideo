@@ -16,7 +16,8 @@
       "WebFetch(domain:www.paddleocr.ai)",
       "Read(//d/**)",
       "Bash(python:*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "WebFetch(domain:pyimagesearch.com)"
     ],
     "deny": [],
     "ask": []
