@@ -15,7 +15,8 @@
       "WebFetch(domain:paddlepaddle.github.io)",
       "WebFetch(domain:www.paddleocr.ai)",
       "Read(//d/**)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(docker exec:*)"
     ],
     "deny": [],
     "ask": []

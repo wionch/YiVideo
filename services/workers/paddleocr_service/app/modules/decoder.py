@@ -89,3 +89,58 @@ class GPUDecoder:
             progress_bar.finish(f"✅ 解码完成，总共 {frame_count} 帧")
         
         container.close()
+
+    def sample_frames_precise(self, video_path: str, target_timestamps: list) -> list:
+        """
+        精准采样：使用seek定位到指定时间戳，只解码目标帧。
+        
+        Args:
+            video_path (str): 视频文件路径
+            target_timestamps (list): 目标时间戳列表（秒为单位）
+            
+        Returns:
+            list: 采样得到的帧数据列表（numpy格式）
+        """
+        sampled_frames = []
+        
+        try:
+            container = av.open(video_path)
+            stream = container.streams.video[0]
+            
+            # 排序时间戳，优化seek效率
+            sorted_timestamps = sorted(target_timestamps)
+            
+            for timestamp in sorted_timestamps:
+                try:
+                    # 精准定位到目标时间点
+                    container.seek(int(timestamp * av.time_base_q), 
+                                 whence='time', 
+                                 stream=stream)
+                    
+                    # 解码该时间点附近的帧
+                    frame_found = False
+                    for frame in container.decode(stream):
+                        frame_time = frame.pts * stream.time_base
+                        
+                        # 找到最接近目标时间的帧
+                        if abs(frame_time - timestamp) < 0.5:  # 0.5秒容差
+                            frame_np = frame.to_ndarray(format='rgb24')
+                            sampled_frames.append(frame_np)
+                            frame_found = True
+                            break
+                    
+                    if not frame_found:
+                        print(f"警告: 无法在时间戳 {timestamp:.2f}s 附近找到有效帧")
+                        
+                except (av.AVError, Exception) as e:
+                    print(f"警告: seek到时间戳 {timestamp:.2f}s 失败: {e}")
+                    continue
+            
+            container.close()
+            
+        except av.AVError as e:
+            print(f"错误: 无法打开视频文件 {video_path}: {e}")
+            return []
+        
+        print(f"精准采样完成: 目标 {len(target_timestamps)} 帧，成功获取 {len(sampled_frames)} 帧")
+        return sampled_frames

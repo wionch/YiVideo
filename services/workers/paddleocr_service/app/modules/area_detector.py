@@ -10,6 +10,7 @@ import signal
 import sys
 import gc
 import os
+import av
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
 # 导入我们自己的解码器
@@ -215,10 +216,45 @@ class SubtitleAreaDetector:
         return subtitle_area
 
     def _sample_frames(self, video_path: str, decoder: GPUDecoder) -> List[np.ndarray]:
-        """使用解码器从视频中均匀采样指定数量的帧。"""
+        """使用优化的精准采样从视频中获取指定数量的帧。"""
+        # 获取视频基本信息
+        total_frames = 0
+        duration = 0
+        try:
+            container = av.open(video_path)
+            stream = container.streams.video[0]
+            total_frames = stream.frames
+            if total_frames == 0:
+                total_frames = int(stream.duration * stream.time_base * stream.average_rate)
+            duration = float(stream.duration * stream.time_base)  # 总时长（秒）
+            container.close()
+        except Exception as e:
+            print(f"警告: 无法获取视频元数据: {e}, 使用估算值")
+            duration = 300  # 估算5分钟
+            total_frames = 5000
+
+        if total_frames == 0: 
+            total_frames = 5000
+        if duration == 0:
+            duration = 300
+
+        print(f"  - [信息] 视频时长: {duration:.1f}秒, 总帧数: {total_frames}")
+
+        # 优化策略选择
+        if total_frames <= self.sample_count * 2:
+            # 短视频：使用传统方法（避免过度seek）
+            print(f"  - [策略] 短视频检测，使用传统采样方法")
+            return self._sample_frames_traditional(video_path, decoder)
+        else:
+            # 长视频：使用精准采样（显著提升效率）
+            print(f"  - [策略] 长视频检测，使用精准采样方法")
+            return self._sample_frames_precise(video_path, decoder, duration)
+
+    def _sample_frames_traditional(self, video_path: str, decoder: GPUDecoder) -> List[np.ndarray]:
+        """传统采样方法：遍历所有帧（适用于短视频）"""
         total_frames = 0
         try:
-            container = decoder.av.open(video_path)
+            container = av.open(video_path)
             stream = container.streams.video[0]
             total_frames = stream.frames
             if total_frames == 0:
@@ -238,7 +274,7 @@ class SubtitleAreaDetector:
         # 创建采样进度条
         sampling_progress = create_stage_progress("帧采样", self.sample_count, show_rate=True, show_eta=False)
 
-        for batch_tensor, _ in decoder.decode(video_path, log_progress=False):  # 解码进度由采样进度条替代
+        for batch_tensor, _ in decoder.decode(video_path, log_progress=False):
             for frame_tensor in batch_tensor:
                 if sample_idx_ptr < len(sample_indices) and current_frame_idx == sample_indices[sample_idx_ptr]:
                     frame_np = frame_tensor.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
@@ -252,7 +288,112 @@ class SubtitleAreaDetector:
             if sample_idx_ptr >= len(sample_indices):
                 break
         
-        sampling_progress.finish("✅ 帧采样完成")
+        sampling_progress.finish("✅ 传统采样完成")
+        return frames
+
+    def _sample_frames_precise(self, video_path: str, decoder: GPUDecoder, duration: float) -> List[np.ndarray]:
+        """精准采样方法：直接seek到目标时间点（适用于长视频）"""
+        # 计算目标时间戳（均匀分布）
+        target_timestamps = np.linspace(0, duration * 0.95, self.sample_count).tolist()  # 避免文件末尾
+        
+        # 创建采样进度条
+        sampling_progress = create_stage_progress("精准采样", self.sample_count, show_rate=True, show_eta=True)
+        
+        frames = []
+        successful_samples = 0
+        failed_count = 0
+        
+        try:
+            container = av.open(video_path)
+            stream = container.streams.video[0]
+            
+            # 获取视频的时间基准，用于更准确的seek
+            time_base = float(stream.time_base)
+            print(f"  - [信息] 视频时间基准: {time_base}, 流时长: {duration:.1f}s")
+            
+            for i, timestamp in enumerate(target_timestamps):
+                try:
+                    # 使用PyAV标准的时间转换方式
+                    # 将秒转换为PyAV的时间单位 (AV_TIME_BASE = 1000000)
+                    seek_target = int(timestamp * av.time_base)
+                    
+                    # 使用标准的时间seek方式，更稳定
+                    container.seek(seek_target)
+                    
+                    # 解码该时间点的帧 - 增加容错性
+                    frame_found = False
+                    frames_checked = 0
+                    best_frame = None
+                    best_time_diff = float('inf')
+                    
+                    for frame in container.decode(stream):
+                        frames_checked += 1
+                        if frames_checked > 20:  # 增加检查帧数到20帧
+                            break
+                            
+                        if frame.pts is None:
+                            continue
+                            
+                        frame_time = float(frame.pts * time_base)
+                        time_diff = abs(frame_time - timestamp)
+                        
+                        # 记录最接近的帧
+                        if time_diff < best_time_diff:
+                            best_time_diff = time_diff
+                            best_frame = frame
+                        
+                        # 找到足够接近的帧就使用（容差放宽到3.0秒）
+                        if time_diff <= 3.0:
+                            frame_found = True
+                            break
+                    
+                    # 如果没有找到很接近的帧，使用最接近的帧（时间差放宽到5.0秒）
+                    if not frame_found and best_frame is not None and best_time_diff <= 5.0:
+                        frame = best_frame
+                        frame_found = True
+                    
+                    if frame_found:
+                        try:
+                            frame_np = frame.to_ndarray(format='rgb24')
+                            frames.append(frame_np)
+                            successful_samples += 1
+                        except Exception as convert_e:
+                            print(f"    转换错误 {timestamp:.1f}s: {convert_e}")
+                            failed_count += 1
+                    else:
+                        failed_count += 1
+                        if i < 5:  # 只对前5次失败打印警告，减少日志噪音
+                            print(f"    警告: 时间戳 {timestamp:.1f}s 采样失败 (检查了{frames_checked}帧)")
+                        
+                except Exception as e:
+                    failed_count += 1
+                    if i < 3:  # 只对前3次失败打印详细错误
+                        print(f"    seek错误 {timestamp:.1f}s: {e}")
+                
+                # 更新进度
+                sampling_progress.update(1, 成功=successful_samples, 失败=failed_count)
+                
+                # 调整提前终止条件，更宽松
+                if i > 100 and successful_samples < i * 0.2:
+                    print(f"  - [终止] 成功率过低 ({successful_samples}/{i+1})，提前终止精准采样")
+                    break
+            
+            container.close()
+            
+        except Exception as e:
+            print(f"精准采样过程出错: {e}")
+            # 回退到传统方法
+            sampling_progress.finish("⚠️  精准采样失败，回退到传统方法")
+            return self._sample_frames_traditional(video_path, decoder)
+        
+        success_rate = successful_samples / len(target_timestamps) if target_timestamps else 0
+        sampling_progress.finish(f"✅ 精准采样完成，成功率: {success_rate:.1%} ({successful_samples}/{len(target_timestamps)})")
+        
+        # 降低回退阈值到30%，更宽松的成功标准
+        if len(frames) < self.sample_count * 0.3:
+            print(f"  - [回退] 采样成功率过低 ({len(frames)}/{self.sample_count})，使用传统方法")
+            return self._sample_frames_traditional(video_path, decoder)
+        
         return frames
 
     def _detect_text_in_samples(self, frames: List[np.ndarray]) -> List[Tuple[np.ndarray, str]]:
