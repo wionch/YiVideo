@@ -57,38 +57,30 @@ def initialize_worker():
         print(f"[PID: {os.getpid()}] 配置加载失败，使用默认语言: {lang}，错误: {e}")
     
     try:
-        # 使用PaddleOCR 3.x的分离模块API
-        # 根据语言设置选择合适的模型 - 修复模型名称问题
-        if lang in ['ch', 'zh', 'chinese_cht', 'japan']:
-            det_model = "PP-OCRv5_server_det"
-            rec_model = "PP-OCRv5_server_rec"  # PP-OCRv5主模型支持中文、繁体中文、日文、英文、拼音
-        elif lang == 'en':
-            det_model = "PP-OCRv5_server_det"
-            rec_model = "en_PP-OCRv5_mobile_rec"  # 英文专用优化模型
-        elif lang == 'korean':
-            det_model = "PP-OCRv5_server_det" 
-            rec_model = "korean_PP-OCRv5_mobile_rec"  # 韩文模型
-        elif lang in ['latin', 'french', 'german', 'spanish', 'italian', 'portuguese']:
-            det_model = "PP-OCRv5_server_det"
-            rec_model = "latin_PP-OCRv5_mobile_rec"  # 拉丁语系模型
-        elif lang in ['russian', 'ukrainian', 'belarusian']:
-            det_model = "PP-OCRv5_server_det"
-            rec_model = "eslav_PP-OCRv5_mobile_rec"  # 东斯拉夫语系模型
-        elif lang == 'thai':
-            det_model = "PP-OCRv5_server_det"
-            rec_model = "th_PP-OCRv5_mobile_rec"  # 泰文模型
-        elif lang == 'greek':
-            det_model = "PP-OCRv5_server_det"
-            rec_model = "el_PP-OCRv5_mobile_rec"  # 希腊文模型
-        else:
-            # 对于不支持的语言，回退到PP-OCRv5主模型（支持中英日等）
-            det_model = "PP-OCRv5_server_det"
-            rec_model = "PP-OCRv5_server_rec"
-            print(f"[PID: {os.getpid()}] 语言 '{lang}' 暂不支持专用模型，使用通用PP-OCRv5模型")
+        # 使用统一的模型配置加载器
+        # 导入通用配置加载器
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        from utils.config_loader import (get_ocr_lang, get_detection_model, 
+                                       get_recognition_model_for_lang, get_ocr_models_config)
         
+        # 获取语言设置
+        lang = get_ocr_lang(default_lang='zh')
+        print(f"[PID: {os.getpid()}] 从配置加载语言设置: {lang}")
+        
+        # 获取统一的模型配置
+        det_model = get_detection_model()
+        rec_model = get_recognition_model_for_lang(lang)
+        models_config = get_ocr_models_config()
+        
+        print(f"[PID: {os.getpid()}] 使用模型配置: 检测={det_model}, 识别={rec_model}")
+        
+        # 使用PaddleOCR 3.x的分离模块API - 应用字幕场景优化设置
         worker_text_detector = TextDetection(model_name=det_model)
         worker_text_recognizer = TextRecognition(model_name=rec_model)
+        
         print(f"[PID: {os.getpid()}] TextDetection和TextRecognition模块初始化完成 (语言: {lang})")
+        
     except Exception as e:
         print(f"[PID: {os.getpid()}] OCR模块初始化失败: {e}")
         worker_text_detector = None

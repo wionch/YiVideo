@@ -36,8 +36,35 @@ change_detector:
 ocr:
   # 当使用本地 PaddleOCR 实例时 (即 ocr_server.enabled = false)，此语言设置生效。
   # 当使用 ocr_server 时，语言模型在服务器端配置，此处设置被忽略。
-  lang: 'zh' # 英文en 中文ch
+  lang: 'en' # 英文en 中文ch
   num_workers: 4
+  
+  # 模型配置 - 用于字幕场景的最佳模型选择
+  models:
+    # 文本检测模型 - 检测文本区域
+    detection_model: "PP-OCRv5_server_det"
+    
+    # 文本识别模型配置 - 按语言优化选择
+    recognition_models:
+      zh: "PP-OCRv5_server_rec"           # 中文简体 (最佳)
+      chinese_cht: "PP-OCRv5_server_rec"  # 中文繁体
+      en: "en_PP-OCRv5_mobile_rec"        # 英文专用 (轻量高效)
+      ja: "PP-OCRv5_server_rec"           # 日文 (使用服务器版)
+      korean: "korean_PP-OCRv5_mobile_rec" # 韩文
+      fr: "latin_PP-OCRv5_mobile_rec"     # 法语
+      de: "latin_PP-OCRv5_mobile_rec"     # 德语
+      es: "latin_PP-OCRv5_mobile_rec"     # 西班牙语
+      it: "latin_PP-OCRv5_mobile_rec"     # 意大利语
+      pt: "latin_PP-OCRv5_mobile_rec"     # 葡萄牙语
+      ru: "eslav_PP-OCRv5_mobile_rec"     # 俄语
+      th: "th_PP-OCRv5_mobile_rec"        # 泰语
+      ar: "ar_PP-OCRv5_mobile_rec"        # 阿拉伯语
+      default: "PP-OCRv5_server_rec"      # 默认回退模型
+    
+    # 字幕场景优化设置
+    subtitle_optimized: true  # 启用字幕场景优化
+    # 注意：PaddleOCR 3.x已移除 use_angle_cls 和 use_space_char 参数
+    # 优化主要通过语言选择和模型配置实现
 
 # 5. OCR 服务端配置
 ocr_server:

@@ -277,7 +277,7 @@ class MultiProcessOCREngine:
         x1, y1, x2, y2 = crop_rect
         
         # 创建调试目录
-        debug_dir = "/app/pics"
+        debug_dir = "./pics"
         os.makedirs(debug_dir, exist_ok=True)
         
         # 计数器，只保存前10帧
@@ -314,22 +314,34 @@ def _worker_initializer(lang='en'):
     """
     多进程worker初始化函数。
     每个子进程会调用此函数来初始化自己独立的PaddleOCR实例。
-    参考simple_test.py中的worker_initializer实现。
+    使用统一的模型配置和字幕场景优化。
     """
     global ocr_engine_process_global
     pid = os.getpid()
     
-    # 使用通用配置加载器获取语言设置（优先级高于参数传递）
+    # 使用通用配置加载器获取语言设置和模型配置
     try:
         # 导入通用配置加载器
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from utils.config_loader import get_ocr_lang
+        from utils.config_loader import (get_ocr_lang, get_ocr_models_config, 
+                                       get_recognition_model_for_lang)
+        
+        # 获取语言设置
         actual_lang = get_ocr_lang(default_lang=lang)
-        # print(f"[PID: {pid}] 从配置加载语言设置: {actual_lang} (原参数: {lang})")  # 减少日志输出
+        print(f"[PID: {pid}] 从配置加载语言设置: {actual_lang}")
         lang = actual_lang
+        
+        # 获取模型配置
+        models_config = get_ocr_models_config()
+        
     except Exception as e:
         print(f"[PID: {pid}] 配置加载失败，使用传入参数语言: {lang}，错误: {e}")
+        models_config = {
+            'subtitle_optimized': True,
+            'use_angle_cls': False,
+            'use_space_char': True
+        }
     
     # 修正语言代码映射，确保与PaddleOCR兼容
     paddleocr_lang_map = {
@@ -356,20 +368,36 @@ def _worker_initializer(lang='en'):
     
     # 转换语言代码
     paddleocr_lang = paddleocr_lang_map.get(lang, 'ch')  # 默认使用中文
-    # if paddleocr_lang != lang:  # 减少日志输出
-    #     print(f"[PID: {pid}] 语言代码转换: {lang} -> {paddleocr_lang}")
     
-    # print(f"[PID: {pid}] 开始初始化独立的PaddleOCR引擎 (语言: {paddleocr_lang})...")  # 减少日志输出
+    print(f"[PID: {pid}] 开始初始化PaddleOCR引擎 (语言: {paddleocr_lang})...")
     
     init_start_time = time.time()
     try:
-        # 使用转换后的语言代码初始化PaddleOCR
-        ocr_engine_process_global = PaddleOCR(lang=paddleocr_lang)
+        # PaddleOCR 3.x 正确的初始化参数
+        ocr_kwargs = {
+            'lang': paddleocr_lang,
+        }
+        
+        # 字幕场景优化设置 - 使用PaddleOCR 3.x的参数名
+        if models_config.get('subtitle_optimized', True):
+            # 在PaddleOCR 3.x中，很多优化参数已经内置或移除
+            # 主要通过lang参数和模型选择来优化
+            print(f"[PID: {pid}] 启用字幕场景优化模式 (PaddleOCR 3.x)")
+        
+        print(f"[PID: {pid}] PaddleOCR初始化参数: {ocr_kwargs}")
+        
+        # 使用PaddleOCR 3.x API初始化
+        from paddleocr import PaddleOCR
+        ocr_engine_process_global = PaddleOCR(**ocr_kwargs)
+        
         init_end_time = time.time()
         init_duration = init_end_time - init_start_time
-        # print(f"[PID: {pid}] PaddleOCR引擎初始化完成 (语言: {paddleocr_lang}, 耗时: {init_duration:.4f} 秒)。")  # 减少日志输出
+        print(f"[PID: {pid}] ✅ PaddleOCR引擎初始化成功 (语言: {paddleocr_lang}, 耗时: {init_duration:.2f}s)")
+        
     except Exception as e:
-        print(f"[PID: {pid}] PaddleOCR引擎初始化失败: {e}")
+        print(f"[PID: {pid}] ❌ PaddleOCR引擎初始化失败: {e}")
+        import traceback
+        traceback.print_exc()
         ocr_engine_process_global = None
 
 
@@ -521,7 +549,7 @@ def _ocr_worker_task(task_data):
 def _save_debug_image_with_annotations(image_data, frame_idx, positions, texts, confidences):
     """保存带标注的调试图像（字典格式）"""
     try:
-        debug_dir = "/app/pics"
+        debug_dir = "./pics"
         os.makedirs(debug_dir, exist_ok=True)
         
         # 复制图像数据以避免修改原始数据
@@ -568,7 +596,7 @@ def _save_debug_image_with_annotations(image_data, frame_idx, positions, texts, 
 def _save_debug_image_with_annotations_list(image_data, frame_idx, ocr_results):
     """保存带标注的调试图像（列表格式）"""
     try:
-        debug_dir = "/app/pics"
+        debug_dir = "./pics"
         os.makedirs(debug_dir, exist_ok=True)
         
         # 复制图像数据以避免修改原始数据
