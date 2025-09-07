@@ -6,6 +6,7 @@ from typing import List, Tuple
 from enum import Enum, auto
 
 from .decoder import GPUDecoder
+from ..utils.progress_logger import create_stage_progress
 
 class ChangeType(Enum):
     """
@@ -43,20 +44,21 @@ class ChangeDetector:
         Returns:
             List[Tuple[int, ChangeType]]: 包含所有关键事件的列表 (帧号, 变化类型)。
         """
-        print("开始检测字幕变化关键帧...")
+        print("🔍 开始分析字幕变化...")
         x1, y1, x2, y2 = subtitle_area
 
         # 1. 批量计算所有帧的dHash和标准差
         all_hashes, all_stds = self._compute_metrics_for_all_frames(video_path, decoder, (x1, y1, x2, y2))
-        print(f"已计算 {len(all_hashes)} 帧的dHash和标准差。")
+        print(f"📊 完成特征计算: {len(all_hashes)} 帧")
 
         # 2. 使用大津法自动确定空白帧阈值
         blank_threshold = self._get_otsu_threshold(all_stds)
-        print(f"通过大津法自动确定空白帧标准差阈值: {blank_threshold:.4f}")
+        print(f"🎯 空白帧阈值: {blank_threshold:.4f}")
 
         # 3. 找出所有变化点
         key_events = self._detect_change_points(all_hashes, all_stds, blank_threshold)
-        print(f"检测到 {len(key_events)} 个关键事件。")
+        
+        print(f"✅ 检测到 {len(key_events)} 个关键变化事件")
 
         return key_events
 
@@ -66,6 +68,12 @@ class ChangeDetector:
         all_stds = []
         x1, y1, x2, y2 = crop_rect
 
+        # 简单的计数器，不使用进度条（因为总帧数未知）
+        frame_count = 0
+        batch_count = 0
+        
+        print("🔄 正在计算视频特征...")
+        
         for batch_tensor, _ in decoder.decode(video_path):
             # 裁剪字幕区域
             cropped_batch = batch_tensor[:, :, y1:y2, x1:x2]
@@ -81,6 +89,15 @@ class ChangeDetector:
             diff = resized_batch[:, :, :, 1:] > resized_batch[:, :, :, :-1]
             hashes_np = diff.cpu().numpy().astype(np.uint8).reshape(diff.shape[0], -1)
             all_hashes.extend(hashes_np)
+            
+            frame_count += batch_tensor.size(0)
+            batch_count += 1
+            
+            # 每50个batch显示一次进度
+            if batch_count % 50 == 0:
+                print(f"  📊 已处理 {frame_count} 帧...")
+            
+        print(f"✅ 特征计算完成: 共处理 {frame_count} 帧")
             
         return all_hashes, np.array(all_stds)
 
@@ -101,6 +118,8 @@ class ChangeDetector:
         if not is_blank_list[0]:
             key_events.append((0, ChangeType.TEXT_APPEARED))
 
+        print(f"🔄 正在分析 {len(hashes)} 帧的变化点...")
+        
         for i in range(1, len(hashes)):
             prev_is_blank = is_blank_list[i-1]
             curr_is_blank = is_blank_list[i]
@@ -116,5 +135,12 @@ class ChangeDetector:
                 hamming_distance = np.count_nonzero(hashes[i-1] != hashes[i])
                 if hamming_distance > self.hamming_threshold:
                     key_events.append((i, ChangeType.CONTENT_CHANGED))
+            
+            # 每1000帧显示一次进度
+            if i % 1000 == 0:
+                progress_percent = (i / len(hashes)) * 100
+                print(f"  🔍 变化检测进度: {i}/{len(hashes)} ({progress_percent:.1f}%), 已找到 {len(key_events)} 个事件")
+        
+        print(f"✅ 变化检测完成，共找到 {len(key_events)} 个关键事件")
         
         return key_events

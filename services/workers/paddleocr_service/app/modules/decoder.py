@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from typing import Generator, Tuple
 import time
+from ..utils.progress_logger import create_progress_bar
 
 class GPUDecoder:
     """
@@ -49,12 +50,12 @@ class GPUDecoder:
         frames_buffer = []
         timestamps_buffer = []
 
+        progress_bar = None
         if log_progress:
-            print(f"开始解码视频: {video_path} (原始帧率: {stream.average_rate}, 总计约 {total_frames} 帧)")
+            progress_bar = create_progress_bar(total_frames, "视频解码", show_rate=True, show_eta=True)
         
         frame_count = 0
         batch_count = 0
-        start_time = time.time()
 
         for frame in container.decode(stream):
             if resampler:
@@ -68,24 +69,23 @@ class GPUDecoder:
             timestamps_buffer.append(frame.pts * stream.time_base)
             frame_count += 1
 
+            # 每处理一帧就更新进度条
+            if progress_bar:
+                progress_bar.update(1)
+
             if len(frames_buffer) == self.batch_size:
                 batch_tensor = torch.stack(frames_buffer).to(self.device, non_blocking=True)
                 timestamps_np = np.array(timestamps_buffer, dtype=np.float64)
                 yield batch_tensor, timestamps_np
                 frames_buffer, timestamps_buffer = [], []
                 batch_count += 1
-                if log_progress and batch_count % 20 == 0: # 每20个批次打印一次进度
-                    elapsed = time.time() - start_time
-                    frames_processed = frame_count
-                    percent = (frames_processed / total_frames) * 100 if total_frames > 0 else 0
-                    print(f"    - [解码进度] 已处理 {frames_processed}/{total_frames} 帧 ({percent:.1f}%), 耗时: {elapsed:.2f}s")
-                    start_time = time.time()
             
         if frames_buffer:
             batch_tensor = torch.stack(frames_buffer).to(self.device, non_blocking=True)
             timestamps_np = np.array(timestamps_buffer, dtype=np.float64)
             yield batch_tensor, timestamps_np
         
-        if log_progress:
-            print(f"解码完成。总共解码了 {frame_count} 帧。")
+        if progress_bar:
+            progress_bar.finish(f"✅ 解码完成，总共 {frame_count} 帧")
+        
         container.close()

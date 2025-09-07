@@ -14,7 +14,8 @@
       "Bash(docker exec Video2Subtitle bash -c \"cd /app && ls -la videos/ | grep 223\")",
       "WebFetch(domain:paddlepaddle.github.io)",
       "WebFetch(domain:www.paddleocr.ai)",
-      "Read(//d/**)"
+      "Read(//d/**)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

@@ -61,7 +61,7 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
     change_events = change_detector.find_key_frames(video_path, decoder, subtitle_area)
 
     # 5. 批量OCR识别 (事件驱动)
-    ocr_results = ocr_engine.recognize(video_path, decoder, change_events, subtitle_area)
+    ocr_results = ocr_engine.recognize(video_path, decoder, change_events, subtitle_area, total_frames)
 
     # 6. 后处理与格式化
     final_subtitles = postprocessor.format(ocr_results, fps, total_frames)

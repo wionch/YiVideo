@@ -14,6 +14,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
 # 导入我们自己的解码器
 from .decoder import GPUDecoder
+from ..utils.progress_logger import create_stage_progress
 
 # --- 多进程工作函数 ---
 
@@ -161,10 +162,10 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
         process_end_time = time.time()
         process_duration = process_end_time - process_start_time
         
-        # 输出处理信息
+        # 输出处理信息 - 减少日志输出，改用进度条显示
         detection_count = len(detections_with_text)
         text_count = sum(1 for _, text in detections_with_text if len(text.strip()) > 0)
-        print(f"[PID: {pid}] 帧 {frame_index+1}: 检测到 {detection_count} 个文本框，成功识别 {text_count} 个文本 (总耗时: {process_duration:.4f} 秒)")
+        # print(f"[PID: {pid}] 帧 {frame_index+1}: 检测到 {detection_count} 个文本框，成功识别 {text_count} 个文本 (总耗时: {process_duration:.4f} 秒)")
         
         # 强制垃圾回收，释放临时变量
         del det_result
@@ -241,16 +242,25 @@ class SubtitleAreaDetector:
         frames = []
         current_frame_idx = 0
         sample_idx_ptr = 0
+        
+        # 创建采样进度条
+        sampling_progress = create_stage_progress("帧采样", self.sample_count, show_rate=True, show_eta=False)
 
-        for batch_tensor, _ in decoder.decode(video_path, log_progress=True):
+        for batch_tensor, _ in decoder.decode(video_path, log_progress=False):  # 解码进度由采样进度条替代
             for frame_tensor in batch_tensor:
                 if sample_idx_ptr < len(sample_indices) and current_frame_idx == sample_indices[sample_idx_ptr]:
                     frame_np = frame_tensor.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     frames.append(frame_np)
                     sample_idx_ptr += 1
+                    
+                    # 更新采样进度
+                    sampling_progress.update(1)
+                    
                 current_frame_idx += 1
             if sample_idx_ptr >= len(sample_indices):
                 break
+        
+        sampling_progress.finish("✅ 帧采样完成")
         return frames
 
     def _detect_text_in_samples(self, frames: List[np.ndarray]) -> List[Tuple[np.ndarray, str]]:
@@ -270,30 +280,36 @@ class SubtitleAreaDetector:
 
         # 使用配置中定义的进程数
         num_processes = self.num_workers
-        print(f"    - [检测进度] 使用 {num_processes} 个进程并行处理 {len(frames)} 帧...")
+        
+        # 创建区域检测进度条
+        progress_bar = create_stage_progress("字幕区域检测", len(frames), show_rate=True, show_eta=True)
 
         # 准备任务数据：添加索引以便跟踪处理进度
         indexed_frames = [(i, frame) for i, frame in enumerate(frames)]
         
         # 方案1：使用 ProcessPoolExecutor 替代 multiprocessing.Pool，提供更好的异常处理
         try:
-            self._process_frames_with_executor(indexed_frames, num_processes, all_detections, start_time)
+            self._process_frames_with_executor(indexed_frames, num_processes, all_detections, start_time, progress_bar)
         except Exception as e:
             print(f"    - [警告] ProcessPoolExecutor 方式失败: {e}，回退到传统 Pool 方式...")
             # 方案2：回退到改进的 multiprocessing.Pool
-            self._process_frames_with_pool(indexed_frames, num_processes, all_detections, start_time)
+            self._process_frames_with_pool(indexed_frames, num_processes, all_detections, start_time, progress_bar)
         
         total_elapsed = time.time() - start_time
-        print(f"    - [检测进度] 所有帧处理完毕，总耗时: {total_elapsed:.2f}s")
+        progress_bar.finish(f"✅ 区域检测完成，总耗时: {total_elapsed:.2f}s")
         
         return all_detections
     
-    def _process_frames_with_executor(self, indexed_frames, num_processes, all_detections, start_time):
+    def _process_frames_with_executor(self, indexed_frames, num_processes, all_detections, start_time, progress_bar):
         """
         使用 ProcessPoolExecutor 处理帧 - 更好的异常处理和资源管理
         现在处理带有文本内容的棄测结果
         """
         print("    - [方法] 使用 ProcessPoolExecutor 进行处理")
+        
+        # 总进度条统计变量
+        total_detections = 0
+        total_recognized_texts = 0
         
         with ProcessPoolExecutor(
             max_workers=num_processes,
@@ -318,12 +334,14 @@ class SubtitleAreaDetector:
                     
                     completed_count += 1
                     
-                    # 输出详细信息
-                    elapsed = time.time() - start_time
-                    frame_actual_index, _ = indexed_frames[frame_index]
-                    detection_count = len(detections_with_text)
-                    text_count = sum(1 for _, text in detections_with_text if len(text.strip()) > 0)
-                    print(f"    - [检测] 帧 {frame_actual_index+1}/{len(indexed_frames)}: 检测到 {detection_count} 个文本框，成功识别 {text_count} 个文本 (已完成: {completed_count}/{len(indexed_frames)}, 耗时: {elapsed:.2f}s)")
+                    # 统计总数据
+                    frame_detection_count = len(detections_with_text)
+                    frame_text_count = sum(1 for _, text in detections_with_text if len(text.strip()) > 0)
+                    total_detections += frame_detection_count
+                    total_recognized_texts += frame_text_count
+                    
+                    # 更新进度条
+                    progress_bar.update(1, 检测框=frame_detection_count, 识别文本=frame_text_count)
                         
                 except TimeoutError:
                     frame_index = future_to_index[future]
@@ -334,7 +352,7 @@ class SubtitleAreaDetector:
                     frame_actual_index, _ = indexed_frames[frame_index]
                     print(f"    - [警告] 帧 {frame_actual_index+1} 处理失败: {e}")
     
-    def _process_frames_with_pool(self, indexed_frames, num_processes, all_detections, start_time):
+    def _process_frames_with_pool(self, indexed_frames, num_processes, all_detections, start_time, progress_bar):
         """
         使用改进的 multiprocessing.Pool 处理帧 - 回退方案
         现在处理带有文本内容的检测结果
@@ -360,11 +378,12 @@ class SubtitleAreaDetector:
                     for box_np, text in detections_with_text:
                         all_detections.append((box_np, text))
                 
+                # 批量更新进度条
                 if (i + 1) % 50 == 0 or (i + 1) == len(results):
-                    elapsed = time.time() - start_time
                     total_detections = sum(len(det) for det in results[:i+1] if det)
                     total_texts = sum(sum(1 for _, text in det if len(text.strip()) > 0) for det in results[:i+1] if det)
-                    print(f"    - [检测进度] 已处理 {i + 1}/{len(results)} 帧，检测到 {total_detections} 个文本框，识别 {total_texts} 个文本 (耗时: {elapsed:.2f}s)")
+                    progress_bar.update(50 if (i + 1) % 50 == 0 else (i + 1) % 50, 
+                                      检测框=total_detections, 识别文本=total_texts)
                     
         except Exception as e:
             print(f"    - [错误] 多进程处理期间发生错误: {e}")

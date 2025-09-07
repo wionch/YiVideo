@@ -12,6 +12,7 @@ from typing import List, Tuple, Dict, Any
 
 from .decoder import GPUDecoder
 from .change_detector import ChangeType
+from ..utils.progress_logger import create_stage_progress
 
 # 全局变量，用于多进程worker初始化
 ocr_engine_process_global = None
@@ -60,7 +61,7 @@ class MultiProcessOCREngine:
         print(f"警告：未找到有效的num_workers配置，将使用默认值2。")
         return 2
 
-    def recognize(self, video_path: str, decoder: GPUDecoder, change_events: List[Tuple[int, ChangeType]], subtitle_area: Tuple[int, int, int, int]) -> Dict[int, Tuple[str, Any, ChangeType]]:
+    def recognize(self, video_path: str, decoder: GPUDecoder, change_events: List[Tuple[int, ChangeType]], subtitle_area: Tuple[int, int, int, int], total_frames: int = 0) -> Dict[int, Tuple[str, Any, ChangeType]]:
         """
         使用多进程并发模式对必要的frames进行OCR处理。
         """
@@ -74,7 +75,7 @@ class MultiProcessOCREngine:
             # Still need to return disappearance events
             return {frame_idx: (None, None, event_type) for frame_idx, event_type in change_events}
 
-        print(f"检测到 {len(change_events)} 个关键事件, 其中 {len(frames_to_ocr_indices)} 个需要进行OCR...")
+        print(f"检测到 {len(change_events)} 个关键事件, 其中 {len(frames_to_ocr_indices)} 个需要进行OCR")
         x1, y1, x2, y2 = subtitle_area
 
         # 1. Decode and extract only the frames that need OCR
@@ -82,12 +83,8 @@ class MultiProcessOCREngine:
         if not key_frames_map:
             return {}
 
-        print(f"  - [进度] 已提取 {len(key_frames_map)} 帧图像，准备进行多进程并发OCR处理...")
-
         # 2. 使用多进程并发处理OCR
-        ocr_results_map = self._multiprocess_ocr_batch(key_frames_map, subtitle_area)
-        
-        print("  - [进度] 多进程OCR处理完成，开始整理结果...")
+        ocr_results_map = self._multiprocess_ocr_batch(key_frames_map, subtitle_area, total_frames)
 
         # 3. Construct final event-aware dictionary
         final_results = {}
@@ -98,93 +95,178 @@ class MultiProcessOCREngine:
             elif event_type == ChangeType.TEXT_DISAPPEARED:
                 final_results[frame_idx] = (None, None, event_type)
 
-        print("OCR (多进程并发模式)完成。")
+        print("✅ OCR识别完成")
         return final_results
 
-    def _multiprocess_ocr_batch(self, key_frames_map: Dict[int, np.ndarray], subtitle_area: Tuple[int, int, int, int]) -> Dict[int, Tuple[str, Any]]:
+    def _multiprocess_ocr_batch(self, key_frames_map: Dict[int, np.ndarray], subtitle_area: Tuple[int, int, int, int], total_frames: int) -> Dict[int, Tuple[str, Any]]:
         """
         使用多进程并发处理OCR识别。
         参考simple_test.py中的test_multiprocess_concurrent实现。
         """
-        print(f"创建 {self.num_workers} 个子进程进行并发OCR处理...")
-        
         # 构造worker任务列表：(frame_idx, image_data)
         worker_tasks = [(frame_idx, image_data) for frame_idx, image_data in key_frames_map.items()]
         
+        # 创建OCR处理进度条
+        progress_bar = create_stage_progress("OCR文本识别", len(worker_tasks), 
+                                           show_rate=True, show_eta=True)
+        
         ocr_results_map = {}
         pool = None
+        
+        # 先尝试使用ProcessPoolExecutor实现实时进度更新
+        success_count = 0
+        error_count = 0
+        x1, y1, x2, y2 = subtitle_area
+        
         try:
-            # 创建进程池，每个worker初始化自己的PaddleOCR实例
-            pool = multiprocessing.Pool(
-                processes=self.num_workers, 
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            
+            # 创建进程池执行器
+            with ProcessPoolExecutor(
+                max_workers=self.num_workers,
                 initializer=_worker_initializer,
                 initargs=(self.lang,)
-            )
-            
-            print(f"开始将 {len(worker_tasks)} 个OCR任务映射到工作进程...")
-            start_time = time.time()
-            
-            # 使用pool.map进行并发处理
-            results = pool.map(_ocr_worker_task, worker_tasks)
-            
-            end_time = time.time()
-            ocr_duration = end_time - start_time
-            print(f"多进程OCR处理耗时: {ocr_duration:.4f} 秒")
-            
-            # 关闭进程池 - 先关闭再join
-            pool.close()
-            pool.join()
-            print("进程池已关闭。")
-            
-            # 整理结果
-            x1, y1, x2, y2 = subtitle_area
-            for result in results:
-                if result:  # 过滤掉None结果
-                    frame_idx, texts, boxes = result
-                    if texts and boxes:
-                        # 确保texts是字符串列表
-                        if isinstance(texts, list) and len(texts) > 0:
-                            full_text = " ".join(str(text) for text in texts if text)
-                            
-                            # 安全地处理boxes数据
-                            try:
-                                if boxes and len(boxes) > 0:
-                                    # 确保boxes是数值类型的numpy数组
-                                    valid_boxes = []
-                                    for box in boxes:
-                                        if isinstance(box, (list, np.ndarray)):
-                                            # 转换为float类型的numpy数组
-                                            box_array = np.array(box, dtype=np.float32)
-                                            valid_boxes.append(box_array)
+            ) as executor:
+                
+                start_time = time.time()
+                
+                # 提交所有任务
+                future_to_task = {}
+                for task in worker_tasks:
+                    future = executor.submit(_ocr_worker_task, task)
+                    future_to_task[future] = task
+                
+                # 实时收集结果并更新进度条
+                for future in as_completed(future_to_task, timeout=600):  # 10分钟总超时
+                    try:
+                        result = future.result(timeout=60)  # 单个任务60秒超时
+                        
+                        if result:  # 过滤掉None结果
+                            frame_idx, texts, boxes = result
+                            if texts and boxes:
+                                # 确保texts是字符串列表
+                                if isinstance(texts, list) and len(texts) > 0:
+                                    full_text = " ".join(str(text) for text in texts if text)
                                     
-                                    if valid_boxes:
-                                        all_points = np.vstack(valid_boxes).reshape(-1, 2)
-                                        min_x, min_y = np.min(all_points, axis=0)
-                                        max_x, max_y = np.max(all_points, axis=0)
-                                        
-                                        abs_bbox = (int(min_x), int(min_y + y1), int(max_x), int(max_y + y1))
-                                        ocr_results_map[frame_idx] = (full_text.strip(), abs_bbox)
-                                        print(f"  处理帧 {frame_idx}: 文本='{full_text}', 坐标={abs_bbox}")
-                                    else:
-                                        print(f"  帧 {frame_idx}: 无有效边界框数据")
+                                    # 安全地处理boxes数据
+                                    try:
+                                        if boxes and len(boxes) > 0:
+                                            # 确保boxes是数值类型的numpy数组
+                                            valid_boxes = []
+                                            for box in boxes:
+                                                if isinstance(box, (list, np.ndarray)):
+                                                    # 转换为float类型的numpy数组
+                                                    box_array = np.array(box, dtype=np.float32)
+                                                    valid_boxes.append(box_array)
+                                            
+                                            if valid_boxes:
+                                                all_points = np.vstack(valid_boxes).reshape(-1, 2)
+                                                min_x, min_y = np.min(all_points, axis=0)
+                                                max_x, max_y = np.max(all_points, axis=0)
+                                                
+                                                abs_bbox = (int(min_x), int(min_y + y1), int(max_x), int(max_y + y1))
+                                                ocr_results_map[frame_idx] = (full_text.strip(), abs_bbox)
+                                                success_count += 1
+                                            else:
+                                                error_count += 1
+                                        else:
+                                            error_count += 1
+                                    except Exception as box_error:
+                                        error_count += 1
                                 else:
-                                    print(f"  帧 {frame_idx}: 无边界框数据")
-                            except Exception as box_error:
-                                print(f"  帧 {frame_idx}: 处理边界框时出错: {box_error}")
+                                    error_count += 1
                         else:
-                            print(f"  帧 {frame_idx}: 文本数据格式异常")
+                            error_count += 1
+                        
+                        # 实时更新进度条
+                        progress_bar.update(1, 成功=success_count, 失败=error_count)
+                            
+                    except Exception as e:
+                        task = future_to_task[future]
+                        frame_idx = task[0]
+                        print(f"任务 {frame_idx} 处理失败: {e}")
+                        error_count += 1
+                        progress_bar.update(1, 成功=success_count, 失败=error_count)
+                
+                end_time = time.time()
+                ocr_duration = end_time - start_time
+                progress_bar.finish(f"✅ OCR识别完成: {len(worker_tasks)}项，耗时: {ocr_duration/60:.1f}m, 平均速率: {len(worker_tasks)/ocr_duration:.1f}/s")
             
         except Exception as e:
-            print(f"多进程OCR处理期间发生错误: {e}")
-            import traceback
-            traceback.print_exc()
-            if pool:
-                try:
-                    pool.terminate()
-                    pool.join()
-                    print("进程池已强制终止。")
-                except:
-                    pass
+            print(f"ProcessPoolExecutor执行失败，回退到Pool.imap方式: {e}")
+            
+            # 回退到使用multiprocessing.Pool的imap方式实现实时进度
+            try:
+                pool = multiprocessing.Pool(
+                    processes=self.num_workers, 
+                    initializer=_worker_initializer,
+                    initargs=(self.lang,)
+                )
+                
+                start_time = time.time()
+                
+                # 使用imap而非map来获得实时结果
+                results_iter = pool.imap(_ocr_worker_task, worker_tasks)
+                
+                success_count = 0
+                error_count = 0
+                
+                for i, result in enumerate(results_iter):
+                    if result:  # 过滤掉None结果
+                        frame_idx, texts, boxes = result
+                        if texts and boxes:
+                            # 确保texts是字符串列表
+                            if isinstance(texts, list) and len(texts) > 0:
+                                full_text = " ".join(str(text) for text in texts if text)
+                                
+                                # 安全地处理boxes数据
+                                try:
+                                    if boxes and len(boxes) > 0:
+                                        # 确保boxes是数值类型的numpy数组
+                                        valid_boxes = []
+                                        for box in boxes:
+                                            if isinstance(box, (list, np.ndarray)):
+                                                # 转换为float类型的numpy数组
+                                                box_array = np.array(box, dtype=np.float32)
+                                                valid_boxes.append(box_array)
+                                        
+                                        if valid_boxes:
+                                            all_points = np.vstack(valid_boxes).reshape(-1, 2)
+                                            min_x, min_y = np.min(all_points, axis=0)
+                                            max_x, max_y = np.max(all_points, axis=0)
+                                            
+                                            abs_bbox = (int(min_x), int(min_y + y1), int(max_x), int(max_y + y1))
+                                            ocr_results_map[frame_idx] = (full_text.strip(), abs_bbox)
+                                            success_count += 1
+                                        else:
+                                            error_count += 1
+                                    else:
+                                        error_count += 1
+                                except Exception as box_error:
+                                    error_count += 1
+                            else:
+                                error_count += 1
+                    else:
+                        error_count += 1
+                    
+                    # 实时更新进度条
+                    progress_bar.update(1, 成功=success_count, 失败=error_count)
+                
+                end_time = time.time()
+                ocr_duration = end_time - start_time
+                progress_bar.finish(f"✅ OCR识别完成: {len(worker_tasks)}项，耗时: {ocr_duration/60:.1f}m, 平均速率: {len(worker_tasks)/ocr_duration:.1f}/s")
+                
+            except Exception as e2:
+                progress_bar.finish(f"❌ 多进程OCR处理失败: {e2}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                if pool:
+                    try:
+                        pool.close()
+                        pool.join()
+                    except:
+                        pass
         
         return ocr_results_map
 
@@ -244,7 +326,7 @@ def _worker_initializer(lang='en'):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from utils.config_loader import get_ocr_lang
         actual_lang = get_ocr_lang(default_lang=lang)
-        print(f"[PID: {pid}] 从配置加载语言设置: {actual_lang} (原参数: {lang})")
+        # print(f"[PID: {pid}] 从配置加载语言设置: {actual_lang} (原参数: {lang})")  # 减少日志输出
         lang = actual_lang
     except Exception as e:
         print(f"[PID: {pid}] 配置加载失败，使用传入参数语言: {lang}，错误: {e}")
@@ -274,10 +356,10 @@ def _worker_initializer(lang='en'):
     
     # 转换语言代码
     paddleocr_lang = paddleocr_lang_map.get(lang, 'ch')  # 默认使用中文
-    if paddleocr_lang != lang:
-        print(f"[PID: {pid}] 语言代码转换: {lang} -> {paddleocr_lang}")
+    # if paddleocr_lang != lang:  # 减少日志输出
+    #     print(f"[PID: {pid}] 语言代码转换: {lang} -> {paddleocr_lang}")
     
-    print(f"[PID: {pid}] 开始初始化独立的PaddleOCR引擎 (语言: {paddleocr_lang})...")
+    # print(f"[PID: {pid}] 开始初始化独立的PaddleOCR引擎 (语言: {paddleocr_lang})...")  # 减少日志输出
     
     init_start_time = time.time()
     try:
@@ -285,7 +367,7 @@ def _worker_initializer(lang='en'):
         ocr_engine_process_global = PaddleOCR(lang=paddleocr_lang)
         init_end_time = time.time()
         init_duration = init_end_time - init_start_time
-        print(f"[PID: {pid}] PaddleOCR引擎初始化完成 (语言: {paddleocr_lang}, 耗时: {init_duration:.4f} 秒)。")
+        # print(f"[PID: {pid}] PaddleOCR引擎初始化完成 (语言: {paddleocr_lang}, 耗时: {init_duration:.4f} 秒)。")  # 减少日志输出
     except Exception as e:
         print(f"[PID: {pid}] PaddleOCR引擎初始化失败: {e}")
         ocr_engine_process_global = None
@@ -318,7 +400,7 @@ def _ocr_worker_task(task_data):
         ocr_end_time = time.time()
         ocr_duration = ocr_end_time - ocr_start_time
         
-        print(f"[PID: {pid}] 帧 {frame_idx}: OCR识别完成 (耗时: {ocr_duration:.4f} 秒)")
+        # OCR识别完成，减少日志输出
         
         # 解析OCR结果 - 基于simple_test.py的format_ocr_results函数处理predict方法返回的字典格式
         if ocr_output and isinstance(ocr_output, list) and len(ocr_output) > 0:
@@ -332,7 +414,7 @@ def _ocr_worker_task(task_data):
                     texts = data_dict.get('rec_texts', [])
                     confidences = data_dict.get('rec_scores', [])
                     
-                    print(f"[PID: {pid}] 帧 {frame_idx}: 检测到 {len(texts)} 个文本区域 (字典格式)")
+                    # 检测到文本区域，减少日志输出
                     
                     extracted_texts = []
                     extracted_boxes = []
@@ -359,9 +441,10 @@ def _ocr_worker_task(task_data):
                                         box_array = np.array(box_data, dtype=np.float32)
                                         if box_array.size > 0 and not np.isnan(box_array).any():
                                             extracted_boxes.append(box_array.tolist())
-                                            print(f"[PID: {pid}] 帧 {frame_idx}: 提取文本 '{texts[i]}'，置信度: {confidences[i] if i < len(confidences) else 'N/A'}")
+                                            # 提取文本成功，减少日志输出
                                 except Exception as box_err:
-                                    print(f"[PID: {pid}] 帧 {frame_idx}: 边界框处理失败: {box_err}")
+                                    # 边界框处理失败，减少日志输出
+                                    pass
                     
                     return (frame_idx, extracted_texts, extracted_boxes)
                     
@@ -370,7 +453,7 @@ def _ocr_worker_task(task_data):
                     texts = []
                     boxes = []
                     
-                    print(f"[PID: {pid}] 帧 {frame_idx}: 解析OCR结果，检测到 {len(ocr_output[0])} 个文本区域 (列表格式)")
+                    # 解析OCR结果，减少日志输出
                     
                     # 保存调试图像（阶段2：OCR识别后带标注的图像）
                     debug_frame_counter += 1
@@ -385,7 +468,7 @@ def _ocr_worker_task(task_data):
                                 text = str(text_info[0]) if text_info[0] else ""
                                 if text.strip():
                                     texts.append(text.strip())
-                                    print(f"[PID: {pid}] 帧 {frame_idx}: 提取文本: '{text}'")
+                                    # 提取文本成功，减少日志输出
                                     
                                     # 提取边界框 (line[0])
                                     if line[0] is not None:
@@ -396,12 +479,13 @@ def _ocr_worker_task(task_data):
                                                 if box_array.size > 0 and not np.isnan(box_array).any():
                                                     boxes.append(box_array.tolist())
                                         except (ValueError, TypeError) as box_err:
-                                            print(f"[PID: {pid}] 帧 {frame_idx}: 边界框转换失败: {box_err}")
+                                            # 边界框转换失败，减少日志输出
+                                            pass
                             elif isinstance(text_info, str):
                                 # 兼容性处理：如果text_info直接是字符串
                                 if text_info.strip():
                                     texts.append(text_info.strip())
-                                    print(f"[PID: {pid}] 帧 {frame_idx}: 提取文本(字符串): '{text_info}'")
+                                    # 提取文本成功，减少日志输出
                                     
                                     # 尝试提取边界框
                                     if line[0] is not None:
@@ -412,23 +496,25 @@ def _ocr_worker_task(task_data):
                                                 if box_array.size > 0 and not np.isnan(box_array).any():
                                                     boxes.append(box_array.tolist())
                                         except (ValueError, TypeError) as box_err:
-                                            print(f"[PID: {pid}] 帧 {frame_idx}: 边界框转换失败: {box_err}")
+                                            # 边界框转换失败，减少日志输出
+                                            pass
                             else:
-                                print(f"[PID: {pid}] 帧 {frame_idx}: 文本信息格式异常: {type(text_info)}")
+                                # 文本信息格式异常，减少日志输出
+                                pass
                     
                     return (frame_idx, texts, boxes)
                 
             except Exception as parse_error:
-                print(f"[PID: {pid}] 帧 {frame_idx}: OCR结果解析失败: {parse_error}")
+                # OCR结果解析失败，减少日志输出
                 import traceback
                 traceback.print_exc()
                 return (frame_idx, [], [])
         else:
-            print(f"[PID: {pid}] 帧 {frame_idx}: 未检测到文本")
+            # 未检测到文本，减少日志输出
             return (frame_idx, [], [])
             
     except Exception as e:
-        print(f"[PID: {pid}] 帧 {frame_idx}: OCR处理失败: {e}")
+        # OCR处理失败，减少日志输出
         return None
 
 
