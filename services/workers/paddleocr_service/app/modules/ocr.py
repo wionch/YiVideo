@@ -307,6 +307,48 @@ class MultiProcessOCREngine:
         
         return key_frames_map
 
+    def recognize_keyframes(self, video_path: str, decoder: GPUDecoder, keyframes: List[int], 
+                           subtitle_area: Tuple[int, int, int, int], total_frames: int = 0) -> Dict[int, Tuple[str, Any]]:
+        """
+        关键帧驱动的OCR识别方法 - 适配新架构
+        
+        基于KeyFrameDetector提供的关键帧列表进行OCR识别，
+        替代原有的事件驱动模式。
+        
+        Args:
+            video_path: 视频文件路径
+            decoder: GPU解码器实例
+            keyframes: 关键帧索引列表 [0, 45, 89, ...]
+            subtitle_area: 字幕区域坐标 (x1, y1, x2, y2)
+            total_frames: 视频总帧数（用于进度显示）
+            
+        Returns:
+            Dict[int, Tuple[str, bbox]]: 关键帧OCR结果映射
+            {
+                0: ("Hello World", (x1, y1, x2, y2)),
+                45: ("Nice to meet you", (x1, y1, x2, y2)),
+                ...
+            }
+        """
+        if not keyframes:
+            print("⚠️ 未提供关键帧列表，OCR识别跳过")
+            return {}
+            
+        print(f"🔍 开始关键帧OCR识别: {len(keyframes)} 个关键帧")
+        x1, y1, x2, y2 = subtitle_area
+        
+        # 1. 提取关键帧图像数据
+        key_frames_map = self._extract_key_frames(video_path, decoder, keyframes, (x1, y1, x2, y2))
+        if not key_frames_map:
+            print("❌ 关键帧提取失败")
+            return {}
+            
+        # 2. 使用多进程并发进行OCR识别
+        ocr_results_map = self._multiprocess_ocr_batch(key_frames_map, subtitle_area, total_frames)
+        
+        print(f"✅ 关键帧OCR识别完成: {len(ocr_results_map)} 个结果")
+        return ocr_results_map
+
 
 # --- 多进程Worker函数（模块级别函数，供multiprocessing调用） ---
 

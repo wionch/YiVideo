@@ -99,7 +99,7 @@ for i in range(1, total_frames):
 YiVideo/
 ├── services/workers/paddleocr_service/app/
 │   ├── modules/                    # 核心处理模块
-│   │   ├── change_detector.py     # 变化检测器
+│   │   ├── keyframe_detector.py   # 关键帧检测器 (新架构)
 │   │   ├── decoder.py             # GPU解码器
 │   │   ├── area_detector.py       # 字幕区域检测器
 │   │   ├── ocr.py                 # OCR处理引擎
@@ -148,27 +148,33 @@ graph TB
 
 ## 📊 数据结构
 
-### 关键事件类型
+### 关键帧数据结构 (新架构)
 
+**关键帧列表 (当前实现)**
 ```python
-from enum import Enum, auto
+# 关键帧索引列表 - 替代原有的事件列表
+keyframes = [0, 45, 89, 156, 203]  # 第一帧强制 + 相似度检测帧
 
-class ChangeType(Enum):
-    TEXT_APPEARED = auto()      # 文本出现 (从无到有)
-    TEXT_DISAPPEARED = auto()   # 文本消失 (从有到无)
-    CONTENT_CHANGED = auto()    # 文本内容变化 (从有到有，但内容不同)
+# 段落数据结构
+segments = [
+    {
+        'key_frame': 0,
+        'start_frame': 0,
+        'end_frame': 44,
+        'start_time': 0.0,
+        'end_time': 1.76,
+        'duration': 1.76
+    },
+    # ...
+]
 ```
 
 ### 输出数据格式
 
-#### **事件列表 (当前实现)**
-```json
-[
-    [45, "TEXT_APPEARED"],
-    [67, "CONTENT_CHANGED"], 
-    [89, "TEXT_DISAPPEARED"],
-    [156, "TEXT_APPEARED"]
-]
+#### **关键帧处理流程 (当前实现)**
+```
+关键帧检测 → 段落生成 → OCR识别 → 最终输出
+[0,45,89,156] → segments → OCR → JSON/SRT
 ```
 
 #### **最终输出格式**
@@ -194,9 +200,9 @@ class ChangeType(Enum):
 ```
 
 **注意**: 
-- 当前实现的JSON格式**不包含** `keyFrame` 和 `frameRange` 字段
+- 当前实现的JSON格式**已包含** `keyFrame` 和 `frameRange` 字段
 - `bbox` 使用四个顶点坐标格式，与PaddleOCR原始输出格式保持一致
-- 如需完整格式请参考代码施工文档中的增强计划
+- 基于关键帧驱动的新架构，每个段落对应一个关键帧
 
 **SRT文件格式**（标准字幕格式）：
 ```srt
@@ -266,13 +272,13 @@ def _get_otsu_threshold(self, stds: np.ndarray) -> float:
 **注意**: 以下示例基于项目的当前目录结构，需要在`services/workers/paddleocr_service/`目录下运行。
 
 ```python
-from app.modules.change_detector import ChangeDetector
+from app.modules.keyframe_detector import KeyFrameDetector  # 🆕 新的关键帧检测器
 from app.modules.decoder import GPUDecoder
 from app.modules.area_detector import SubtitleAreaDetector
 
 # 1. 初始化组件
-config = {"hamming_threshold": 3, "batch_size": 32}
-detector = ChangeDetector(config)
+config = {"similarity_threshold": 0.90, "dhash_size": 8, "batch_size": 32}  # 🆕 新配置参数
+keyframe_detector = KeyFrameDetector(config)  # 🆕 新检测器
 decoder = GPUDecoder(config)
 area_detector = SubtitleAreaDetector(config)
 
@@ -280,17 +286,25 @@ area_detector = SubtitleAreaDetector(config)
 subtitle_area = area_detector.detect(video_path, decoder)
 print(f"字幕区域: {subtitle_area}")
 
-# 3. 检测关键帧事件
-key_events = detector.find_key_frames(video_path, decoder, subtitle_area)
-print(f"检测到 {len(key_events)} 个关键事件")
+# 3. 检测关键帧 (新逻辑)
+keyframes = keyframe_detector.detect_keyframes(video_path, decoder, subtitle_area)  # 🆕 新方法
+print(f"检测到 {len(keyframes)} 个关键帧")
 
-# 4. OCR识别与输出生成
+# 4. 生成段落信息 (新逻辑)
+fps, total_frames = 25.0, 8000  # 示例数据
+segments = keyframe_detector.generate_subtitle_segments(keyframes, fps, total_frames)  # 🆕 新方法
+
+# 5. OCR识别 (适配新架构)
 from app.modules.ocr import MultiProcessOCREngine
 ocr_engine = MultiProcessOCREngine(config.get('ocr', {}))
-ocr_results = ocr_engine.recognize(video_path, decoder, key_events, subtitle_area, total_frames=0)
+ocr_results = ocr_engine.recognize_keyframes(video_path, decoder, keyframes, subtitle_area, total_frames)  # 🆕 新方法
 
-# 5. 生成最终输出格式
-final_output = build_final_output(key_events, ocr_results, frame_rate=25.0)
+# 6. 后处理 (适配新数据结构)
+from app.modules.postprocessor import SubtitlePostprocessor
+postprocessor = SubtitlePostprocessor(config.get('postprocessor', {}))
+final_subtitles = postprocessor.format_from_keyframes(segments, ocr_results, fps)  # 🆕 新方法
+
+print(f"生成 {len(final_subtitles)} 条字幕")
 ```
 
 ### 完整输出生成示例
@@ -298,30 +312,25 @@ final_output = build_final_output(key_events, ocr_results, frame_rate=25.0)
 **注意**: 以下代码为文档示例，实际项目中的完整实现在`app/modules/postprocessor.py`和`app/logic.py`中。
 
 ```python
-def build_final_output(key_events, ocr_results, frame_rate):
-    """生成最终的JSON和SRT输出格式"""
+def build_final_output(keyframes, segments, ocr_results, frame_rate):
+    """生成最终的JSON和SRT输出格式 - 基于关键帧架构"""
     subtitles = []
-    current_start = None
     segment_id = 1
     
-    for frame_idx, change_type in key_events:
-        if change_type == ChangeType.TEXT_APPEARED:
-            current_start = frame_idx
-        elif change_type in [ChangeType.TEXT_DISAPPEARED, ChangeType.CONTENT_CHANGED]:
-            if current_start is not None and current_start in ocr_results:
-                text, bbox, _ = ocr_results[current_start]
-                if text:  # 只保存有文本的段落
-                    subtitles.append({
-                        "id": segment_id,
-                        "startTime": current_start / frame_rate,
-                        "endTime": frame_idx / frame_rate,
-                        "keyFrame": current_start,
-                        "frameRange": [current_start, frame_idx],
-                        "text": text,
-                        "bbox": list(bbox) if bbox else [0, 0, 0, 0]
-                    })
-                    segment_id += 1
-                current_start = frame_idx if change_type == ChangeType.CONTENT_CHANGED else None
+    for segment, keyframe in zip(segments, keyframes):
+        if keyframe in ocr_results:
+            text, bbox = ocr_results[keyframe]
+            if text:  # 只保存有文本的段落
+                subtitles.append({
+                    "id": segment_id,
+                    "startTime": segment['start_time'],
+                    "endTime": segment['end_time'],
+                    "keyFrame": keyframe,      # 🆕 关键帧信息
+                    "frameRange": [segment['start_frame'], segment['end_frame']],  # 🆕 帧范围
+                    "text": text,
+                    "bbox": list(bbox) if bbox else []
+                })
+                segment_id += 1
     
     return subtitles
 
@@ -373,12 +382,12 @@ print(f"生成 {len(final_subtitles)} 个字幕段落")
 ### 常见问题
 
 #### **1. 检测到过多关键帧**
-**原因**: 阈值设置过低，噪点被误判为变化
-**解决**: 增大 `hamming_threshold` 值 (3→5)
+**原因**: 相似度阈值设置过低，微小变化被误判为新关键帧
+**解决**: 增大 `similarity_threshold` 值 (0.90→0.95)，提高相似度要求
 
 #### **2. 漏检字幕变化**
-**原因**: 阈值过高，细微变化被忽略
-**解决**: 减小 `hamming_threshold` 值 (3→2)
+**原因**: 相似度阈值过高，明显变化被忽略
+**解决**: 减小 `similarity_threshold` 值 (0.90→0.85)，降低相似度要求
 
 #### **3. GPU内存不足**
 **原因**: 批处理尺寸过大
@@ -392,10 +401,10 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # 检查中间结果
-from app.modules.change_detector import ChangeDetector
-detector = ChangeDetector(config)
-all_hashes, all_stds = detector._compute_metrics_for_all_frames(
-    video_path, decoder, subtitle_area
+from app.modules.keyframe_detector import KeyFrameDetector  # 🆕 新的检测器
+keyframe_detector = KeyFrameDetector(config)
+all_hashes, all_stds = keyframe_detector._compute_frame_features(
+    video_path, decoder, (x1, y1, x2, y2)  # 需要提供完整的坐标元组
 )
 
 # 分析数据分布

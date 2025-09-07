@@ -274,8 +274,7 @@ class KeyFrameDetector:
 **修改内容**: 将change_detector替换为keyframe_detector
 
 ```python
-# 原有导入
-from app.modules.change_detector import ChangeDetector, ChangeType
+# 🚫 旧版本已替换: from app.modules.change_detector import ChangeDetector, ChangeType
 
 # 新增导入
 from app.modules.keyframe_detector import KeyFrameDetector
@@ -445,63 +444,48 @@ keyframe_detector:
 
 ```python
 # 原始方法签名
-def format(self, ocr_results: Dict[int, Tuple[str, Any, ChangeType]], video_fps: float, total_frames: int) -> List[Dict[str, Any]]:
+def format(self, ocr_results: Dict[int, Tuple[str, Any]], video_fps: float, total_frames: int) -> List[Dict[str, Any]]:
 
-# 新增方法签名 - 需要变化事件信息
-def format(self, ocr_results: Dict[int, Tuple[str, Any, ChangeType]], 
-           change_events: List[Tuple[int, ChangeType]], 
-           video_fps: float, total_frames: int) -> List[Dict[str, Any]]:
+# 新增方法签名 - 需要关键帧和段落信息
+def format_from_keyframes(self, segments: List[Dict], ocr_results: Dict[int, Tuple[str, Any]], 
+                         video_fps: float) -> List[Dict[str, Any]]:
 ```
 
-**修改原因**: 需要change_events来计算keyFrame和frameRange
+**修改原因**: 基于关键帧驱动架构，需要段落信息来生成keyFrame和frameRange
 
 #### **步骤2: 增强_build_segments方法**
 
 **位置**: `postprocessor.py` 第44行
 
 ```python
-def _build_segments(self, ocr_results: Dict[int, Tuple[str, Any, ChangeType]], 
-                   change_events: List[Tuple[int, ChangeType]], 
-                   total_frames: int) -> List[Dict]:
+def _build_segments_from_keyframes(self, keyframes: List[int], 
+                                  ocr_results: Dict[int, Tuple[str, Any]], 
+                                  total_frames: int) -> List[Dict]:
     """
-    构建时间段，同时记录关键帧和帧范围信息
+    基于关键帧构建时间段，记录关键帧和帧范围信息
     """
-    if not ocr_results:
+    if not keyframes:
         return []
 
-    # 创建事件索引映射
-    event_map = {frame_idx: event_type for frame_idx, event_type in change_events}
-    
-    sorted_events = sorted(ocr_results.items())
     segments = []
-    active_segment = None
-
-    for i, (frame_idx, (text, bbox, event_type)) in enumerate(sorted_events):
-        if event_type in [ChangeType.TEXT_APPEARED, ChangeType.CONTENT_CHANGED]:
-            # 结束前一个段落
-            if active_segment:
-                active_segment['end_frame'] = frame_idx - 1
-                segments.append(active_segment)
+    
+    for i, keyframe in enumerate(keyframes):
+        if keyframe in ocr_results:
+            text, bbox = ocr_results[keyframe]
             
-            # 开始新段落
-            active_segment = {
-                'start_frame': frame_idx,
-                'end_frame': None,  # 待确定
-                'key_frame': frame_idx,  # 🆕 关键帧就是触发变化的帧
+            # 确定结束帧
+            if i + 1 < len(keyframes):
+                end_frame = keyframes[i + 1] - 1
+            else:
+                end_frame = total_frames - 1
+            
+            segments.append({
+                'start_frame': keyframe,
+                'end_frame': end_frame,
+                'key_frame': keyframe,  # 关键帧就是段落起始帧
                 'text': text,
                 'bbox': bbox
-            }
-
-        elif event_type == ChangeType.TEXT_DISAPPEARED:
-            if active_segment:
-                active_segment['end_frame'] = frame_idx - 1
-                segments.append(active_segment)
-                active_segment = None
-
-    # 处理最后一个段落
-    if active_segment:
-        active_segment['end_frame'] = total_frames - 1
-        segments.append(active_segment)
+            })
     
     return segments
 ```
@@ -562,10 +546,11 @@ def _clean_and_format_segments(self, segments: List[Dict], fps: float) -> List[D
 
 ```python
 # 原始调用
-final_subtitles = postprocessor.format(ocr_results, fps, total_frames)
+final_subtitles = postprocessor.format_from_keyframes(segments, ocr_results, fps)
 
-# 新调用方式
-final_subtitles = postprocessor.format(ocr_results, change_events, fps, total_frames)
+# 新调用方式 - 基于关键帧架构
+segments = keyframe_detector.generate_subtitle_segments(keyframes, fps, total_frames)
+final_subtitles = postprocessor.format_from_keyframes(segments, ocr_results, fps)
 ```
 
 **验收标准**:
@@ -588,12 +573,11 @@ final_subtitles = postprocessor.format(ocr_results, change_events, fps, total_fr
 # 完整的段落聚合器实现
 import numpy as np
 from typing import List, Dict, Tuple
-from .change_detector import ChangeType
 
 class SubtitleSegmentBuilder:
     """
     字幕段落构建器 - 实现智能段落聚合
-    基于文档优化建议实现
+    基于关键帧驱动架构的段落聚合
     """
     
     def __init__(self, config):
@@ -603,22 +587,23 @@ class SubtitleSegmentBuilder:
         self.min_segment_duration = config.get('min_segment_duration', 0.5)  # 最小段落长度
         self.similarity_threshold = config.get('similarity_threshold', 0.7)  # 文本相似度阈值
         
-    def build_segments(self, events: List[Tuple[int, ChangeType]], 
-                      ocr_results: Dict[int, Tuple[str, Any, ChangeType]], 
-                      frame_rate: float) -> List[Dict]:
+    def build_segments(self, keyframes: List[int], 
+                      ocr_results: Dict[int, Tuple[str, Any]], 
+                      frame_rate: float, total_frames: int) -> List[Dict]:
         """
-        构建智能聚合的字幕段落
+        基于关键帧构建智能聚合的字幕段落
         
         Args:
-            events: 变化事件列表
+            keyframes: 关键帧索引列表
             ocr_results: OCR识别结果
             frame_rate: 视频帧率
+            total_frames: 总帧数
             
         Returns:
             聚合后的段落列表
         """
         # 1. 初步构建原始段落
-        raw_segments = self._build_raw_segments(events, ocr_results)
+        raw_segments = self._build_raw_segments_from_keyframes(keyframes, ocr_results, total_frames)
         
         # 2. 应用聚合规则
         merged_segments = self._apply_merge_rules(raw_segments, frame_rate)
@@ -628,35 +613,30 @@ class SubtitleSegmentBuilder:
         
         return final_segments
     
-    def _build_raw_segments(self, events: List[Tuple[int, ChangeType]], 
-                           ocr_results: Dict[int, Tuple[str, Any, ChangeType]]) -> List[Dict]:
-        """构建原始段落"""
+    def _build_raw_segments_from_keyframes(self, keyframes: List[int], 
+                                          ocr_results: Dict[int, Tuple[str, Any]], 
+                                          total_frames: int) -> List[Dict]:
+        """基于关键帧构建原始段落"""
         segments = []
-        active_segment = None
         
-        for frame_idx, event_type in events:
-            if event_type in [ChangeType.TEXT_APPEARED, ChangeType.CONTENT_CHANGED]:
-                # 结束当前段落
-                if active_segment:
-                    active_segment['end_frame'] = frame_idx - 1
-                    segments.append(active_segment)
+        for i, keyframe in enumerate(keyframes):
+            if keyframe in ocr_results:
+                text, bbox = ocr_results[keyframe]
                 
-                # 开始新段落
-                if frame_idx in ocr_results:
-                    text, bbox, _ = ocr_results[frame_idx]
-                    active_segment = {
-                        'start_frame': frame_idx,
-                        'key_frame': frame_idx,
-                        'text': text,
-                        'bbox': bbox,
-                        'confidence': self._calculate_confidence(text)
-                    }
-                    
-            elif event_type == ChangeType.TEXT_DISAPPEARED:
-                if active_segment:
-                    active_segment['end_frame'] = frame_idx - 1
-                    segments.append(active_segment)
-                    active_segment = None
+                # 确定结束帧
+                if i + 1 < len(keyframes):
+                    end_frame = keyframes[i + 1] - 1
+                else:
+                    end_frame = total_frames - 1
+                
+                segments.append({
+                    'start_frame': keyframe,
+                    'end_frame': end_frame,
+                    'key_frame': keyframe,
+                    'text': text,
+                    'bbox': bbox,
+                    'confidence': self._calculate_confidence(text)
+                })
         
         return segments
     
@@ -765,8 +745,8 @@ class SubtitlePostprocessor:
         
         print("开始智能段落构建和后处理...")
 
-        # 🆕 使用智能段落构建器
-        segments = self.segment_builder.build_segments(change_events, ocr_results, video_fps)
+        # 使用智能段落构建器
+        segments = self.segment_builder.build_segments(keyframes, ocr_results, video_fps, total_frames)
         print(f"智能聚合后构建 {len(segments)} 个段落。")
 
         # 转换为最终格式
@@ -780,7 +760,7 @@ class SubtitlePostprocessor:
 
 **目标**: 在段落中选择质量最高的帧进行OCR识别
 
-**修改文件**: `services/workers/paddleocr_service/app/modules/change_detector.py`
+**修改文件**: `services/workers/paddleocr_service/app/modules/keyframe_detector.py`
 
 **新增方法**:
 
@@ -836,8 +816,8 @@ def get_frame_quality_scores(self, video_path: str, decoder, subtitle_area: Tupl
     获取所有帧的质量分数（标准差）
     为智能帧选择提供数据支持
     """
-    # 复用现有的_compute_metrics_for_all_frames方法
-    all_hashes, all_stds = self._compute_metrics_for_all_frames(video_path, decoder, subtitle_area)
+    # 复用现有的_compute_frame_features方法
+    all_hashes, all_stds = self._compute_frame_features(video_path, decoder, subtitle_area)
     return all_stds
 ```
 
@@ -854,26 +834,25 @@ def recognize_with_optimization(self, video_path: str, decoder: GPUDecoder,
     带有智能帧选择的OCR识别
     """
     # 1. 获取质量分数
-    quality_scores = self.change_detector.get_frame_quality_scores(
+    quality_scores = self.keyframe_detector.get_frame_quality_scores(
         video_path, decoder, subtitle_area
     )
     
     # 2. 对每个段落选择最优帧
-    optimized_events = []
-    for i, (frame_idx, event_type) in enumerate(change_events):
-        if event_type in [ChangeType.TEXT_APPEARED, ChangeType.CONTENT_CHANGED]:
+    optimized_keyframes = []
+    for i, keyframe in enumerate(keyframes):
+        if i + 1 < len(keyframes):
             # 确定段落范围
-            next_event_frame = change_events[i + 1][0] if i + 1 < len(change_events) else total_frames
-            frame_range = (frame_idx, next_event_frame - 1)
-            
-            # 选择最优帧
-            optimal_frame = self.change_detector.select_optimal_frame(frame_range, quality_scores)
-            optimized_events.append((optimal_frame, event_type))
+            frame_range = (keyframe, keyframes[i + 1] - 1)
         else:
-            optimized_events.append((frame_idx, event_type))
+            frame_range = (keyframe, total_frames - 1)
+        
+        # 选择最优帧
+        optimal_frame = self.keyframe_detector.select_optimal_frame(frame_range, quality_scores)
+        optimized_keyframes.append(optimal_frame)
     
-    # 3. 使用优化后的事件进行OCR
-    return self.recognize(video_path, decoder, optimized_events, subtitle_area, total_frames)
+    # 3. 使用优化后的关键帧进行OCR
+    return self.recognize_keyframes(video_path, decoder, optimized_keyframes, subtitle_area, total_frames)
 ```
 
 ---
@@ -1080,7 +1059,7 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
         # 1. 初始化模块
         decoder = GPUDecoder(config.get('decoder', {}))
         area_detector = SubtitleAreaDetector(config.get('area_detector', {}))
-        change_detector = ChangeDetector(config.get('change_detector', {}))
+        keyframe_detector = KeyFrameDetector(config.get('keyframe_detector', {}))  # 🆕 新检测器
         ocr_engine = MultiProcessOCREngine(config.get('ocr', {}))
         postprocessor = SubtitlePostprocessor(config.get('postprocessor', {}))
         
@@ -1093,22 +1072,24 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
             if subtitle_area is None:
                 return []
         
-        # 4. 变化点检测
-        with monitor.measure_stage("change_detection"):
-            change_events = change_detector.find_key_frames(video_path, decoder, subtitle_area)
+        # 4. 关键帧检测 (新逻辑)
+        with monitor.measure_stage("keyframe_detection"):  # 🆕 更新stage名称
+            keyframes = keyframe_detector.detect_keyframes(video_path, decoder, subtitle_area)  # 🆕 新方法
         
         # 5. OCR识别
         with monitor.measure_stage("ocr_processing"):
-            ocr_results = ocr_engine.recognize(video_path, decoder, change_events, subtitle_area, total_frames)
+            ocr_results = ocr_engine.recognize_keyframes(video_path, decoder, keyframes, subtitle_area, total_frames)  # 🆕 新方法
             
             # 统计OCR调用
-            monitor.track_ocr_calls(total_frames, len(change_events))
+            monitor.track_ocr_calls(total_frames, len(keyframes))  # 🆕 更新为关键帧数量
             success_count = len([r for r in ocr_results.values() if r[0].strip()])
             monitor.track_ocr_results(success_count, len(ocr_results) - success_count)
         
         # 6. 后处理
         with monitor.measure_stage("postprocessing"):
-            final_subtitles = postprocessor.format(ocr_results, change_events, fps, total_frames)
+            # 🆕 生成段落信息
+            segments = keyframe_detector.generate_subtitle_segments(keyframes, fps, total_frames)
+            final_subtitles = postprocessor.format_from_keyframes(segments, ocr_results, fps)  # 🆕 新方法
         
         return final_subtitles
         
@@ -1128,7 +1109,7 @@ import numpy as np
 import os
 import cv2
 from typing import List, Tuple, Dict, Any
-from ..modules.change_detector import ChangeDetector, ChangeType
+from ..modules.keyframe_detector import KeyFrameDetector  # 🆕 新的检测器
 
 class DebugAnalyzer:
     """
@@ -1141,7 +1122,7 @@ class DebugAnalyzer:
         self.debug_dir = config.get('debug_dir', './debug_output')
         os.makedirs(self.debug_dir, exist_ok=True)
         
-    def analyze_detection_quality(self, video_path: str, detector: ChangeDetector, 
+    def analyze_detection_quality(self, video_path: str, detector: KeyFrameDetector,  # 🆕 更新参数类型 
                                  decoder, subtitle_area: Tuple[int, int, int, int]) -> Dict[str, Any]:
         """
         分析检测质量的调试工具
@@ -1150,7 +1131,7 @@ class DebugAnalyzer:
         print("🔍 开始检测质量分析...")
         
         # 1. 获取所有帧的指标数据
-        all_hashes, all_stds = detector._compute_metrics_for_all_frames(
+        all_hashes, all_stds = detector._compute_frame_features(
             video_path, decoder, subtitle_area
         )
         
@@ -1298,49 +1279,38 @@ class DebugAnalyzer:
         
         return recommendations
     
-    def visualize_change_points(self, stds: np.ndarray, 
-                              change_events: List[Tuple[int, ChangeType]], 
-                              video_path: str):
-        """可视化变化点检测结果"""
+    def visualize_keyframes(self, stds: np.ndarray, 
+                           keyframes: List[int], 
+                           video_path: str):
+        """可视化关键帧检测结果"""
         plt.figure(figsize=(15, 8))
         
         # 绘制标准差曲线
         frames = np.arange(len(stds))
         plt.plot(frames, stds, 'b-', alpha=0.6, label='像素标准差')
         
-        # 标记变化点
-        colors = {
-            ChangeType.TEXT_APPEARED: 'green',
-            ChangeType.TEXT_DISAPPEARED: 'red',
-            ChangeType.CONTENT_CHANGED: 'orange'
-        }
-        
-        for frame_idx, change_type in change_events:
-            if frame_idx < len(stds):
-                plt.axvline(x=frame_idx, color=colors.get(change_type, 'black'), 
+        # 标记关键帧
+        for keyframe_idx in keyframes:
+            if keyframe_idx < len(stds):
+                plt.axvline(x=keyframe_idx, color='red', 
                            alpha=0.8, linewidth=2)
-                plt.annotate(change_type.name, 
-                           xy=(frame_idx, stds[frame_idx]),
-                           xytext=(frame_idx, stds[frame_idx] + 10),
+                plt.annotate(f'关键帧 {keyframe_idx}', 
+                           xy=(keyframe_idx, stds[keyframe_idx]),
+                           xytext=(keyframe_idx, stds[keyframe_idx] + 10),
                            rotation=90, fontsize=8,
-                           arrowprops=dict(arrowstyle='->', color=colors.get(change_type, 'black')))
+                           arrowprops=dict(arrowstyle='->', color='red'))
         
-        plt.title(f"变化点检测可视化 - {os.path.basename(video_path)}")
+        plt.title(f"关键帧检测可视化 - {os.path.basename(video_path)}")
         plt.xlabel("帧编号")
         plt.ylabel("像素标准差")
         plt.legend()
         plt.grid(True, alpha=0.3)
         
-        # 添加图例
-        legend_elements = [plt.Line2D([0], [0], color=color, lw=2, label=change_type.name) 
-                         for change_type, color in colors.items()]
-        plt.legend(handles=legend_elements, loc='upper right')
-        
-        output_path = os.path.join(self.debug_dir, 'change_points_visualization.png')
+        output_path = os.path.join(self.debug_dir, 'keyframes_visualization.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"📈 变化点可视化已保存到: {output_path}")
+        print(f"📈 关键帧可视化已保存到: {output_path}")
     
     def generate_debug_report(self, video_path: str, analysis_results: Dict[str, Any], 
                             performance_metrics: Dict[str, Any]):
@@ -1511,14 +1481,14 @@ def test_debug_analyzer(video_path: str, config: Dict) -> bool:
     print("\n🧪 测试调试分析工具...")
     
     try:
-        from modules.change_detector import ChangeDetector
+        from modules.keyframe_detector import KeyFrameDetector  # 🆕 新的检测器
         from modules.decoder import GPUDecoder
         from modules.area_detector import SubtitleAreaDetector
         
         # 初始化组件
         decoder = GPUDecoder(config.get('decoder', {}))
         area_detector = SubtitleAreaDetector(config.get('area_detector', {}))
-        change_detector = ChangeDetector(config.get('change_detector', {}))
+        keyframe_detector = KeyFrameDetector(config.get('keyframe_detector', {}))  # 🆕 新检测器
         analyzer = DebugAnalyzer(config.get('debug_analyzer', {}))
         
         # 检测字幕区域
@@ -1529,7 +1499,7 @@ def test_debug_analyzer(video_path: str, config: Dict) -> bool:
         
         # 运行质量分析
         analysis_results = analyzer.analyze_detection_quality(
-            video_path, change_detector, decoder, subtitle_area
+            video_path, keyframe_detector, decoder, subtitle_area
         )
         
         # 验证分析结果
@@ -1670,7 +1640,7 @@ enhanced_features:
 3. **智能优化功能** 📋
    - [ ] 创建 `segment_builder.py` 完整实现
    - [ ] 集成段落聚合器到 `postprocessor.py`
-   - [ ] 实现 `change_detector.py` 中的智能帧选择
+   - [ ] 实现 `keyframe_detector.py` 中的智能帧选择
    - [ ] 测试优化效果和性能提升
 
 ### **第三阶段实施清单** (4-6周)
