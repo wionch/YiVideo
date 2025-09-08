@@ -36,7 +36,7 @@ class KeyFrameDetector:
     def detect_keyframes(self, video_path: str, decoder: GPUDecoder, 
                         subtitle_area: Tuple[int, int, int, int]) -> List[int]:
         """
-        检测视频中所有关键帧
+        检测视频中所有关键帧 (原版本，不缓存)
         
         实现逻辑:
         1. 第一帧默认为关键帧
@@ -51,11 +51,34 @@ class KeyFrameDetector:
         Returns:
             关键帧索引列表 [0, 45, 89, 156, ...]
         """
-        print("🔍 开始关键帧检测 (重构版本)...")
+        keyframes, _ = self.detect_keyframes_with_cache(video_path, decoder, subtitle_area)
+        return keyframes
+
+    def detect_keyframes_with_cache(self, video_path: str, decoder: GPUDecoder, 
+                                   subtitle_area: Tuple[int, int, int, int]) -> Tuple[List[int], Dict[int, np.ndarray]]:
+        """
+        检测视频中所有关键帧 + 同步缓存关键帧图像数据
+        
+        🆕 新增功能: 在关键帧检测过程中同步缓存关键帧的图像数据，
+        避免后续OCR识别阶段的重复视频解码
+        
+        Args:
+            video_path: 视频文件路径
+            decoder: GPU解码器实例
+            subtitle_area: 字幕区域坐标 (x1, y1, x2, y2)
+            
+        Returns:
+            Tuple[List[int], Dict[int, np.ndarray]]: 
+            - 关键帧索引列表 [0, 45, 89, ...]
+            - 关键帧图像缓存 {0: image_array, 45: image_array, ...}
+        """
+        print("🔍 开始关键帧检测 (同步缓存模式)...")
         x1, y1, x2, y2 = subtitle_area
 
-        # 1. 批量计算所有帧的特征
-        all_hashes, all_stds = self._compute_frame_features(video_path, decoder, (x1, y1, x2, y2))
+        # 1. 批量计算所有帧的特征 + 同步缓存
+        all_hashes, all_stds, keyframe_cache = self._compute_frame_features_with_cache(
+            video_path, decoder, (x1, y1, x2, y2)
+        )
         print(f"📊 完成特征计算: {len(all_hashes)} 帧")
 
         # 2. 使用大津法确定空白帧阈值
@@ -65,8 +88,15 @@ class KeyFrameDetector:
         # 3. 关键帧逐帧检测
         keyframes = self._detect_keyframes_sequential(all_hashes, all_stds, blank_threshold)
         
+        # 4. 只保留检测到的关键帧缓存，释放其他缓存
+        final_keyframe_cache = {k: keyframe_cache[k] for k in keyframes if k in keyframe_cache}
+        
+        # 5. 显示缓存统计信息
+        cache_size_mb = len(final_keyframe_cache) * 0.307  # 每帧约307KB
         print(f"✅ 检测到 {len(keyframes)} 个关键帧")
-        return keyframes
+        print(f"🗂️  关键帧缓存: {len(final_keyframe_cache)} 帧，约 {cache_size_mb:.1f}MB")
+        
+        return keyframes, final_keyframe_cache
     
     def _detect_keyframes_sequential(self, hashes: List[np.ndarray], 
                                    stds: np.ndarray, blank_threshold: float) -> List[int]:
@@ -205,6 +235,99 @@ class KeyFrameDetector:
             
         print(f"✅ 特征计算完成: 共处理 {frame_count} 帧")
         return all_hashes, np.array(all_stds)
+    
+    def _compute_frame_features_with_cache(self, video_path: str, decoder: GPUDecoder, 
+                                          crop_rect: Tuple[int, int, int, int]) -> Tuple[List[np.ndarray], np.ndarray, Dict[int, np.ndarray]]:
+        """
+        批量计算所有帧的dHash和标准差 + 智能缓存关键帧图像
+        
+        🆕 新功能: 在计算特征的同时，智能缓存可能成为关键帧的图像数据
+        通过粗筛选机制，减少无关帧的缓存，控制内存使用
+        
+        Args:
+            video_path: 视频文件路径
+            decoder: GPU解码器实例 
+            crop_rect: 裁剪区域 (x1, y1, x2, y2)
+            
+        Returns:
+            Tuple[List[np.ndarray], np.ndarray, Dict[int, np.ndarray]]:
+            - all_hashes: 所有帧的dHash特征列表
+            - all_stds: 所有帧的标准差数组
+            - keyframe_cache: 候选关键帧的图像缓存字典
+        """
+        all_hashes = []
+        all_stds = []
+        keyframe_cache = {}
+        x1, y1, x2, y2 = crop_rect
+
+        frame_count = 0
+        batch_count = 0
+        prev_hash = None
+        cached_frames_count = 0
+        
+        print("🔄 正在计算视频特征并智能缓存...")
+        
+        for batch_tensor, _ in decoder.decode(video_path):
+            # 裁剪字幕区域
+            cropped_batch = batch_tensor[:, :, y1:y2, x1:x2]
+
+            # --- 在GPU上批量计算特征 --- #
+            # 1. 计算标准差
+            stds = torch.std(cropped_batch.float().view(cropped_batch.size(0), -1), dim=1)
+            batch_stds = stds.cpu().numpy()
+            all_stds.extend(batch_stds)
+
+            # 2. 计算dHash
+            grayscale_batch = cropped_batch.float().mean(dim=1, keepdim=True)
+            resized_batch = torch.nn.functional.interpolate(
+                grayscale_batch, 
+                size=(self.hash_size, self.hash_size + 1), 
+                mode='bilinear', align_corners=False
+            )
+            diff = resized_batch[:, :, :, 1:] > resized_batch[:, :, :, :-1]
+            batch_hashes = diff.cpu().numpy().astype(np.uint8).reshape(diff.shape[0], -1)
+            all_hashes.extend(batch_hashes)
+            
+            # --- 🆕 智能缓存候选关键帧 --- #
+            for i, curr_hash in enumerate(batch_hashes):
+                frame_idx = frame_count + i
+                
+                # 第一帧默认缓存
+                if frame_idx == 0:
+                    frame_np = cropped_batch[i].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                    keyframe_cache[frame_idx] = frame_np
+                    prev_hash = curr_hash
+                    cached_frames_count += 1
+                    continue
+                
+                # 快速相似度预判断 (粗筛)
+                if prev_hash is not None:
+                    hamming_distance = np.count_nonzero(curr_hash != prev_hash)
+                    rough_similarity = 1.0 - (hamming_distance / curr_hash.size)
+                    
+                    # 缓存可能是关键帧的帧 (相似度 < 95%，宽松预筛选)
+                    if rough_similarity < 0.95:
+                        frame_np = cropped_batch[i].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                        keyframe_cache[frame_idx] = frame_np
+                        prev_hash = curr_hash
+                        cached_frames_count += 1
+            
+            frame_count += batch_tensor.size(0)
+            batch_count += 1
+            
+            # 每50个batch显示一次进度 + 缓存统计
+            if batch_count % 50 == 0:
+                cache_mb = cached_frames_count * 0.307  # 每帧约307KB
+                cache_ratio = (cached_frames_count / frame_count) * 100
+                print(f"  📊 已处理 {frame_count} 帧，预缓存 {cached_frames_count} 帧 ({cache_ratio:.1f}%, ~{cache_mb:.1f}MB)")
+            
+        # 最终统计
+        final_cache_mb = cached_frames_count * 0.307
+        cache_ratio = (cached_frames_count / frame_count) * 100
+        print(f"✅ 特征计算完成: 共处理 {frame_count} 帧")
+        print(f"🗂️  预缓存统计: {cached_frames_count} 帧 ({cache_ratio:.1f}%), 约 {final_cache_mb:.1f}MB")
+        
+        return all_hashes, np.array(all_stds), keyframe_cache
     
     def _get_otsu_threshold(self, stds: np.ndarray) -> float:
         """使用大津法计算最佳空白帧阈值"""

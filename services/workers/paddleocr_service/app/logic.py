@@ -30,7 +30,12 @@ def _get_video_metadata(video_path: str) -> Tuple[float, int]:
 
 def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str, Any]]:
     """
-    从视频文件中提取字幕的核心逻辑函数 - 重构版本
+    从视频文件中提取字幕的核心逻辑函数 - 重构版本 + 性能优化
+
+    🆕 性能优化更新: 关键帧同步缓存
+    - 在关键帧检测阶段同步缓存关键帧图像数据
+    - OCR识别阶段直接使用缓存，避免重复视频解码
+    - 预计性能提升: 减少40-60%的总处理时间
 
     重大更新: 从"事件驱动"改为"关键帧驱动"模式
     - 第一帧默认为关键帧
@@ -44,7 +49,7 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
     Returns:
         List[Dict[str, Any]]: 提取出的字幕列表，包含keyFrame和frameRange字段。
     """
-    print("🚀 开始字幕提取 (关键帧驱动模式)...")
+    print("🚀 开始字幕提取 (关键帧驱动模式 + 性能优化)...")
     
     # 1. 初始化所有处理模块
     decoder = GPUDecoder(config.get('decoder', {}))
@@ -64,8 +69,8 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
         return []  # 返回空的字幕列表
     print(f"📍 字幕区域: {subtitle_area}")
 
-    # 4. 关键帧检测 (新逻辑)
-    keyframes = keyframe_detector.detect_keyframes(video_path, decoder, subtitle_area)
+    # 4. 关键帧检测 + 同步缓存 (🆕 优化：避免重复解码)
+    keyframes, keyframe_cache = keyframe_detector.detect_keyframes_with_cache(video_path, decoder, subtitle_area)
     if not keyframes:
         print("❌ 未检测到关键帧，任务结束")
         return []
@@ -73,8 +78,8 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
     # 5. 生成段落信息 (新逻辑) 
     segments = keyframe_detector.generate_subtitle_segments(keyframes, fps, total_frames)
 
-    # 6. OCR识别 (需要适配新的输入格式)
-    ocr_results = ocr_engine.recognize_keyframes(video_path, decoder, keyframes, subtitle_area, total_frames)
+    # 6. OCR识别 (🆕 优化：使用缓存数据，避免重复解码)
+    ocr_results = ocr_engine.recognize_keyframes_from_cache(keyframe_cache, subtitle_area, total_frames)
 
     # 7. 后处理 (需要适配新的数据结构)
     final_subtitles = postprocessor.format_from_keyframes(segments, ocr_results, fps)

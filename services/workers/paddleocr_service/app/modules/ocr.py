@@ -350,6 +350,42 @@ class MultiProcessOCREngine:
         print(f"✅ 关键帧OCR识别完成: {len(ocr_results_map)} 个结果")
         return ocr_results_map
 
+    def recognize_keyframes_from_cache(self, keyframe_cache: Dict[int, np.ndarray], 
+                                      subtitle_area: Tuple[int, int, int, int], 
+                                      total_frames: int = 0) -> Dict[int, Tuple[str, Any]]:
+        """
+        🆕 优化方法：直接从缓存的关键帧图像进行OCR识别
+        
+        避免重复视频解码，直接使用关键帧检测阶段缓存的图像数据进行OCR处理。
+        这是核心性能优化：消除第二次视频解码的时间开销。
+        
+        Args:
+            keyframe_cache: 关键帧图像缓存 {frame_idx: image_array, ...}
+            subtitle_area: 字幕区域坐标 (x1, y1, x2, y2) 
+            total_frames: 视频总帧数（用于进度显示）
+            
+        Returns:
+            Dict[int, Tuple[str, bbox]]: 关键帧OCR结果映射
+            {
+                0: ("Hello World", (x1, y1, x2, y2)),
+                45: ("Nice to meet you", (x1, y1, x2, y2)),
+                ...
+            }
+        """
+        if not keyframe_cache:
+            print("⚠️ 关键帧缓存为空，OCR识别跳过")
+            return {}
+            
+        print(f"🔍 开始关键帧OCR识别: {len(keyframe_cache)} 个缓存关键帧")
+        print(f"⚡ 性能优化: 跳过视频解码，直接使用缓存数据")
+        
+        # 使用多进程并发进行OCR识别 (复用现有逻辑)
+        ocr_results_map = self._multiprocess_ocr_batch(keyframe_cache, subtitle_area, total_frames)
+        
+        print(f"✅ 关键帧OCR识别完成: {len(ocr_results_map)} 个结果")
+        print(f"🚀 性能提升: 消除了第二次视频解码时间")
+        return ocr_results_map
+
 
 # --- 多进程Worker函数（模块级别函数，供multiprocessing调用） ---
 
