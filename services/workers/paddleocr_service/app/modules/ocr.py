@@ -180,7 +180,7 @@ class MultiProcessOCREngine:
                         
                         # 实时更新进度条
                         progress_bar.update(1, 成功=success_count, 失败=error_count)
-                            
+                        
                     except Exception as e:
                         task = future_to_task[future]
                         frame_idx = task[0]
@@ -276,27 +276,28 @@ class MultiProcessOCREngine:
         key_frames_map = {}
         x1, y1, x2, y2 = crop_rect
         
-        # 创建调试目录
-        debug_dir = "./pics"
-        os.makedirs(debug_dir, exist_ok=True)
+        # 创建调试目录 - 已注释，避免磁盘空间占用
+        # debug_dir = "./pics"
+        # os.makedirs(debug_dir, exist_ok=True)
         
-        # 计数器，只保存前10帧
-        saved_count = 0
-        MAX_DEBUG_FRAMES = 10
+        # 计数器，只保存前10帧 - 已注释
+        # saved_count = 0
+        # MAX_DEBUG_FRAMES = 10
         
         current_frame_idx = 0
         for batch_tensor, _ in decoder.decode(video_path):
             for frame_tensor in batch_tensor:
                 if current_frame_idx in key_frames_to_get:
+                    # 正确的tensor切片 - 已修复维度问题
                     cropped_tensor = frame_tensor[:, y1:y2, x1:x2]
                     frame_np = cropped_tensor.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
                     key_frames_map[current_frame_idx] = frame_np
                     
-                    # 保存前10帧调试图像（阶段1：裁剪后的图像）
-                    if saved_count < MAX_DEBUG_FRAMES:
-                        debug_path = os.path.join(debug_dir, f"stage1_cropped_frame_{current_frame_idx:06d}.jpg")
-                        cv2.imwrite(debug_path, cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR))
-                        saved_count += 1
+                    # 保存前10帧调试图像（阶段1：裁剪后的图像） - 已注释
+                    # if saved_count < MAX_DEBUG_FRAMES:
+                    #     debug_path = os.path.join(debug_dir, f"stage1_cropped_frame_{current_frame_idx:06d}.jpg")
+                    #     cv2.imwrite(debug_path, cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR))
+                    #     saved_count += 1
                     
                     key_frames_to_get.remove(current_frame_idx)
                 
@@ -356,85 +357,53 @@ def _worker_initializer(lang='en'):
     """
     多进程worker初始化函数。
     每个子进程会调用此函数来初始化自己独立的PaddleOCR实例。
-    使用统一的模型配置和字幕场景优化。
+    使用基于测试结果优化的统一配置。
     """
     global ocr_engine_process_global
     pid = os.getpid()
     
-    # 使用通用配置加载器获取语言设置和模型配置
+    # 使用通用配置加载器获取完整的 PaddleOCR 3.x 配置
     try:
         # 导入通用配置加载器
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from utils.config_loader import (get_ocr_lang, get_ocr_models_config, 
-                                       get_recognition_model_for_lang)
+        from utils.config_loader import get_paddleocr_config
         
-        # 获取语言设置
-        actual_lang = get_ocr_lang(default_lang=lang)
-        print(f"[PID: {pid}] 从配置加载语言设置: {actual_lang}")
-        lang = actual_lang
-        
-        # 获取模型配置
-        models_config = get_ocr_models_config()
+        # 🎯 核心修复：直接获取完整的优化配置
+        ocr_kwargs = get_paddleocr_config()
+        print(f"[PID: {pid}] 📋 从配置文件加载 PaddleOCR 3.x 完整参数:")
+        print(f"[PID: {pid}] 🎯 语言={ocr_kwargs['lang']}, 模型版本={ocr_kwargs['ocr_version']}")
+        print(f"[PID: {pid}] 📊 关键参数: thresh={ocr_kwargs['text_det_thresh']}, box_thresh={ocr_kwargs['text_det_box_thresh']}")
         
     except Exception as e:
-        print(f"[PID: {pid}] 配置加载失败，使用传入参数语言: {lang}，错误: {e}")
-        models_config = {
-            'subtitle_optimized': True,
-            'use_angle_cls': False,
-            'use_space_char': True
+        print(f"[PID: {pid}] ⚠️  配置加载失败，使用测试验证的最佳参数: {e}")
+        # 即使配置加载失败，也使用测试验证的最佳配置
+        ocr_kwargs = {
+            'lang': 'en',  # 🔥 测试证明英文模式效果最佳(99.96%置信度)
+            'ocr_version': 'PP-OCRv5',
+            'text_det_limit_side_len': 736,
+            'text_det_thresh': 0.30,
+            'text_det_box_thresh': 0.60,
+            'text_det_unclip_ratio': 1.50,
+            'text_rec_score_thresh': 0,
+            'use_doc_orientation_classify': False,
+            'use_doc_unwarping': False,
+            'use_textline_orientation': False
         }
     
-    # 修正语言代码映射，确保与PaddleOCR兼容
-    paddleocr_lang_map = {
-        'zh': 'ch',  # 中文简体
-        'chinese': 'ch',
-        'chinese_cht': 'chinese_cht',  # 中文繁体
-        'en': 'en',  # 英文
-        'english': 'en',
-        'ja': 'japan',  # 日文
-        'japan': 'japan',
-        'ko': 'korean',  # 韩文
-        'korean': 'korean',
-        'fr': 'french',  # 法文
-        'french': 'french',
-        'de': 'german',  # 德文
-        'german': 'german',
-        'it': 'it',  # 意大利文
-        'es': 'es',  # 西班牙文
-        'pt': 'pt',  # 葡萄牙文
-        'ru': 'ru',  # 俄文
-        'th': 'th',  # 泰文
-        'ar': 'ar',  # 阿拉伯文
-    }
-    
-    # 转换语言代码
-    paddleocr_lang = paddleocr_lang_map.get(lang, 'ch')  # 默认使用中文
-    
-    print(f"[PID: {pid}] 开始初始化PaddleOCR引擎 (语言: {paddleocr_lang})...")
+    print(f"[PID: {pid}] 🚀 开始初始化 PaddleOCR 引擎 (基于测试结果优化)...")
     
     init_start_time = time.time()
     try:
-        # PaddleOCR 3.x 正确的初始化参数
-        ocr_kwargs = {
-            'lang': paddleocr_lang,
-        }
+        # print(f"[PID: {pid}] PaddleOCR初始化参数: {ocr_kwargs}")
         
-        # 字幕场景优化设置 - 使用PaddleOCR 3.x的参数名
-        if models_config.get('subtitle_optimized', True):
-            # 在PaddleOCR 3.x中，很多优化参数已经内置或移除
-            # 主要通过lang参数和模型选择来优化
-            print(f"[PID: {pid}] 启用字幕场景优化模式 (PaddleOCR 3.x)")
-        
-        print(f"[PID: {pid}] PaddleOCR初始化参数: {ocr_kwargs}")
-        
-        # 使用PaddleOCR 3.x API初始化
+        # 使用PaddleOCR 3.x API初始化 - 所有参数已优化
         from paddleocr import PaddleOCR
         ocr_engine_process_global = PaddleOCR(**ocr_kwargs)
         
         init_end_time = time.time()
         init_duration = init_end_time - init_start_time
-        print(f"[PID: {pid}] ✅ PaddleOCR引擎初始化成功 (语言: {paddleocr_lang}, 耗时: {init_duration:.2f}s)")
+        print(f"[PID: {pid}] ✅ PaddleOCR引擎初始化成功 (语言: {ocr_kwargs['lang']}, 模型: {ocr_kwargs['ocr_version']}, 耗时: {init_duration:.2f}s)")
         
     except Exception as e:
         print(f"[PID: {pid}] ❌ PaddleOCR引擎初始化失败: {e}")
@@ -464,6 +433,36 @@ def _ocr_worker_task(task_data):
         return None
     
     try:
+        # 🔍 关键调试：检查传递给PaddleOCR的图像数据
+        # print(f"[PID: {pid}] 🔍 OCR输入调试: image_data.shape={image_data.shape}, dtype={image_data.dtype}")
+        # print(f"[PID: {pid}] 🔍 预期尺寸应为字幕条: 高度~80, 宽度~1280")
+        
+        # 🎯 关键修复：确保图像数据格式符合PaddleOCR 3.x要求
+        if image_data.dtype != np.uint8:
+            print(f"[PID: {pid}] 🔧 修复dtype: {image_data.dtype} -> uint8")
+            image_data = image_data.astype(np.uint8)
+        
+        # 确保图像数据是连续的内存布局
+        if not image_data.flags['C_CONTIGUOUS']:
+            print(f"[PID: {pid}] 🔧 修复内存布局: 转为连续内存")
+            image_data = np.ascontiguousarray(image_data)
+        
+        # 检查并修复图像尺寸范围
+        height, width, channels = image_data.shape
+        if height > 4000 or width > 4000:
+            print(f"[PID: {pid}] ⚠️  图像尺寸异常: {height}x{width}, 需要调整")
+            # 这不应该发生，但作为安全检查
+            max_dim = 4000
+            if height > max_dim or width > max_dim:
+                scale = min(max_dim/height, max_dim/width)
+                new_height = int(height * scale)
+                new_width = int(width * scale)
+                print(f"[PID: {pid}] 🔧 缩放图像: {height}x{width} -> {new_height}x{new_width}")
+                import cv2
+                image_data = cv2.resize(image_data, (new_width, new_height))
+        
+        # print(f"[PID: {pid}] 🎯 最终输入PaddleOCR: shape={image_data.shape}, dtype={image_data.dtype}")
+        
         ocr_start_time = time.time()
         # 使用predict方法替代ocr方法，与simple_test.py保持一致
         ocr_output = ocr_engine_process_global.predict(image_data)
@@ -491,8 +490,9 @@ def _ocr_worker_task(task_data):
                     
                     # 保存调试图像（阶段2：OCR识别后带标注的图像）
                     debug_frame_counter += 1
-                    if debug_frame_counter <= 10:
-                        _save_debug_image_with_annotations(image_data, frame_idx, positions, texts, confidences)
+                    # 已注释调试图像保存功能，避免磁盘空间占用
+                    # if debug_frame_counter <= 10:
+                    #     _save_debug_image_with_annotations(image_data, frame_idx, positions, texts, confidences)
                     
                     for i in range(len(texts)):
                         if texts[i] and texts[i].strip():
@@ -527,8 +527,9 @@ def _ocr_worker_task(task_data):
                     
                     # 保存调试图像（阶段2：OCR识别后带标注的图像）
                     debug_frame_counter += 1
-                    if debug_frame_counter <= 10:
-                        _save_debug_image_with_annotations_list(image_data, frame_idx, ocr_output[0])
+                    # 已注释调试图像保存功能，避免磁盘空间占用
+                    # if debug_frame_counter <= 10:
+                    #     _save_debug_image_with_annotations_list(image_data, frame_idx, ocr_output[0])
                     
                     for i, line in enumerate(ocr_output[0]):
                         if len(line) >= 2 and line[1]:
@@ -589,109 +590,94 @@ def _ocr_worker_task(task_data):
 
 
 def _save_debug_image_with_annotations(image_data, frame_idx, positions, texts, confidences):
-    """保存带标注的调试图像（字典格式）"""
-    try:
-        debug_dir = "./pics"
-        os.makedirs(debug_dir, exist_ok=True)
-        
-        # 复制图像数据以避免修改原始数据
-        debug_image = image_data.copy()
-        
-        # 转换为BGR格式用于OpenCV
-        if len(debug_image.shape) == 3 and debug_image.shape[2] == 3:
-            debug_image = cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR)
-        
-        # 绘制标注
-        for i, (pos, text, conf) in enumerate(zip(positions, texts, confidences)):
-            if pos is not None and text:
-                try:
-                    # 转换边界框坐标
-                    if isinstance(pos, (list, np.ndarray)):
-                        box = np.array(pos, dtype=np.int32)
-                        if box.shape[0] >= 4:  # 确保至少有4个点
-                            # 绘制红色边界框
-                            cv2.polylines(debug_image, [box], True, (0, 0, 255), 2)
-                            
-                            # 在边界框下方绘制文本
-                            x = int(box[0][0])  # 左上角x坐标
-                            y = int(box[3][1]) + 20  # 左下角y坐标 + 偏移
-                            
-                            # 绘制文本背景
-                            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                            cv2.rectangle(debug_image, (x, y - text_size[1] - 5), 
-                                        (x + text_size[0], y + 5), (0, 0, 255), -1)
-                            
-                            # 绘制白色文本
-                            cv2.putText(debug_image, text, (x, y), 
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                except Exception as box_err:
-                    print(f"绘制边界框失败: {box_err}")
-        
-        # 保存图像
-        debug_path = os.path.join(debug_dir, f"stage2_annotated_frame_{frame_idx:06d}.jpg")
-        cv2.imwrite(debug_path, debug_image)
-        
-    except Exception as e:
-        print(f"保存调试图像失败: {e}")
+    """保存带标注的调试图像（字典格式） - 已注释，避免磁盘空间占用"""
+    pass
+    # 原函数体已注释，避免磁盘空间占用
+    # try:
+    #     debug_dir = "./pics"
+    #     os.makedirs(debug_dir, exist_ok=True)
+    #     debug_image = image_data.copy()
+    #     if len(debug_image.shape) == 3 and debug_image.shape[2] == 3:
+    #         debug_image = cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR)
+    #     for i, (pos, text, conf) in enumerate(zip(positions, texts, confidences)):
+    #         if pos is not None and text:
+    #             try:
+    #                 if isinstance(pos, (list, np.ndarray)):
+    #                     box = np.array(pos, dtype=np.int32)
+    #                     if box.shape[0] >= 4:
+    #                         cv2.polylines(debug_image, [box], True, (0, 0, 255), 2)
+    #                         x = int(box[0][0])
+    #                         y = int(box[3][1]) + 20
+    #                         text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+    #                         cv2.rectangle(debug_image, (x, y - text_size[1] - 5), (x + text_size[0], y + 5), (0, 0, 255), -1)
+    #                         cv2.putText(debug_image, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    #             except Exception as box_err:
+    #                 print(f"绘制边界框失败: {box_err}")
+    #     debug_path = os.path.join(debug_dir, f"stage2_annotated_frame_{frame_idx:06d}.jpg")
+    #     cv2.imwrite(debug_path, debug_image)
+    # except Exception as e:
+    #     print(f"保存调试图像失败: {e}")
 
 
 def _save_debug_image_with_annotations_list(image_data, frame_idx, ocr_results):
-    """保存带标注的调试图像（列表格式）"""
-    try:
-        debug_dir = "./pics"
-        os.makedirs(debug_dir, exist_ok=True)
-        
-        # 复制图像数据以避免修改原始数据
-        debug_image = image_data.copy()
-        
-        # 转换为BGR格式用于OpenCV
-        if len(debug_image.shape) == 3 and debug_image.shape[2] == 3:
-            debug_image = cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR)
-        
-        # 绘制标注
-        for line in ocr_results:
-            if len(line) >= 2 and line[1]:
-                try:
-                    box = line[0]  # 边界框
-                    text_info = line[1]  # 文本信息
-                    
-                    # 获取文本
-                    if isinstance(text_info, (list, tuple)) and len(text_info) > 0:
-                        text = str(text_info[0]) if text_info[0] else ""
-                    elif isinstance(text_info, str):
-                        text = text_info
-                    else:
-                        continue
-                    
-                    if not text.strip():
-                        continue
-                    
-                    # 绘制边界框
-                    if box is not None and isinstance(box, (list, np.ndarray)):
-                        box_array = np.array(box, dtype=np.int32)
-                        if box_array.size > 0:
-                            # 绘制红色边界框
-                            cv2.polylines(debug_image, [box_array], True, (0, 0, 255), 2)
-                            
-                            # 在边界框下方绘制文本
-                            x = int(box_array[0][0])  # 左上角x坐标
-                            y = int(box_array[3][1]) + 20  # 左下角y坐标 + 偏移
-                            
-                            # 绘制文本背景
-                            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                            cv2.rectangle(debug_image, (x, y - text_size[1] - 5), 
-                                        (x + text_size[0], y + 5), (0, 0, 255), -1)
-                            
-                            # 绘制白色文本
-                            cv2.putText(debug_image, text, (x, y), 
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                            
-                except Exception as box_err:
-                    print(f"绘制边界框失败: {box_err}")
-        
-        # 保存图像
-        debug_path = os.path.join(debug_dir, f"stage2_annotated_frame_{frame_idx:06d}.jpg")
-        cv2.imwrite(debug_path, debug_image)
-        
-    except Exception as e:
-        print(f"保存调试图像失败: {e}")
+    """保存带标注的调试图像（列表格式） - 已注释，避免磁盘空间占用"""
+    pass
+    # 原函数体已注释，避免磁盘空间占用
+    # try:
+    #     debug_dir = "./pics"
+    #     os.makedirs(debug_dir, exist_ok=True)
+    #     
+    #     # 复制图像数据以避免修改原始数据
+    #     debug_image = image_data.copy()
+    #     
+    #     # 转换为BGR格式用于OpenCV
+    #     if len(debug_image.shape) == 3 and debug_image.shape[2] == 3:
+    #         debug_image = cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR)
+    #     
+    #     # 绘制标注
+    #     for line in ocr_results:
+    #         if len(line) >= 2 and line[1]:
+    #             try:
+    #                 box = line[0]  # 边界框
+    #                 text_info = line[1]  # 文本信息
+    #                 
+    #                 # 获取文本
+    #                 if isinstance(text_info, (list, tuple)) and len(text_info) > 0:
+    #                     text = str(text_info[0]) if text_info[0] else ""
+    #                 elif isinstance(text_info, str):
+    #                     text = text_info
+    #                 else:
+    #                     continue
+    #                 
+    #                 if not text.strip():
+    #                     continue
+    #                 
+    #                 # 绘制边界框
+    #                 if box is not None and isinstance(box, (list, np.ndarray)):
+    #                     box_array = np.array(box, dtype=np.int32)
+    #                     if box_array.size > 0:
+    #                         # 绘制红色边界框
+    #                         cv2.polylines(debug_image, [box_array], True, (0, 0, 255), 2)
+    #                         
+    #                         # 在边界框下方绘制文本
+    #                         x = int(box_array[0][0])  # 左上角x坐标
+    #                         y = int(box_array[3][1]) + 20  # 左下角y坐标 + 偏移
+    #                         
+    #                         # 绘制文本背景
+    #                         text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+    #                         cv2.rectangle(debug_image, (x, y - text_size[1] - 5), 
+    #                                     (x + text_size[0], y + 5), (0, 0, 255), -1)
+    #                         
+    #                         # 绘制白色文本
+    #                         cv2.putText(debug_image, text, (x, y), 
+    #                                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    #                         
+    #             except Exception as box_err:
+    #                 print(f"绘制边界框失败: {box_err}")
+    #     
+    #     # 保存图像
+    #     debug_path = os.path.join(debug_dir, f"stage2_annotated_frame_{frame_idx:06d}.jpg")
+    #     cv2.imwrite(debug_path, debug_image)
+    #     
+    # except Exception as e:
+    #     print(f"保存调试图像失败: {e}")

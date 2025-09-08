@@ -17,7 +17,8 @@
       "Read(//d/**)",
       "Bash(python:*)",
       "Bash(docker exec:*)",
-      "WebFetch(domain:pyimagesearch.com)"
+      "WebFetch(domain:pyimagesearch.com)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

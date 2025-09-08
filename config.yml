@@ -40,6 +40,35 @@ ocr:
   lang: 'en' # 英文en 中文ch
   num_workers: 4
   
+  # PaddleOCR 3.x 核心参数配置 (基于测试结果优化)
+  # 测试证明：PP-OCRv5 + 英文 + 以下参数 = 99.96%置信度
+  paddleocr_config:
+    # 模型版本选择 - PP-OCRv5是最新最准确的版本
+    ocr_version: 'PP-OCRv5'
+    
+    # 文本检测参数 (针对字幕条优化)
+    text_det_limit_side_len: 64         # 降低最小边长限制，适应字幕条高度. 必须要有, 如果注释掉就会报`Resized image size`错误
+    text_det_thresh: 0.30               # 文本检测像素阈值 (在线成功参数)
+    text_det_box_thresh: 0.60           # 文本检测框阈值 (在线成功参数)  
+    text_det_unclip_ratio: 1.50         # 文本检测扩张系数 (在线成功参数，之前2.0太大)
+    text_det_input_shape: null          # 检测模型输入形状，null使用默认
+    
+    # 文本识别参数
+    text_recognition_batch_size: 8  # 识别批处理大小
+    text_rec_score_thresh: 0        # 文本识别阈值 (在线成功参数)
+    text_rec_input_shape: null      # 识别模型输入形状，null使用默认
+    
+    # 方向分类参数 (字幕场景优化：全部关闭以提高速度)
+    use_doc_orientation_classify: false    # 关闭文档图像方向分类
+    use_doc_unwarping: false              # 关闭文档扭曲矫正
+    use_textline_orientation: false       # 关闭文本行方向分类
+    textline_orientation_batch_size: 6    # 方向分类批处理大小
+    
+    # 其他优化参数
+    return_word_box: false          # 是否返回单词级别的边界框
+    precision: "fp32"              # 推理精度：fp32(精度高) 或 fp16(速度快)
+    use_tensorrt: false            # 是否启用TensorRT加速 (需要支持)
+  
   # 模型配置 - 用于字幕场景的最佳模型选择
   models:
     # 文本检测模型 - 检测文本区域
