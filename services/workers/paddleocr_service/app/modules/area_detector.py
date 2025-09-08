@@ -180,6 +180,7 @@ class SubtitleAreaDetector:
         self.config = config
         self.sample_count = config.get('sample_count', 300)
         self.min_text_len = config.get('min_text_len', 2) # 用于加权的最小文本长度
+        self.y_padding = config.get('y_padding', 10) # 字幕区域高度扩展像素数
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         # 从配置中读取区域检测器的特定配置
@@ -572,10 +573,9 @@ class SubtitleAreaDetector:
         x_min = 0
         x_max = width
 
-        # 参照老版本设置 padding
-        y_padding = 15  # 与老版本保持一致
-        final_y_min = max(0, y_min - y_padding)
-        final_y_max = min(height, y_max + y_padding)
+        # 使用配置中的 padding 值
+        final_y_min = max(0, y_min - self.y_padding)
+        final_y_max = min(height, y_max + self.y_padding)
 
         if final_y_max - final_y_min < 20:
              return (0, height * 2 // 3, width, height - 10)
@@ -597,7 +597,6 @@ class SubtitleAreaDetector:
         while y_min > 0 and y_histogram[y_min] > y_threshold: y_min -= 1
         y_max = peak_y
         while y_max < height - 1 and y_histogram[y_max] > y_threshold: y_max += 1
-        y_padding = 15
-        final_y_min = max(0, y_min - y_padding)
-        final_y_max = min(height, y_max + y_padding)
+        final_y_min = max(0, y_min - self.y_padding)
+        final_y_max = min(height, y_max + self.y_padding)
         return (0, int(final_y_min), width, int(final_y_max))

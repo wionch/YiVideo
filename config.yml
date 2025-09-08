@@ -20,6 +20,10 @@ area_detector:
   # 默认值: min(CPU核心数, 4)
   # 增加此值可以加快区域检测速度，但会消耗更多CPU和内存。
   num_workers: 4
+  # 检测到的字幕区域上下各扩展的像素数，用于确保完整捕获字幕内容。
+  # 建议值: 5-10 (精确字幕), 10-15 (一般场景), 15-30 (有特效字幕)
+  # 默认值: 10
+  y_padding: 10
 
 # 3. 关键帧检测模块配置 (新架构)
 keyframe_detector:
@@ -37,7 +41,7 @@ keyframe_detector:
 ocr:
   # 当使用本地 PaddleOCR 实例时 (即 ocr_server.enabled = false)，此语言设置生效。
   # 当使用 ocr_server 时，语言模型在服务器端配置，此处设置被忽略。
-  lang: 'en' # 英文en 中文ch
+  lang: 'ch' # 英文en 中文ch
   num_workers: 4
   
   # PaddleOCR 3.x 核心参数配置 (基于测试结果优化)
