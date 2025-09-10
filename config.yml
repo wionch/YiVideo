@@ -23,7 +23,7 @@ area_detector:
   # 检测到的字幕区域上下各扩展的像素数，用于确保完整捕获字幕内容。
   # 建议值: 5-10 (精确字幕), 10-15 (一般场景), 15-30 (有特效字幕)
   # 默认值: 10
-  y_padding: 10
+  y_padding: 5
 
 # 3. 关键帧检测模块配置 (新架构)
 keyframe_detector:
@@ -34,14 +34,31 @@ keyframe_detector:
   # - 90% (0.90): 严格模式，只有显著差异才触发新关键帧，适合内容变化明显的字幕
   # - 85% (0.85): 平衡模式，适合大多数场景
   # - 80% (0.80): 宽松模式，对细微变化也敏感，适合动画或特效字幕
-  # 建议值: 0.90
-  similarity_threshold: 0.90
+  # 建议值: 0.90 (修复重复字幕问题)
+  similarity_threshold: 0.85
+  
+  # 🆕 dHash区域优化配置 (聚焦字幕中心，减少背景干扰)
+  # dHash焦点区域宽度计算公式: 字幕高度 × dhash_focus_ratio
+  # 例如: 字幕高度72px × 3.0 = 216px焦点宽度
+  # - 2.0: 较窄焦点，最小背景干扰，适合简洁字幕
+  # - 3.0: 平衡焦点，推荐值，适合大多数场景  
+  # - 4.0: 较宽焦点，适合字体较大或有装饰的字幕
+  dhash_focus_ratio: 3.0
+  # 最小焦点宽度保护，防止极小字幕导致焦点区域过窄
+  # 建议值: 150-300像素
+  min_focus_width: 200
+  
+  # 🆕 调试和分析配置
+  # 是否保存关键帧截图用于调试分析
+  # - true: 保存所有关键帧的dHash区域截图到 ./pic/ 目录
+  # - false: 不保存截图，节省磁盘空间
+  save_keyframe_images: false
 
 # 4. OCR识别模块配置
 ocr:
   # 当使用本地 PaddleOCR 实例时 (即 ocr_server.enabled = false)，此语言设置生效。
   # 当使用 ocr_server 时，语言模型在服务器端配置，此处设置被忽略。
-  lang: 'ch' # 英文en 中文ch
+  lang: 'en' # 英文en 中文ch
   num_workers: 4
   
   # PaddleOCR 3.x 核心参数配置 (基于测试结果优化)

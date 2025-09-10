@@ -1,5 +1,7 @@
 # pipeline/modules/postprocessor.py
 import numpy as np
+import re
+import difflib
 from typing import List, Dict, Tuple, Any
 
 from .change_detector import ChangeType
@@ -213,5 +215,168 @@ class SubtitlePostprocessor:
               f"识别失败总帧数:{failed_total}/"
               f"缺少OCR帧数:{process_stats['missing_ocr']}/"
               f"小于最短限制帧数:{process_stats['short_duration']}")
-        print(f"✅ 关键帧后处理完成: 生成 {len(final_subtitles)} 条字幕")
-        return final_subtitles
+        
+        # 合并重复字幕
+        merged_subtitles = self._merge_duplicate_subtitles(final_subtitles)
+        print(f"🔄 重复字幕合并: {len(final_subtitles)} → {len(merged_subtitles)} 条字幕")
+        print(f"✅ 关键帧后处理完成: 生成 {len(merged_subtitles)} 条字幕")
+        return merged_subtitles
+    
+    def _merge_duplicate_subtitles(self, subtitles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        合并重复的字幕内容
+        
+        合并规则:
+        1. 相同文本内容的相邻字幕进行合并
+        2. 合并后的时间范围为: start=最早开始时间, end=最晚结束时间
+        3. 保留第一个字幕的其他属性
+        
+        Args:
+            subtitles: 原始字幕列表
+            
+        Returns:
+            去重后的字幕列表
+        """
+        if not subtitles or len(subtitles) <= 1:
+            return subtitles
+            
+        merged = []
+        current_group = [subtitles[0]]  # 当前待合并组
+        
+        for i in range(1, len(subtitles)):
+            current_sub = subtitles[i]
+            last_in_group = current_group[-1]
+            
+            # 检查是否为重复字幕 (改进的文本相似度比较)
+            if self._are_texts_similar(current_sub['text'], last_in_group['text']):
+                # 检查时间连续性 (修复时间间隔判断逻辑)
+                if self._are_times_continuous(current_sub, last_in_group):
+                    # 添加到当前合并组
+                    current_group.append(current_sub)
+                    continue
+            
+            # 完成当前组的合并，开始新组
+            merged_sub = self._merge_subtitle_group(current_group)
+            merged.append(merged_sub)
+            current_group = [current_sub]
+        
+        # 处理最后一组
+        if current_group:
+            merged_sub = self._merge_subtitle_group(current_group)
+            merged.append(merged_sub)
+        
+        # 重新分配ID
+        for i, subtitle in enumerate(merged, 1):
+            subtitle['id'] = i
+            
+        return merged
+    
+    def _are_texts_similar(self, text1: str, text2: str, similarity_threshold: float = 0.8) -> bool:
+        """
+        使用difflib比较两个文本的相似度，处理标点符号和空格差异
+        
+        Args:
+            text1: 第一个文本
+            text2: 第二个文本  
+            similarity_threshold: 相似度阈值，默认0.8 (80%)
+            
+        Returns:
+            bool: 是否为相似文本
+        """
+        if not text1 or not text2:
+            return False
+        
+        # 标准化文本 (去除标点符号和多余空格，转小写)
+        normalized_text1 = self._normalize_text(text1)
+        normalized_text2 = self._normalize_text(text2)
+        
+        # 完全相同
+        if normalized_text1 == normalized_text2:
+            return True
+            
+        # 使用difflib计算相似度
+        similarity = difflib.SequenceMatcher(None, normalized_text1, normalized_text2).ratio()
+        return similarity >= similarity_threshold
+    
+    def _normalize_text(self, text: str) -> str:
+        """
+        标准化文本，移除标点符号和多余空格
+        
+        Args:
+            text: 原始文本
+            
+        Returns:
+            标准化后的文本
+        """
+        if not text:
+            return ""
+        
+        # 转换为小写并去除首尾空格
+        normalized = text.strip().lower()
+        
+        # 移除常见标点符号和特殊字符
+        normalized = re.sub(r'[,，。.!！?？;；:：\'"""""''`@#$%^&*()_+=\-\[\]{}|\\~]+', '', normalized)
+        
+        # 统一空格 (移除多余空格)
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        
+        return normalized
+    
+    def _are_times_continuous(self, sub1: Dict[str, Any], sub2: Dict[str, Any]) -> bool:
+        """
+        检查两个字幕的时间是否连续或重叠
+        
+        Args:
+            sub1: 第一个字幕
+            sub2: 第二个字幕
+            
+        Returns:
+            bool: 是否时间连续
+        """
+        # 时间重叠检测
+        if (sub1['startTime'] <= sub2['endTime'] and sub2['startTime'] <= sub1['endTime']):
+            return True
+        
+        # 时间间隔检测 (允许5秒内的间隔)
+        time_gap = min(
+            abs(sub1['endTime'] - sub2['startTime']),    # sub1结束到sub2开始
+            abs(sub2['endTime'] - sub1['startTime'])     # sub2结束到sub1开始
+        )
+        return time_gap <= 5.0
+    
+    def _merge_subtitle_group(self, group: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        合并一组相同文本的字幕
+        
+        Args:
+            group: 待合并的字幕组
+            
+        Returns:
+            合并后的字幕
+        """
+        if len(group) == 1:
+            return group[0]
+            
+        # 找到最早开始时间和最晚结束时间
+        start_time = min(sub['startTime'] for sub in group)
+        end_time = max(sub['endTime'] for sub in group)
+        
+        # 合并帧范围 (添加安全检查)
+        frame_ranges = [sub['frameRange'] for sub in group if 'frameRange' in sub and sub['frameRange']]
+        if frame_ranges:
+            start_frame = min(fr[0] for fr in frame_ranges)
+            end_frame = max(fr[1] for fr in frame_ranges)
+        else:
+            # 如果没有帧范围信息，使用第一个字幕的关键帧作为默认值
+            start_frame = group[0].get('keyFrame', 0)
+            end_frame = start_frame
+        
+        # 使用第一个字幕作为模板
+        merged = group[0].copy()
+        merged.update({
+            'startTime': round(start_time, 3),
+            'endTime': round(end_time, 3),
+            'frameRange': [start_frame, end_frame]
+        })
+        
+        return merged
