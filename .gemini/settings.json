@@ -20,6 +20,6 @@
     //     }
     // },
     "checkpointing": {
-        "enabled": true
+        "enabled": false
     }
 }

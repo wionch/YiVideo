@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 import json
 import os
+import gc # 🆕 内存优化: 引入垃圾回收模块
 from datetime import datetime
 from typing import List, Tuple, Dict
 from .decoder import GPUDecoder
@@ -50,11 +51,6 @@ class KeyFrameDetector:
         if self.min_focus_width <= 0:
             raise ValueError(f"min_focus_width必须大于0，当前值: {self.min_focus_width}")
         
-        # 🆕 截图保存配置
-        self.save_keyframe_images = config.get('save_keyframe_images', False)  # 默认不保存
-        if not isinstance(self.save_keyframe_images, bool):
-            raise ValueError(f"save_keyframe_images必须是布尔值，当前值: {self.save_keyframe_images}")
-        
         # 进度显示配置
         self.progress_interval_frames = config.get('progress_interval_frames', 1000)  # 进度显示间隔
         if self.progress_interval_frames <= 0 or not isinstance(self.progress_interval_frames, int):
@@ -65,7 +61,7 @@ class KeyFrameDetector:
             raise ValueError(f"progress_interval_batches必须是正整数，当前值: {self.progress_interval_batches}")
         
         print(f"模块: 关键帧检测器已加载 (简化版本-仅dHash) - 相似度阈值: {self.similarity_threshold:.0%}, "
-              f"dHash焦点区域: 高差×{self.dhash_focus_ratio}, 截图保存: {'启用' if self.save_keyframe_images else '禁用'}")
+              f"dHash焦点区域: 高差×{self.dhash_focus_ratio}")
 
     def _optimize_dhash_region(self, subtitle_area: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
@@ -233,7 +229,11 @@ class KeyFrameDetector:
         # 4. 只保留检测到的关键帧缓存，释放其他缓存
         final_keyframe_cache = {k: keyframe_cache[k] for k in keyframes if k in keyframe_cache}
         
-        # 5. 显示缓存统计信息 (使用配置的内存估算)
+        # 5. 🆕 内存优化: 显式删除临时缓存并强制垃圾回收
+        del keyframe_cache
+        gc.collect()
+        
+        # 6. 显示缓存统计信息 (使用配置的内存估算)
         cache_size_mb = len(final_keyframe_cache) * self.frame_memory_estimate_mb  
         print(f"✅ 检测到 {len(keyframes)} 个关键帧")
         print(f"🗂️  关键帧缓存: {len(final_keyframe_cache)} 帧，约 {cache_size_mb:.1f}MB")
@@ -270,15 +270,6 @@ class KeyFrameDetector:
         
         keyframes = []
         dhash_log_data = []  # 用于保存详细的dHash对比数据
-        saved_keyframe_pics = 0  # 已保存的关键帧图片数量
-        
-        # 根据配置决定是否创建输出目录
-        if self.save_keyframe_images:
-            os.makedirs('./logs', exist_ok=True)
-            os.makedirs('./pic', exist_ok=True)
-        else:
-            # 仍需创建logs目录用于保存分析日志
-            os.makedirs('./logs', exist_ok=True)
         
         # 统计数据初始化 - 使用动态变量名
         similarity_stats = {
@@ -291,20 +282,12 @@ class KeyFrameDetector:
         print(f"📌 关键帧 0: 默认第一帧")
         
         # 记录第一帧的日志数据
-        pic_path = None
-        if self.save_keyframe_images and 0 in keyframe_cache:  # 移除100张限制，由配置控制
-            # 从完整字幕条中提取dHash区域进行保存
-            dhash_pic = self._extract_dhash_region_from_cache(keyframe_cache[0], dhash_region, subtitle_area)
-            pic_path = f'./pic/keyframe_{saved_keyframe_pics+1:03d}_frame_{0:06d}.jpg'
-            cv2.imwrite(pic_path, dhash_pic)
-            saved_keyframe_pics += 1
-        
         dhash_log_data.append({
             "frame_index": 0,
             "threshold": self.similarity_threshold,
             "similarity_with_previous": None,  # 第一帧没有前一帧
             "is_keyframe": True,
-            "subtitle_frame_path": pic_path
+            "subtitle_frame_path": None
         })
         
         print(f"🔄 正在分析 {len(hashes)} 帧的相似度...")
@@ -329,22 +312,13 @@ class KeyFrameDetector:
             if is_keyframe:
                 keyframes.append(curr_frame)
             
-            # 保存关键帧图片 (根据配置决定是否保存)
-            pic_path = None
-            if is_keyframe and self.save_keyframe_images and curr_frame in keyframe_cache:  # 移除100张限制，由配置控制
-                # 从完整字幕条中提取dHash区域进行保存
-                dhash_pic = self._extract_dhash_region_from_cache(keyframe_cache[curr_frame], dhash_region, subtitle_area)
-                pic_path = f'./pic/keyframe_{saved_keyframe_pics+1:03d}_frame_{curr_frame:06d}.jpg'
-                cv2.imwrite(pic_path, dhash_pic)
-                saved_keyframe_pics += 1
-            
             # 记录详细的dHash对比数据
             dhash_log_data.append({
                 "frame_index": curr_frame,
                 "threshold": self.similarity_threshold,
                 "similarity_with_previous": round(similarity, 4),
                 "is_keyframe": is_keyframe,
-                "subtitle_frame_path": pic_path
+                "subtitle_frame_path": None
             })
             
             # 进度显示 (按配置间隔显示)
@@ -356,23 +330,26 @@ class KeyFrameDetector:
                       f"<{threshold_percent}%帧:{similarity_stats['lt_threshold']} | "
                       f"关键帧:{len(keyframes)}个")
         
-        # 保存dHash对比日志文件
-        video_name = os.path.splitext(os.path.basename(video_path))[0]
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f'./logs/dhash_analysis_{video_name}_{timestamp}.json'
+        # # 任务1: 注释日志保存功能
+        # # 保存dHash对比日志文件
+        # video_name = os.path.splitext(os.path.basename(video_path))[0]
+        # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # log_filename = f'./logs/dhash_analysis_{video_name}_{timestamp}.json'
         
-        log_summary = {
-            "video_path": video_path,
-            "total_frames": len(hashes),
-            "similarity_threshold": self.similarity_threshold,
-            "detected_keyframes": len(keyframes),
-            "keyframe_ratio": len(keyframes) / len(hashes),
-            "analysis_timestamp": datetime.now().isoformat(),
-            "frames_data": dhash_log_data
-        }
+        # log_summary = {
+        #     "video_path": video_path,
+        #     "total_frames": len(hashes),
+        #     "similarity_threshold": self.similarity_threshold,
+        #     "detected_keyframes": len(keyframes),
+        #     "keyframe_ratio": len(keyframes) / len(hashes),
+        #     "analysis_timestamp": datetime.now().isoformat(),
+        #     "frames_data": dhash_log_data
+        # }
         
-        with open(log_filename, 'w', encoding='utf-8') as f:
-            json.dump(log_summary, f, indent=2, ensure_ascii=False)
+        # # 确保logs目录存在
+        # os.makedirs('./logs', exist_ok=True)
+        # with open(log_filename, 'w', encoding='utf-8') as f:
+        #     json.dump(log_summary, f, indent=2, ensure_ascii=False)
         
         # 输出最终统计 - 使用动态变量名
         total_compared = len(hashes) - 1  # 第一帧不参与比较
@@ -380,11 +357,7 @@ class KeyFrameDetector:
         print(f"📊 相似度统计(总计{total_compared}帧): >={threshold_percent}%帧:{similarity_stats['gte_threshold']}/"
               f"<{threshold_percent}%帧:{similarity_stats['lt_threshold']}")
         print(f"✅ 关键帧检测完成: 共找到 {len(keyframes)} 个关键帧")
-        print(f"📝 详细日志已保存: {log_filename}")
-        if self.save_keyframe_images:
-            print(f"🖼️  已保存 {saved_keyframe_pics} 张关键帧字幕条图片到: ./pic/ 目录")
-        else:
-            print(f"🖼️  截图保存已禁用 (save_keyframe_images=false)")
+        # print(f"📝 详细日志已保存: {log_filename}") # 任务1: 注释日志保存功能
         
         return keyframes
     
@@ -498,7 +471,7 @@ class KeyFrameDetector:
         
         print("🔄 正在计算视频特征 (使用优化的dHash区域)...")
         
-        for batch_tensor, _ in decoder.decode(video_path):
+        for batch_tensor, _ in decoder.decode_gpu(video_path):
             # 裁剪优化后的dHash区域  
             dhash_cropped_batch = batch_tensor[:, :, y1:y2, x1:x2]
 
@@ -570,7 +543,7 @@ class KeyFrameDetector:
         
         print("🔄 正在计算视频特征并智能缓存...")
         
-        for batch_tensor, _ in decoder.decode(video_path):
+        for batch_tensor, _ in decoder.decode_gpu(video_path):
             # 🎯 先裁剪dHash计算区域 (优先处理，减少内存占用)
             dhash_cropped = batch_tensor[:, :, dhash_y1:dhash_y2, dhash_x1:dhash_x2]
 

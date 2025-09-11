@@ -35,7 +35,7 @@ keyframe_detector:
   # - 85% (0.85): 平衡模式，适合大多数场景
   # - 80% (0.80): 宽松模式，对细微变化也敏感，适合动画或特效字幕
   # 建议值: 0.90 (修复重复字幕问题)
-  similarity_threshold: 0.85
+  similarity_threshold: 0.98
   
   # 🆕 dHash区域优化配置 (聚焦字幕中心，减少背景干扰)
   # dHash焦点区域宽度计算公式: 字幕高度 × dhash_focus_ratio
@@ -48,11 +48,7 @@ keyframe_detector:
   # 建议值: 150-300像素
   min_focus_width: 200
   
-  # 🆕 调试和分析配置
-  # 是否保存关键帧截图用于调试分析
-  # - true: 保存所有关键帧的dHash区域截图到 ./pic/ 目录
-  # - false: 不保存截图，节省磁盘空间
-  save_keyframe_images: false
+  
 
 # 4. OCR识别模块配置
 ocr:
@@ -136,3 +132,21 @@ postprocessor:
   # 一条字幕被认为是有效的最小持续时间（单位：秒）。用于过滤掉因检测错误而产生的快速闪现的无效字幕。
   # 建议值: 0.1 ~ 0.5
   min_duration_seconds: 0.2
+
+# 6. 流水线控制 (新增)
+pipeline:
+  # true: 只处理内容变化的关键帧 (当前默认逻辑)。
+  # false: 处理视频的每一帧。速度极慢，但能捕捉所有微小变化。
+  detect_keyframes: false
+
+  # true: 将多个字幕条拼接成一张大图进行OCR。
+  # false: 对每个字幕条独立进行OCR (当前默认逻辑)。
+  use_image_concat: true
+  
+  # 当 use_image_concat=true 时，每多少个字幕条合并成一张图片。
+  concat_batch_size: 20
+
+  # 帧缓存策略。
+  # "memory": 帧图像缓存在内存中 (当前默认逻辑)。速度快，内存占用高。
+  # "pic": 帧图像保存为临时图片文件。内存占用低，磁盘I/O开销大。
+  frame_cache_strategy: "pic"
