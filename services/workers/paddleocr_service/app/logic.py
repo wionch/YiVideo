@@ -40,6 +40,7 @@ def _get_video_metadata(video_path: str) -> Tuple[float, int]:
 def _prepare_ocr_tasks(frame_cache: Dict, concat_config: Dict, temp_dir: str, cache_strategy: str) -> List[Dict[str, Any]]:
     """
     将帧缓存按批次拼接成适合OCR的大图任务。
+    使用并行I/O优化磁盘读取性能。
     """
     tasks = []
     frames = sorted(frame_cache.items())
@@ -47,17 +48,24 @@ def _prepare_ocr_tasks(frame_cache: Dict, concat_config: Dict, temp_dir: str, ca
 
     progress_bar = create_stage_progress("拼接OCR图像", len(frames), show_rate=False, show_eta=True)
 
+    # 如果是磁盘模式，使用并行I/O优化
+    if cache_strategy == 'pic':
+        return _prepare_ocr_tasks_parallel_io(frames, batch_size, temp_dir, progress_bar)
+    else:
+        # 内存模式保持原有逻辑
+        return _prepare_ocr_tasks_memory_mode(frames, batch_size, temp_dir, progress_bar)
+
+def _prepare_ocr_tasks_memory_mode(frames, batch_size: int, temp_dir: str, progress_bar) -> List[Dict[str, Any]]:
+    """
+    内存模式的拼接处理（原有逻辑）
+    """
+    tasks = []
     for i in range(0, len(frames), batch_size):
         batch = frames[i:i+batch_size]
         images_to_concat = []
         
         for _, frame_data in batch:
-            if isinstance(frame_data, str): # 'pic' mode
-                img = cv2.imread(frame_data)
-                if img is not None:
-                    images_to_concat.append(img)
-            else: # 'memory' mode
-                images_to_concat.append(frame_data)
+            images_to_concat.append(frame_data)
 
         if not images_to_concat:
             progress_bar.update(len(batch))
@@ -71,16 +79,117 @@ def _prepare_ocr_tasks(frame_cache: Dict, concat_config: Dict, temp_dir: str, ca
             metadata.append({"frame_idx": frame_idx, "y_offset": y_offset, "height": height})
             y_offset += height
         
-        task_image_data = stitched_image
-        if cache_strategy == 'pic':
-            task_path = os.path.join(temp_dir, 'stitched', f'stitched_{i//batch_size}.jpg')
-            cv2.imwrite(task_path, stitched_image)
-            task_image_data = task_path
-
-        tasks.append({"image": task_image_data, "meta": metadata})
+        tasks.append({"image": stitched_image, "meta": metadata})
         progress_bar.update(len(batch))
     
     progress_bar.finish("✅ 拼接完成")
+    return tasks
+
+def _prepare_ocr_tasks_parallel_io(frames, batch_size: int, temp_dir: str, progress_bar) -> List[Dict[str, Any]]:
+    """
+    磁盘模式的并行I/O优化拼接处理
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import logging
+    
+    def load_image_safe(image_path: str):
+        """安全加载图像，处理异常情况"""
+        try:
+            img = cv2.imread(image_path)
+            return img if img is not None else None
+        except Exception as e:
+            logging.warning(f"图像加载失败 {image_path}: {e}")
+            return None
+    
+    def process_batch_parallel(batch_data):
+        """并行处理单个批次的图像加载和拼接"""
+        batch, batch_index = batch_data
+        
+        # 1. 并行加载图像
+        image_paths = [frame_data for _, frame_data in batch]
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # 提交所有加载任务
+            future_to_path = {
+                executor.submit(load_image_safe, path): (idx, path) 
+                for idx, path in enumerate(image_paths)
+            }
+            
+            # 收集结果，保持顺序
+            images_with_idx = []
+            for future in as_completed(future_to_path):
+                idx, path = future_to_path[future]
+                img = future.result()
+                if img is not None:
+                    images_with_idx.append((idx, img))
+        
+        # 按原始顺序排序
+        images_with_idx.sort(key=lambda x: x[0])
+        images_to_concat = [img for _, img in images_with_idx]
+        valid_indices = [idx for idx, _ in images_with_idx]
+        
+        if not images_to_concat:
+            return None
+        
+        # 2. 使用cv2.vconcat拼接
+        stitched_image = cv2.vconcat(images_to_concat)
+        
+        # 3. 构建元数据
+        metadata = []
+        y_offset = 0
+        for i, (idx, img) in enumerate(images_with_idx):
+            original_idx = valid_indices[i]
+            frame_idx = batch[original_idx][0]  # 获取原始frame_idx
+            height = img.shape[0]
+            metadata.append({"frame_idx": frame_idx, "y_offset": y_offset, "height": height})
+            y_offset += height
+        
+        # 4. 处理拼接图存储
+        if stitched_image is not None:
+            task_path = os.path.join(temp_dir, 'stitched', f'stitched_{batch_index}.jpg')
+            cv2.imwrite(task_path, stitched_image)
+            return {"image": task_path, "meta": metadata}
+        
+        return None
+    
+    # 准备批次数据
+    batches_with_index = []
+    for i in range(0, len(frames), batch_size):
+        batch = frames[i:i+batch_size]
+        batches_with_index.append((batch, i//batch_size))
+    
+    # 并行处理所有批次
+    tasks = []
+    processed_count = 0
+    
+    # 使用较小的worker数量避免过度并发
+    max_workers = min(4, len(batches_with_index))
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有批次处理任务
+        future_to_batch = {
+            executor.submit(process_batch_parallel, batch_data): batch_data
+            for batch_data in batches_with_index
+        }
+        
+        # 收集结果
+        for future in as_completed(future_to_batch):
+            batch_data = future_to_batch[future]
+            batch, batch_idx = batch_data
+            
+            try:
+                result = future.result()
+                if result:
+                    tasks.append(result)
+                processed_count += len(batch)
+                progress_bar.update(len(batch))
+                
+            except Exception as e:
+                logging.error(f"批次 {batch_idx} 处理失败: {e}")
+                progress_bar.update(len(batch))
+    
+    progress_bar.finish("✅ 并行拼接完成")
+    logging.info(f"并行处理完成: {len(tasks)} 个拼接任务，处理 {processed_count} 帧")
     return tasks
 
 def _transform_coordinates(ocr_results: List[Dict[str, Any]], subtitle_area: Tuple[int, int, int, int]) -> Dict[int, Tuple[str, Any]]:

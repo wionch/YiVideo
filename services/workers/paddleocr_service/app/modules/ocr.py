@@ -230,9 +230,15 @@ def _worker_cleanup():
             
         # 清理 PaddlePaddle GPU 缓存
         import paddle
+        import gc
+        
         if paddle.is_compiled_with_cuda():
             paddle.device.cuda.empty_cache()
             logging.info(f"[PID: {pid}] PaddleOCR worker GPU cache cleared")
+        
+        # 强制垃圾回收
+        gc.collect()
+        logging.info(f"[PID: {pid}] Worker cleanup completed")
             
     except Exception as e:
         logging.warning(f"[PID: {pid}] Worker cleanup error: {e}")
@@ -263,8 +269,28 @@ def _ocr_worker_task(task: Tuple[Any, Any]) -> Tuple[Any, List[str], List[np.nda
         if isinstance(task_data, np.ndarray) and image_data.shape[2] == 3:
              image_data = cv2.cvtColor(image_data, cv2.COLOR_RGB2BGR)
 
-        # Restore the original .predict() call and parsing logic
+        # Restore the original .predict() call and parsing logic with memory management
         ocr_output = ocr_engine_process_global.predict(image_data)
+        
+        # 智能内存管理：仅在必要时清理内存
+        # 使用计数器减少清理频率，平衡性能和内存使用
+        global _ocr_task_counter
+        if not hasattr(_ocr_worker_task, '_task_counter'):
+            _ocr_worker_task._task_counter = 0
+        
+        _ocr_worker_task._task_counter += 1
+        
+        # 每处理10个任务才执行一次内存清理
+        if _ocr_worker_task._task_counter % 10 == 0:
+            try:
+                import paddle
+                import gc
+                if paddle.is_compiled_with_cuda():
+                    paddle.device.cuda.empty_cache()
+                    logging.debug(f"Memory cleanup performed after {_ocr_worker_task._task_counter} tasks")
+                gc.collect()
+            except Exception as cleanup_error:
+                logging.debug(f"Memory cleanup warning: {cleanup_error}")
         
         if not ocr_output or not isinstance(ocr_output, list) or not ocr_output[0]:
             return (task_id, [], [])

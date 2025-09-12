@@ -19,7 +19,8 @@
       "Bash(docker exec:*)",
       "WebFetch(domain:pyimagesearch.com)",
       "Bash(find:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "WebFetch(domain:www.paddlepaddle.org.cn)"
     ],
     "deny": [],
     "ask": []
