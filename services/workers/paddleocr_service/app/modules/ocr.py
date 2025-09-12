@@ -5,6 +5,7 @@ import os
 import time
 import cv2
 import logging
+import torch
 from paddleocr import PaddleOCR
 from typing import List, Tuple, Dict, Any
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -59,9 +60,18 @@ class MultiProcessOCREngine:
                         progress_bar.update(1)
             
             progress_bar.finish("✅ OCR识别完成")
+            
+            # 主进程 GPU 资源清理
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logging.info("主进程 GPU 缓存已清理")
         except Exception as e:
             logging.error(f"Multi-process OCR failed: {e}", exc_info=True)
             progress_bar.finish("❌ OCR识别失败")
+            
+            # 出错时也要清理 GPU 资源
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
         return results
 
@@ -85,7 +95,13 @@ class MultiProcessOCREngine:
         
         # Cleanup cache right after creating the task list to free up resources
         if cache_strategy == 'memory':
+            # 显式清理内存缓存
+            for frame_idx in list(keyframe_cache.keys()):
+                del keyframe_cache[frame_idx]
             keyframe_cache.clear()
+            # 强制垃圾回收
+            import gc
+            gc.collect()
         elif cache_strategy == 'pic':
             for _, path in tasks:
                 try:
@@ -111,6 +127,15 @@ class MultiProcessOCREngine:
                  ocr_results_map[frame_idx] = (" ".join(texts).strip(), None)
 
         logging.info(f"完成 {len(ocr_results_map)} 个关键帧的OCR")
+        
+        # 清理任务列表，释放内存
+        tasks.clear()
+        del tasks
+        
+        # 强制垃圾回收
+        import gc
+        gc.collect()
+        
         return ocr_results_map
 
     def recognize_stitched_images(
@@ -154,6 +179,17 @@ class MultiProcessOCREngine:
                     logging.warning(f"Failed to remove temp stitched file {path}: {e}")
 
         logging.info(f"完成 {len(final_results)} 个拼接图像的OCR")
+        
+        # 清理中间数据，释放内存
+        tasks_for_worker.clear()
+        raw_results.clear()
+        results_map.clear()
+        del tasks_for_worker, raw_results, results_map
+        
+        # 强制垃圾回收
+        import gc
+        gc.collect()
+        
         return final_results
 
 # --- Multi-process Worker Functions ---
@@ -178,6 +214,28 @@ def _worker_initializer(full_config: Dict):
     except Exception as e:
         logging.error(f"[PID: {pid}] ❌ PaddleOCR engine initialization failed: {e}", exc_info=True)
         ocr_engine_process_global = None
+
+def _worker_cleanup():
+    """
+    清理工作进程的 GPU 资源
+    """
+    global ocr_engine_process_global
+    pid = os.getpid()
+    
+    try:
+        if ocr_engine_process_global:
+            # 清理 PaddleOCR 实例
+            del ocr_engine_process_global
+            ocr_engine_process_global = None
+            
+        # 清理 PaddlePaddle GPU 缓存
+        import paddle
+        if paddle.is_compiled_with_cuda():
+            paddle.device.cuda.empty_cache()
+            logging.info(f"[PID: {pid}] PaddleOCR worker GPU cache cleared")
+            
+    except Exception as e:
+        logging.warning(f"[PID: {pid}] Worker cleanup error: {e}")
 
 def _ocr_worker_task(task: Tuple[Any, Any]) -> Tuple[Any, List[str], List[np.ndarray]]:
     """
@@ -249,3 +307,10 @@ def _ocr_worker_task(task: Tuple[Any, Any]) -> Tuple[Any, List[str], List[np.nda
     except Exception as e:
         logging.error(f"OCR task {task_id} execution failed: {e}", exc_info=True)
         return (task_id, [], [])
+    finally:
+        # 尽力清理工作进程中的临时资源
+        try:
+            import gc
+            gc.collect()  # 强制垃圾回收
+        except:
+            pass

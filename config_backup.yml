@@ -1,6 +1,6 @@
-# Video2Subtitle 优化配置文件
+# Video2Subtitle 配置文件
 # -----------------------------------
-# 已移除无效参数，修正配置问题，保留所有实际使用的参数
+# 在运行 run_pipeline.py 时，可以通过 --config config.yml 参数来加载此文件中的配置。
 
 # 1. 解码器模块配置
 decoder:
@@ -18,56 +18,62 @@ area_detector:
   min_text_len: 2
   # 用于并行分析视频帧以确定字幕位置的工作进程数。
   # 默认值: min(CPU核心数, 4)
+  # 增加此值可以加快区域检测速度，但会消耗更多CPU和内存。
   num_workers: 4
   # 检测到的字幕区域上下各扩展的像素数，用于确保完整捕获字幕内容。
   # 建议值: 5-10 (精确字幕), 10-15 (一般场景), 15-30 (有特效字幕)
-  y_padding: 10
+  # 默认值: 10
+  y_padding: 5
 
-# 3. 关键帧检测模块配置
+# 3. 关键帧检测模块配置 (新架构)
 keyframe_detector:
   # 感知哈希(dHash)的大小。更高的值可以更精确地捕捉图像内容的细节，但也可能对微小噪点更敏感。
   # 推荐值: 8, 16
   dhash_size: 8
-  # 相似度阈值。两帧间相似度低于此值则认为是新的关键帧。
-  # - 90% (0.90): 严格模式，只有显著差异才触发新关键帧
+  # 相似度阈值。两帧间相似度低于此值则认为是新的关键帧。基于Dr. Neal Krawetz的行业标准设定。
+  # - 90% (0.90): 严格模式，只有显著差异才触发新关键帧，适合内容变化明显的字幕
   # - 85% (0.85): 平衡模式，适合大多数场景
-  # - 80% (0.80): 宽松模式，对细微变化也敏感
-  # 建议值: 0.98 (修复重复字幕问题)
+  # - 80% (0.80): 宽松模式，对细微变化也敏感，适合动画或特效字幕
+  # 建议值: 0.90 (修复重复字幕问题)
   similarity_threshold: 0.98
   
-  # dHash区域优化配置 (聚焦字幕中心，减少背景干扰)
+  # 🆕 dHash区域优化配置 (聚焦字幕中心，减少背景干扰)
   # dHash焦点区域宽度计算公式: 字幕高度 × dhash_focus_ratio
-  # - 2.0: 较窄焦点，最小背景干扰
-  # - 3.0: 平衡焦点，推荐值  
-  # - 4.0: 较宽焦点，适合字体较大的字幕
+  # 例如: 字幕高度72px × 3.0 = 216px焦点宽度
+  # - 2.0: 较窄焦点，最小背景干扰，适合简洁字幕
+  # - 3.0: 平衡焦点，推荐值，适合大多数场景  
+  # - 4.0: 较宽焦点，适合字体较大或有装饰的字幕
   dhash_focus_ratio: 3.0
   # 最小焦点宽度保护，防止极小字幕导致焦点区域过窄
   # 建议值: 150-300像素
   min_focus_width: 200
+  
+  
 
 # 4. OCR识别模块配置
 ocr:
-  # OCR语言设置
+  # 当使用本地 PaddleOCR 实例时 (即 ocr_server.enabled = false)，此语言设置生效。
+  # 当使用 ocr_server 时，语言模型在服务器端配置，此处设置被忽略。
   lang: 'en' # 英文en 中文ch
-  # 并行处理的工作进程数
   num_workers: 4
   
   # PaddleOCR 3.x 核心参数配置 (基于测试结果优化)
+  # 测试证明：PP-OCRv5 + 英文 + 以下参数 = 99.96%置信度
   paddleocr_config:
     # 模型版本选择 - PP-OCRv5是最新最准确的版本
     ocr_version: 'PP-OCRv5'
     
     # 文本检测参数 (针对字幕条优化)
-    text_det_limit_side_len: 736         # 检测模型输入边长限制 (修正为代码默认值)
-    text_det_thresh: 0.30               # 文本检测像素阈值
-    text_det_box_thresh: 0.60           # 文本检测框阈值 
-    text_det_unclip_ratio: 1.50         # 文本检测扩张系数
+    text_det_limit_side_len: 64         # 降低最小边长限制，适应字幕条高度. 必须要有, 如果注释掉就会报`Resized image size`错误
+    text_det_thresh: 0.30               # 文本检测像素阈值 (在线成功参数)
+    text_det_box_thresh: 0.60           # 文本检测框阈值 (在线成功参数)  
+    text_det_unclip_ratio: 1.50         # 文本检测扩张系数 (在线成功参数，之前2.0太大)
     text_det_input_shape: null          # 检测模型输入形状，null使用默认
     
     # 文本识别参数
-    text_recognition_batch_size: 8      # 识别批处理大小
-    text_rec_score_thresh: 0            # 文本识别阈值
-    text_rec_input_shape: null          # 识别模型输入形状，null使用默认
+    text_recognition_batch_size: 8  # 识别批处理大小
+    text_rec_score_thresh: 0        # 文本识别阈值 (在线成功参数)
+    text_rec_input_shape: null      # 识别模型输入形状，null使用默认
     
     # 方向分类参数 (字幕场景优化：全部关闭以提高速度)
     use_doc_orientation_classify: false    # 关闭文档图像方向分类
@@ -78,19 +84,19 @@ ocr:
     # 其他优化参数
     return_word_box: false          # 是否返回单词级别的边界框
     precision: "fp32"              # 推理精度：fp32(精度高) 或 fp16(速度快)
-    use_tensorrt: false            # 是否启用TensorRT加速
+    use_tensorrt: false            # 是否启用TensorRT加速 (需要支持)
   
   # 模型配置 - 用于字幕场景的最佳模型选择
   models:
-    # 文本检测模型
+    # 文本检测模型 - 检测文本区域
     detection_model: "PP-OCRv5_server_det"
     
     # 文本识别模型配置 - 按语言优化选择
     recognition_models:
-      zh: "PP-OCRv5_server_rec"           # 中文简体
+      zh: "PP-OCRv5_server_rec"           # 中文简体 (最佳)
       chinese_cht: "PP-OCRv5_server_rec"  # 中文繁体
       en: "en_PP-OCRv5_mobile_rec"        # 英文专用 (轻量高效)
-      ja: "PP-OCRv5_server_rec"           # 日文
+      ja: "PP-OCRv5_server_rec"           # 日文 (使用服务器版)
       korean: "korean_PP-OCRv5_mobile_rec" # 韩文
       fr: "latin_PP-OCRv5_mobile_rec"     # 法语
       de: "latin_PP-OCRv5_mobile_rec"     # 德语
@@ -103,7 +109,23 @@ ocr:
       default: "PP-OCRv5_server_rec"      # 默认回退模型
     
     # 字幕场景优化设置
-    subtitle_optimized: true
+    subtitle_optimized: true  # 启用字幕场景优化
+    # 注意：PaddleOCR 3.x已移除 use_angle_cls 和 use_space_char 参数
+    # 优化主要通过语言选择和模型配置实现
+
+# 5. OCR 服务端配置
+ocr_server:
+  # 是否启用 OCR 服务端模式。
+  # - true: 流水线将使用下面的 url 连接 OCR 服务，实现高并发处理。
+  # - false: 流水线将回退到在本地创建 PaddleOCR 实例的传统模式。
+  enabled: true
+  # PaddleOCR Hub Serving 服务的预测 URL。
+  # 如果 ocr-server 和主应用在同一个 docker-compose 网络中，可以直接使用服务名 "ocr-server"。
+  # 如果在宿主机上直接运行 python 脚本测试，请使用 "http://localhost:8868/predict/ocr_system"。
+  url: "http://ocr-server:8868/predict/ocr_system"
+  # 客户端向服务器发送请求时的批处理大小。
+  # 可根据服务端的能力和网络情况调整。
+  batch_size: 16
 
 # 5. 后处理器模块配置
 postprocessor:
@@ -111,20 +133,20 @@ postprocessor:
   # 建议值: 0.1 ~ 0.5
   min_duration_seconds: 0.2
 
-# 6. 流水线控制
+# 6. 流水线控制 (新增)
 pipeline:
-  # true: 只处理内容变化的关键帧 (推荐，性能更好)。
+  # true: 只处理内容变化的关键帧 (当前默认逻辑)。
   # false: 处理视频的每一帧。速度极慢，但能捕捉所有微小变化。
   detect_keyframes: false
-  
-  # true: 将多个字幕条拼接成一张大图进行OCR (推荐，提高效率)。
-  # false: 对每个字幕条独立进行OCR。
+
+  # true: 将多个字幕条拼接成一张大图进行OCR。
+  # false: 对每个字幕条独立进行OCR (当前默认逻辑)。
   use_image_concat: true
   
   # 当 use_image_concat=true 时，每多少个字幕条合并成一张图片。
-  concat_batch_size: 10
-  
+  concat_batch_size: 20
+
   # 帧缓存策略。
-  # "memory": 帧图像缓存在内存中。速度快，内存占用高。
+  # "memory": 帧图像缓存在内存中 (当前默认逻辑)。速度快，内存占用高。
   # "pic": 帧图像保存为临时图片文件。内存占用低，磁盘I/O开销大。
   frame_cache_strategy: "pic"

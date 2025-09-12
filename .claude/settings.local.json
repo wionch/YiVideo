@@ -18,7 +18,8 @@
       "Bash(python:*)",
       "Bash(docker exec:*)",
       "WebFetch(domain:pyimagesearch.com)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []

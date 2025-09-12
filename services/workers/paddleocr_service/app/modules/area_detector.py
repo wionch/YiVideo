@@ -147,10 +147,17 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
                                 text = rec_result[0].get('rec_text', '')
                             
                             detections_with_text.append((box_np, text))
+                            
+                            # 清理识别结果，释放内存
+                            del rec_result
+                            
                         except Exception as rec_e:
                             # 如果识别失败，仍然保留检测框，但文本为空
                             print(f"[PID: {pid}] 文本识别失败: {rec_e}")
                             detections_with_text.append((box_np, ""))
+                            
+                        # 清理文本区域数据
+                        del text_region
         
         process_end_time = time.time()
         process_duration = process_end_time - process_start_time
@@ -164,6 +171,16 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
         del det_result
         del frame  # 释放帧数据
         gc.collect()
+        
+        # 定期清理工作进程内存
+        if frame_index % 50 == 0:  # 每处理50帧清理一次
+            try:
+                # 清理PaddlePaddle缓存
+                import paddle
+                if paddle.is_compiled_with_cuda():
+                    paddle.device.cuda.empty_cache()
+            except:
+                pass
         
         return detections_with_text
         
@@ -285,7 +302,14 @@ class SubtitleAreaDetector:
                     # 更新采样进度
                     sampling_progress.update(1)
                     
+                    # 清理帧tensor
+                    del frame_np
+                    
                 current_frame_idx += 1
+            
+            # 清理批次数据
+            del batch_tensor
+            
             if sample_idx_ptr >= len(sample_indices):
                 break
         
@@ -358,6 +382,8 @@ class SubtitleAreaDetector:
                             frame_np = frame.to_ndarray(format='rgb24')
                             frames.append(frame_np)
                             successful_samples += 1
+                            # 清理帧数据
+                            del frame_np, frame
                         except Exception as convert_e:
                             print(f"    转换错误 {timestamp:.1f}s: {convert_e}")
                             failed_count += 1
@@ -385,6 +411,8 @@ class SubtitleAreaDetector:
             print(f"精准采样过程出错: {e}")
             # 回退到传统方法
             sampling_progress.finish("⚠️  精准采样失败，回退到传统方法")
+            # 清理已采样的数据，避免内存泄漏
+            frames.clear()
             return self._sample_frames_traditional(video_path, decoder)
         
         success_rate = successful_samples / len(target_timestamps) if target_timestamps else 0
@@ -393,7 +421,13 @@ class SubtitleAreaDetector:
         # 降低回退阈值到30%，更宽松的成功标准
         if len(frames) < self.sample_count * 0.3:
             print(f"  - [回退] 采样成功率过低 ({len(frames)}/{self.sample_count})，使用传统方法")
+            # 清理当前采样结果
+            frames.clear()
             return self._sample_frames_traditional(video_path, decoder)
+        
+        # 强制垃圾回收
+        import gc
+        gc.collect()
         
         return frames
 

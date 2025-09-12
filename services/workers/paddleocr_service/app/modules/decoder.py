@@ -30,6 +30,7 @@ class GPUDecoder:
             Generator[Tuple[torch.Tensor, np.ndarray], None, None]: 
             一个元组，包含 (批量帧的Tensor, 对应的时间戳Numpy数组)。
         """
+        container = None
         try:
             container = av.open(video_path)
             stream = container.streams.video[0]
@@ -38,6 +39,8 @@ class GPUDecoder:
                 total_frames = int(stream.duration * stream.time_base * stream.average_rate)
         except Exception as e:
             print(f"错误: 无法打开或解码视频文件: {video_path}. PyAV 错误: {e}")
+            if container:
+                container.close()
             return
 
         stream.thread_type = "AUTO"
@@ -77,18 +80,40 @@ class GPUDecoder:
                 batch_tensor = torch.stack(frames_buffer).to(self.device, non_blocking=True)
                 timestamps_np = np.array(timestamps_buffer, dtype=np.float64)
                 yield batch_tensor, timestamps_np
-                frames_buffer, timestamps_buffer = [], []
+                
+                # 显式清理批次数据，释放内存
+                del batch_tensor, timestamps_np
+                frames_buffer.clear()
+                timestamps_buffer.clear()
                 batch_count += 1
             
         if frames_buffer:
             batch_tensor = torch.stack(frames_buffer).to(self.device, non_blocking=True)
             timestamps_np = np.array(timestamps_buffer, dtype=np.float64)
             yield batch_tensor, timestamps_np
+            
+            # 清理最后批次的数据
+            del batch_tensor, timestamps_np
+            frames_buffer.clear()
+            timestamps_buffer.clear()
         
         if progress_bar:
             progress_bar.finish(f"✅ 解码完成，总共 {frame_count} 帧")
         
-        container.close()
+        # 确保容器资源释放
+        try:
+            if container:
+                container.close()
+        except Exception as e:
+            print(f"警告: 容器关闭时出错: {e}")
+        
+        # GPU 资源释放
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        # 强制垃圾回收
+        import gc
+        gc.collect()
 
     def sample_frames_precise(self, video_path: str, target_timestamps: list) -> list:
         """
@@ -102,6 +127,7 @@ class GPUDecoder:
             list: 采样得到的帧数据列表（numpy格式）
         """
         sampled_frames = []
+        container = None
         
         try:
             container = av.open(video_path)
@@ -126,6 +152,8 @@ class GPUDecoder:
                             frame_np = frame.to_ndarray(format='rgb24')
                             sampled_frames.append(frame_np)
                             frame_found = True
+                            # 显式删除frame对象释放内存
+                            del frame, frame_np
                             break
                     
                     if not frame_found:
@@ -135,13 +163,27 @@ class GPUDecoder:
                     print(f"警告: seek到时间戳 {timestamp:.2f}s 失败: {e}")
                     continue
             
-            container.close()
-            
         except Exception as e:
             print(f"错误: 无法打开视频文件 {video_path}: {e}")
             return []
+        finally:
+            # 确保容器资源释放
+            if container:
+                try:
+                    container.close()
+                except Exception as e:
+                    print(f"警告: 容器关闭时出错: {e}")
         
         print(f"精准采样完成: 目标 {len(target_timestamps)} 帧，成功获取 {len(sampled_frames)} 帧")
+        
+        # GPU 资源释放
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        # 强制垃圾回收
+        import gc
+        gc.collect()
+            
         return sampled_frames
 
     def decode_gpu(self, video_path: str, fps: int = None, log_progress=False) -> Generator[Tuple[torch.Tensor, np.ndarray], None, None]:
@@ -233,7 +275,11 @@ class GPUDecoder:
                     batch_tensor = torch.stack(frames_buffer)
                     timestamps_np = np.array(timestamps_buffer, dtype=np.float64)
                     yield batch_tensor, timestamps_np
-                    frames_buffer, timestamps_buffer = [], []
+                    
+                    # 显式清理批次数据，释放内存
+                    del batch_tensor, timestamps_np
+                    frames_buffer.clear()
+                    timestamps_buffer.clear()
                     batch_count += 1
                 
             # 处理剩余帧
@@ -241,6 +287,11 @@ class GPUDecoder:
                 batch_tensor = torch.stack(frames_buffer)
                 timestamps_np = np.array(timestamps_buffer, dtype=np.float64)
                 yield batch_tensor, timestamps_np
+                
+                # 清理最后批次的数据
+                del batch_tensor, timestamps_np
+                frames_buffer.clear()
+                timestamps_buffer.clear()
             
             if progress_bar:
                 progress_bar.finish(f"✅ GPU解码完成，总共 {frame_count} 帧，{batch_count + (1 if frames_buffer else 0)} 批次")
@@ -251,6 +302,9 @@ class GPUDecoder:
                 progress_bar.finish("❌ GPU解码中断")
         finally:
             container.close()
+            # GPU 资源释放
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def sample_frames_precise_gpu(self, video_path: str, target_timestamps: list) -> list:
         """
@@ -322,6 +376,9 @@ class GPUDecoder:
             print(f"GPU精准采样过程中出错: {e}")
         finally:
             container.close()
+            # GPU 资源释放
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
         print(f"GPU精准采样完成: 目标 {len(target_timestamps)} 帧，成功获取 {len(sampled_frames)} 帧")
         return sampled_frames

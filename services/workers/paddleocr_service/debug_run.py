@@ -79,7 +79,14 @@ def main():
 
     # 3. 执行核心逻辑
     try:
+        import time
+        start_time = time.time()
+        
         subtitles = extract_subtitles_from_video(args.input, config)
+        
+        end_time = time.time()
+        execution_time = end_time - start_time
+        valid_subtitle_count = len(subtitles)
 
         # 4. 生成输出文件
         video_name = os.path.splitext(os.path.basename(args.input))[0]
@@ -96,7 +103,8 @@ def main():
         with open(srt_path, 'w', encoding='utf-8') as f:
             f.write(srt_content)
         
-        # 只打印文件路径
+        # 添加执行统计信息
+        print(f"执行时间: {execution_time:.2f}秒, 提取有效字幕: {valid_subtitle_count}条")
         print(f"JSON文件: {json_path}")
         print(f"SRT文件: {srt_path}")
 

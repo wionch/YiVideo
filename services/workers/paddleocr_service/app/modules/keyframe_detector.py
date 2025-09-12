@@ -487,6 +487,10 @@ class KeyFrameDetector:
                 diff = resized_batch[:, :, :, 1:] > resized_batch[:, :, :, :-1]
                 hashes_np = diff.cpu().numpy().astype(np.uint8).reshape(diff.shape[0], -1)
                 all_hashes.extend(hashes_np)
+                
+                # 显式清理中间GPU变量，释放显存
+                del grayscale_batch, resized_batch, diff, hashes_np
+                
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     print(f"⚠️ GPU内存不足，跳过batch {batch_count}: {e}")
@@ -500,11 +504,26 @@ class KeyFrameDetector:
             frame_count += batch_tensor.size(0)
             batch_count += 1
             
+            # 显式删除批次tensor，释放GPU内存
+            del batch_tensor, dhash_cropped_batch
+            
             # 每配置间隔显示一次进度
             if batch_count % self.progress_interval_batches == 0:
                 print(f"  📊 已处理 {frame_count} 帧...")
+                # 间隔性强制垃圾回收
+                import gc
+                gc.collect()
             
         print(f"✅ 特征计算完成: 共处理 {frame_count} 帧")
+        
+        # GPU 资源释放
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        # 强制垃圾回收
+        import gc
+        gc.collect()
+            
         return all_hashes
     
     def _compute_frame_features_with_cache(self, video_path: str, decoder: GPUDecoder, 
@@ -559,6 +578,10 @@ class KeyFrameDetector:
                 diff = resized_batch[:, :, :, 1:] > resized_batch[:, :, :, :-1]
                 batch_hashes = diff.cpu().numpy().astype(np.uint8).reshape(diff.shape[0], -1)
                 all_hashes.extend(batch_hashes)
+                
+                # 显式清理中间GPU变量，释放显存
+                del grayscale_batch, resized_batch, diff
+                
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     print(f"⚠️ GPU内存不足，跳过batch {batch_count}: {e}")
@@ -608,17 +631,35 @@ class KeyFrameDetector:
             frame_count += batch_tensor.size(0)
             batch_count += 1
             
+            # 显式删除批次数据，释放内存
+            del batch_tensor
+            if cache_cropped is not None:
+                del cache_cropped
+            if batch_hashes is not None:
+                del batch_hashes
+            
             # 每配置间隔显示一次进度 + 缓存统计
             if batch_count % self.progress_interval_batches == 0:
                 cache_mb = cached_frames_count * self.frame_memory_estimate_mb
                 cache_ratio = (cached_frames_count / frame_count) * 100
                 print(f"  📊 已处理 {frame_count} 帧，预缓存 {cached_frames_count} 帧 ({cache_ratio:.1f}%, ~{cache_mb:.1f}MB)")
+                # 间隔性强制垃圾回收
+                import gc
+                gc.collect()
             
         # 最终统计 (使用配置的内存估算)
         final_cache_mb = cached_frames_count * self.frame_memory_estimate_mb
         cache_ratio = (cached_frames_count / frame_count) * 100
         print(f"✅ 特征计算完成: 共处理 {frame_count} 帧")
         print(f"🗂️  预缓存统计: {cached_frames_count} 帧 ({cache_ratio:.1f}%), 约 {final_cache_mb:.1f}MB")
+        
+        # GPU 资源释放
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        # 强制垃圾回收
+        import gc
+        gc.collect()
         
         return all_hashes, keyframe_cache
     

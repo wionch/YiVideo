@@ -90,14 +90,32 @@ class ChangeDetector:
             hashes_np = diff.cpu().numpy().astype(np.uint8).reshape(diff.shape[0], -1)
             all_hashes.extend(hashes_np)
             
-            frame_count += batch_tensor.size(0)
+            # 记录batch大小以便后续清理
+            batch_size = batch_tensor.size(0)
+            
+            # 显式清理GPU中间变量，释放显存
+            del grayscale_batch, resized_batch, diff, hashes_np, stds
+            del cropped_batch, batch_tensor
+            
+            frame_count += batch_size
             batch_count += 1
             
             # 每50个batch显示一次进度
             if batch_count % 50 == 0:
                 print(f"  📊 已处理 {frame_count} 帧...")
+                # 间隔性强制垃圾回收
+                import gc
+                gc.collect()
             
         print(f"✅ 特征计算完成: 共处理 {frame_count} 帧")
+        
+        # GPU 资源释放
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        # 强制垃圾回收
+        import gc
+        gc.collect()
             
         return all_hashes, np.array(all_stds)
 

@@ -191,21 +191,35 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
         
         logging.info(f"缓存了 {len(frame_cache)} 帧图像 (策略: {cache_strategy})")
 
+        # 根据策略选择OCR处理方式
+        ocr_results = {}
         if use_concat:
             logging.info("模式: 拼接OCR")
             ocr_tasks = _prepare_ocr_tasks(frame_cache, pipeline_config, temp_dir, cache_strategy)
             raw_results = ocr_engine.recognize_stitched_images(ocr_tasks, cache_strategy)
             ocr_results = _transform_coordinates(raw_results, subtitle_area)
+            # 清理OCR任务数据
+            del ocr_tasks, raw_results
         else:
             logging.info("模式: 独立OCR")
             ocr_results = ocr_engine.recognize_keyframes_from_cache(frame_cache, subtitle_area, total_frames, cache_strategy)
 
+        # 清理帧缓存，释放内存
+        if isinstance(frame_cache, dict):
+            frame_cache.clear()
+        del frame_cache
+
         if detect_kf:
             segments = keyframe_detector.generate_subtitle_segments(keyframes, fps, total_frames)
             final_subtitles = postprocessor.format_from_keyframes(segments, ocr_results, fps)
+            # 清理段落数据
+            del segments
         else:
-            logging.warning("全帧模式的后处理使用基本格式化，可能不适用于所有场景。")
             final_subtitles = postprocessor.format_from_full_frames(ocr_results, fps)
+
+        # 清理OCR结果，释放内存
+        ocr_results.clear()
+        del ocr_results
 
         # 计算执行时间并输出有效字幕统计信息
         execution_time = time.time() - start_time
@@ -229,6 +243,12 @@ def extract_subtitles_from_video(video_path: str, config: Dict) -> List[Dict[str
         except Exception as cleanup_error:
             logging.warning(f"An error occurred during GPU cache cleanup: {cleanup_error}")
 
+        # 强制垃圾回收
+        import gc
+        gc.collect()
+        logging.info("强制垃圾回收完成")
+
+        # 清理临时目录
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
             logging.info(f"清理临时目录: {temp_dir}")
