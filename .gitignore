@@ -27,6 +27,20 @@ share/python-wheels/
 *.png
 *.jpg
 *.jpeg
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.flv
+*.wmv
+*.webm
+*.mp3
+*.wav
+*.ogg
+*.aac
+*.m4a
+*.m4v
+*.m4b
 MANIFEST
 
 # PyInstaller
