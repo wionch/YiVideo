@@ -2,7 +2,7 @@ import os
 import time
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.modules.video_decoder import get_video_info, split_video_by_gpu, decode_and_count_frames_gpu
+from app.modules.video_decoder import get_video_info, get_video_info_accurate, split_video_by_gpu, decode_and_count_frames_gpu
 
 if __name__ == "__main__":
     video_path = '/app/videos/777.mp4'
@@ -15,24 +15,36 @@ if __name__ == "__main__":
 
     print("--- 开始核心解码模块测试 (精确模式) ---")
 
-    original_video_info = get_video_info(video_path)
-    if not original_video_info:
-        print(f"获取原视频 '{video_path}' 信息失败，测试终止。")
-        exit()
-    
-    print(f"原视频: {video_path}")
-    print(f"  - 时长: {original_video_info['duration']:.2f} 秒")
-    print(f"  - 总帧数: {original_video_info['frame_count']}")
+    # 1. 快速获取视频信息用于即时显示
+    fast_info = get_video_info(video_path)
+    if fast_info:
+        print(f"原视频 (快速检测): {video_path}")
+        print(f"  - 预估时长: {fast_info['duration']:.2f} 秒")
+        print(f"  - 预估总帧数: {fast_info['frame_count']}")
     print(f"分割数量: {num_splits}")
+
+    # 2. 精确获取总帧数，用于后续分割（此步骤会比较慢）
+    print("\n--- 开始精确计算总帧数 (此过程可能需要一些时间) ---")
+    accurate_info_start_time = time.perf_counter()
+    original_video_info = get_video_info_accurate(video_path)
+    accurate_info_end_time = time.perf_counter()
+    if not original_video_info:
+        print(f"获取原视频 '{video_path}' 的精确信息失败，测试终止。")
+        exit()
+    print(f"精确帧数计算耗时: {accurate_info_end_time - accurate_info_start_time:.2f} 秒")
+    print(f"精确总帧数: {original_video_info['frame_count']}")
+
 
     print("\n--- 开始视频分割 (解码再编码模式) ---")
     split_start_time = time.perf_counter()
     split_parts = split_video_by_gpu(
         video_path=video_path,
         output_dir=output_dir,
-        num_splits=num_splits
+        num_splits=num_splits,
+        total_frames=original_video_info['frame_count'] # 传入精确帧数
     )
     split_end_time = time.perf_counter()
+
     print(f"\n分割总耗时: {split_end_time - split_start_time:.2f} 秒")
 
     if not split_parts:
@@ -42,13 +54,23 @@ if __name__ == "__main__":
     print("\n--- 开始并发解码并验证帧数 ---")
     total_decoded_frames = 0
     with ThreadPoolExecutor(max_workers=num_splits) as executor:
-        future_to_part = {executor.submit(decode_and_count_frames_gpu, part['path']): part for part in split_parts}
-        for future in as_completed(future_to_part):
-            part_info = future_to_part[future]
+        # 使用新的字典来存储 future -> (part_info, start_time)
+        future_to_part_and_start_time = {}
+        for part in split_parts:
+            start_time = time.perf_counter()
+            future = executor.submit(decode_and_count_frames_gpu, part['path'])
+            future_to_part_and_start_time[future] = (part, start_time)
+
+        for future in as_completed(future_to_part_and_start_time):
+            part_info, start_time = future_to_part_and_start_time[future]
             try:
                 decoded_frames = future.result()
+                end_time = time.perf_counter()
+                duration = end_time - start_time
                 total_decoded_frames += decoded_frames
+                
                 print(f"\n文件: {os.path.basename(part_info['path'])}")
+                print(f"  - 解码耗时: {duration:.2f} 秒")
                 print(f"  - 预期帧数: {part_info['expected_frames']}")
                 print(f"  - 解码帧数: {decoded_frames}")
                 if decoded_frames == part_info['expected_frames']:
