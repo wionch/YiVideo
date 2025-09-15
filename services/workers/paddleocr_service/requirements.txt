@@ -15,3 +15,4 @@ torch
 av
 numpy
 opencv-python-headless
+av

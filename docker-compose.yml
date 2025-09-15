@@ -1,4 +1,3 @@
-
 services:
   # --- Message Broker ---
   redis:
@@ -9,6 +8,33 @@ services:
       - "6379:6379"
 
   # --- AI Worker Services ---
+
+  ffmpeg_worker:
+    container_name: ffmpeg_worker
+    build:
+      context: .
+      dockerfile: ./services/workers/ffmpeg_worker/Dockerfile
+    volumes:
+      - ./services:/app/services
+      - ./videos:/app/videos
+      - ./locks:/app/locks
+      - ./config.yml:/app/config.yml
+      - ~/.ssh:/root/.ssh
+      - ~/.gemini:/root/.gemini
+    restart: always
+    command: ["python", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "-l", "info", "-Q", "ffmpeg_queue"]
+    entrypoint: ""
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis
 
   paddleocr_service:
     container_name: paddleocr_service
@@ -22,18 +48,23 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
+    restart: always
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "paddleocr_queue"]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
     deploy:
       resources:
         reservations:
-          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
-    # restart: on-failure
-    restart: always
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "paddleocr_queue"]
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     depends_on:
       - redis
 
   inpainting_service:
     container_name: inpainting_service
+    runtime: nvidia
     build:
       context: .
       dockerfile: ./services/workers/inpainting_service/Dockerfile
@@ -43,10 +74,6 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
     restart: on-failure
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "inpainting_queue"]
     depends_on:
@@ -54,6 +81,7 @@ services:
 
   whisperx_service:
     container_name: whisperx_service
+    runtime: nvidia
     build:
       context: .
       dockerfile: ./services/workers/whisperx_service/Dockerfile
@@ -63,10 +91,6 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
     restart: on-failure
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "whisperx_queue"]
     depends_on:
@@ -74,6 +98,7 @@ services:
 
   indextts_service:
     container_name: indextts_service
+    runtime: nvidia
     build:
       context: .
       dockerfile: ./services/workers/indextts_service/Dockerfile
@@ -83,10 +108,6 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
     restart: on-failure
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "indextts_queue"]
     depends_on:
@@ -94,6 +115,7 @@ services:
 
   gptsovits_service:
     container_name: gptsovits_service
+    runtime: nvidia
     build:
       context: .
       dockerfile: ./services/workers/gptsovits_service/Dockerfile
@@ -103,10 +125,6 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
     restart: on-failure
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "gptsovits_queue"]
     depends_on:

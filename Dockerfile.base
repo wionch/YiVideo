@@ -8,6 +8,18 @@ FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.1.1-gpu-cuda11.8
 # 设置环境变量，避免在 apt 安装过程中出现交互式提示
 ENV DEBIAN_FRONTEND=noninteractive
 
+# =========================================================================
+# === 新增：安装与 CUDA 11.8 兼容的 NVIDIA 视频解码库 ===
+#
+# 1. 首先，我们需要为 apt 配置 NVIDIA 的软件源，否则 apt-get 找不到这些包
+RUN apt-get update && apt-get install -y --no-install-recommends gnupg wget && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    rm cuda-keyring_1.1-1_all.deb
+
+# =========================================================================
+
+
 # 1. 安装编译 FFmpeg 所需的系统依赖和常用编解码器开发库
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -33,8 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 
 # 2. & 3. 编译安装 nv-codec-headers 和 FFmpeg
-# 将多个步骤合并到单个 RUN 指令中，以减少 Docker 镜像的层数并确保依赖在同一上下文中安装。
-# 新增：设置 PKG_CONFIG_PATH 环境变量，并克隆 nv-codec-headers 的稳定版本
+# (此部分保持不变)
 WORKDIR /usr/local/src
 RUN export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig" && \
     git clone -b n11.1.5.2 https://git.videolan.org/git/ffmpeg/nv-codec-headers.git && \
