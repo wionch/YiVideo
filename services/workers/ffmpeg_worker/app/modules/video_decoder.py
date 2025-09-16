@@ -3,99 +3,103 @@ import json
 import math
 import os
 import re
+import shutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def get_video_info_accurate(video_path: str) -> dict:
-    """
-    通过高效的 FFmpeg 解复用（demuxing）过程，精确且快速地获取视频的总帧数和时长。
-    此方法避免了完整的视频解码，速度比旧的 ffprobe -count_frames 方法快几个数量级。
-    """
-    # 1. 首先，使用 ffprobe 快速、可靠地获取视频时长。
-    duration = 0.0
-    try:
-        probe_command = [
-            'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-            '-show_entries', 'stream=duration', '-of', 'json', video_path
-        ]
-        probe_result = subprocess.run(probe_command, capture_output=True, text=True, check=True)
-        info = json.loads(probe_result.stdout)['streams'][0]
-        duration = float(info.get('duration', 0.0))
-    except Exception as e:
-        print(f"使用 ffprobe 获取视频 '{video_path}' 时长失败: {e}")
-        # 即使获取时长失败，我们仍然可以继续尝试获取帧数。
-
-    # 2. 接着，使用 ffmpeg 的流复制功能到 null 来快速统计总帧数。
-    # 这个过程只解析容器和数据包，不解码帧，所以非常快。
-    frame_count = 0
-    demux_command = [
-        'ffmpeg',
-        '-i', video_path,
-        '-map', '0:v:0',      # 仅选择第一个视频流
-        '-c', 'copy',         # 直接复制流，不进行编解码
-        '-f', 'null', '-'     # 输出到空设备，不写入任何文件
-    ]
-    try:
-        # 我们需要捕获 stderr，因为 ffmpeg 将其进度和摘要信息输出到此处。
-        # check=False 是因为即使任务“成功”，ffmpeg 在输出到 null 时也可能返回非零退出码。
-        demux_result = subprocess.run(demux_command, capture_output=True, text=True)
-        stderr_output = demux_result.stderr
-
-        # 从 stderr 的最后几行中用正则表达式解析出最终的 frame=... 计数值。
-        frame_matches = re.findall(r'frame=\s*(\d+)', stderr_output)
-        if frame_matches:
-            # 最后一个匹配项就是视频的总帧数。
-            frame_count = int(frame_matches[-1])
-        else:
-            print(f"无法从 ffmpeg 的输出中解析帧数。视频: '{video_path}'. Stderr: {stderr_output}")
-            return None
-
-        return {
-            'frame_count': frame_count,
-            'duration': duration
-        }
-    except FileNotFoundError:
-        print("错误: 'ffmpeg' 或 'ffprobe' 命令未找到。请确保它们已安装并在系统的 PATH 中。")
-        return None
-    except Exception as e:
-        print(f"使用 ffmpeg 解复用获取帧数时发生未知错误，视频 '{video_path}': {e}")
-        return None
-
 def get_video_info(video_path: str) -> dict:
     """
-    Quickly gets video duration and estimates frame count from metadata.
-    This is much faster as it does not decode the video.
+    (首选方法) 使用 MediaInfo 和 ffprobe 快速、准确地获取视频信息。
+    - 使用 MediaInfo 获取总帧数，速度极快且结果准确。
+    - 使用 ffprobe 获取视频时长。
+    请确保 'mediainfo' 和 'ffprobe' 已在环境中安装。
     """
-    command = [
-        'ffprobe',
-        '-v', 'error',
-        '-select_streams', 'v:0',
-        '-show_entries', 'stream=duration,avg_frame_rate',
-        '-of', 'json',
-        video_path
-    ]
+    # 1. 使用 MediaInfo 获取帧数
+    frame_count = 0
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        info = json.loads(result.stdout)['streams'][0]
-        duration = float(info.get('duration', 0.0))
-        
-        frame_rate_str = info.get('avg_frame_rate', '0/0')
-        num, den = map(int, frame_rate_str.split('/'))
-        frame_rate = num / den if den > 0 else 0
-        
-        estimated_frames = int(duration * frame_rate) if duration > 0 and frame_rate > 0 else 0
-        
-        return {
-            'frame_count': estimated_frames, # This is an estimate
-            'duration': duration
-        }
-    except (subprocess.CalledProcessError, json.JSONDecodeError, IndexError, KeyError) as e:
-        print(f"Error getting fast video info for {video_path}: {e}")
+        command = ['mediainfo', '--Output=Video;%FrameCount%', video_path]
+        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10)
+        frame_count = int(result.stdout.strip())
+    except FileNotFoundError:
+        print("错误: 'mediainfo' 命令未找到。请确保它已安装并在系统的 PATH 中。")
         return None
+    except (subprocess.CalledProcessError, ValueError) as e:
+        print(f"使用 mediainfo 获取帧数失败: {e}")
+        # 即使获取帧数失败，我们仍然可以继续尝试获取时长。
+        pass
+
+    # 2. 使用 ffprobe 获取时长
+    duration = 0.0
+    try:
+        command = [
+            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', video_path
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10)
+        duration = float(result.stdout.strip())
+    except FileNotFoundError:
+        print("错误: 'ffprobe' 命令未找到。请确保它已安装并在系统的 PATH 中。")
+        return None
+    except (subprocess.CalledProcessError, ValueError) as e:
+        print(f"使用 ffprobe 获取时长失败: {e}")
+        # 如果两者都失败，则返回 None
+        if frame_count == 0:
+            return None
+
+    return {
+        'frame_count': frame_count,
+        'duration': duration
+    }
+
+def split_video_fast(video_path: str, output_dir: str, num_splits: int) -> list:
+    """
+    (快速分割) 使用 ffmpeg 的流复制模式 (-c copy) 快速将视频分割成多个部分。
+    这种方法非常快，因为它不进行重新编码，但分割点可能不是100%精确到帧。
+    适用于对速度要求高、对分割精度要求不高的场景。
+    """
+    # 首先获取视频总时长，用于计算每个分段的长度
+    video_info = get_video_info(video_path)
+    if not video_info or video_info['duration'] == 0:
+        print(f"无法获取视频 '{video_path}' 的时长信息，分割失败。")
+        return []
+
+    total_duration = video_info['duration']
+    segment_duration = total_duration / num_splits
+
+    # 清理并创建输出目录
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir)
+
+    output_pattern = os.path.join(output_dir, 'segment_%03d.mp4')
+    
+    command = [
+        'ffmpeg',
+        '-y',
+        '-i', video_path,
+        '-c', 'copy',
+        '-map', '0',
+        '-f', 'segment',
+        '-segment_time', str(segment_duration),
+        '-reset_timestamps', '1',
+        output_pattern
+    ]
+
+    try:
+        subprocess.run(command, capture_output=True, text=True, check=True, timeout=300) # 增加超时
+        generated_files = [os.path.join(output_dir, f) for f in sorted(os.listdir(output_dir)) if f.startswith('segment_')]
+        return generated_files
+    except subprocess.CalledProcessError as e:
+        print(f"错误：ffmpeg 快速分割失败。FFmpeg Stderr: {e.stderr.strip()}")
+        return []
+    except FileNotFoundError:
+        print("错误: 'ffmpeg' 命令未找到。请确保它已安装并在系统的 PATH 中。")
+        return []
+
 
 def run_ffmpeg_command(command: list):
     """
-    Executes an FFmpeg command and captures its output.
+    执行一个 FFmpeg 命令并捕获其输出。
     """
     try:
         process = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -108,8 +112,8 @@ def run_ffmpeg_command(command: list):
 
 def decode_and_count_frames_gpu(video_path: str) -> (int, float):
     """
-    Decodes a video using GPU to a null output, and parses the frame count from stderr.
-    Returns the frame count.
+    使用GPU解码视频到null输出，并从stderr中解析帧数。
+    返回解码出的帧数。
     """
     command = [
         'ffmpeg',
@@ -129,15 +133,15 @@ def decode_and_count_frames_gpu(video_path: str) -> (int, float):
 
 def split_video_by_gpu(video_path: str, output_dir: str, num_splits: int = 4, total_frames: int = 0) -> list:
     """
-    Splits a video into multiple parts using FFmpeg with GPU acceleration (decode-encode method).
-    This method is frame-accurate.
-    If total_frames is not provided, it will be calculated using a slow but accurate method.
+    (精确分割) 使用 FFmpeg 和 GPU 加速进行解码和重新编码来分割视频。
+    这种方法是帧精确的，但由于需要重新编码，速度比 `split_video_fast` 慢得多。
+    适用于需要精确控制每个分片起始和结束帧的场景。
     """
     if total_frames == 0:
-        print("`total_frames` not provided, calculating accurately (this may be slow)...")
-        video_info = get_video_info_accurate(video_path)
+        print("警告: `total_frames` 未提供, 将使用 `get_video_info` 自动计算...")
+        video_info = get_video_info(video_path)
         if not video_info or video_info['frame_count'] == 0:
-            print(f"Could not get valid video info for {video_path}")
+            print(f"无法获取视频 '{video_path}' 的有效信息，分割失败。")
             return []
         total_frames = video_info['frame_count']
 
