@@ -2,7 +2,7 @@ from .celery_app import celery_app
 from .modules.video_decoder import split_video_by_gpu
 
 @celery_app.task
-def decode_video(video_path: str, output_dir: str, num_splits: int = 4):
+def decode_video(video_path: str, output_dir: str, num_splits: int = 10):
     """
     Celery task to split a video into multiple parts using GPU acceleration.
     """

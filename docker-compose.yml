@@ -9,11 +9,11 @@ services:
 
   # --- AI Worker Services ---
 
-  ffmpeg_worker:
-    container_name: ffmpeg_worker
+  ffmpeg_service:
+    container_name: ffmpeg_service
     build:
       context: .
-      dockerfile: ./services/workers/ffmpeg_worker/Dockerfile
+      dockerfile: ./services/workers/ffmpeg_service/Dockerfile
     volumes:
       - ./services:/app/services
       - ./videos:/app/videos
