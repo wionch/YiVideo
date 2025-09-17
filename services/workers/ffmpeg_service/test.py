@@ -5,6 +5,9 @@ import time
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 
+# 导入新增的并发解码函数
+from app.modules.video_decoder import decode_video_concurrently
+
 # --- 用户配置 ---
 INPUT_VIDEO = "/app/videos/223.mp4"         # 你的视频文件名
 NUM_SEGMENTS = 10               # 你想分割成的子视频数量
@@ -138,7 +141,7 @@ def print_results(results):
     """格式化并打印分析结果表格"""
     print("\n--- 步骤 3: 分析结果如下 ---")
     print("-" * 100)
-    header = f"{'文件名':<20} | {'期望开始时间 (s)':<20} | {'实际开始时间 (s)':<20} | {'偏差 (s)':<15} | {'视频帧数':<10}"
+    header = f"{ '文件名':<20} | { '期望开始时间 (s)':<20} | { '实际开始时间 (s)':<20} | { '偏差 (s)':<15} | { '视频帧数':<10}"
     print(header)
     print("-" * 100)
     for res in results:
@@ -196,5 +199,63 @@ def main():
     print(f"准备阶段 [获取信息] 耗时: {prep_time:.4f} 秒")
     print(f"总计执行时间        耗时: {total_end_time - total_start_time:.4f} 秒")
 
+# --- 新增：并发解码函数的测试 ---
+def test_concurrent_decoder():
+    """
+    用于测试新增的 decode_video_concurrently 函数。
+    """
+    print("\n" + "="*80)
+    print("###   开始测试新的并发解码函数 (decode_video_concurrently)   ###")
+    print("="*80 + "\n")
+
+    # --- 测试配置 ---
+    test_video_path = "/app/videos/777.mp4"
+    test_output_dir = "/app/services/workers/ffmpeg_service/tmp/concurrent_decode_output"
+    test_num_processes = 10
+    # 可选：设置裁剪区域 [x1, y1, x2, y2] or None
+    # 例如，从左上角(100, 50)裁剪一个 640x360 的区域
+    # crop_x2 = 100 + 640
+    # crop_y2 = 50 + 360
+    # test_crop_area = [100, 50, crop_x2, crop_y2]
+    test_crop_area = [0, 940, 1920, 1010]
+    # ---
+
+    if not os.path.exists(test_video_path):
+        print(f"错误: 测试视频 '{test_video_path}' 不存在，测试终止。")
+        return
+
+    print(f"测试视频: {test_video_path}")
+    print(f"输出目录: {test_output_dir}")
+    print(f"并发进程数: {test_num_processes}")
+    print(f"裁剪区域: {'无' if test_crop_area is None else test_crop_area}")
+    print("-" * 80)
+
+    # 调用新函数
+    result = decode_video_concurrently(
+        video_path=test_video_path,
+        output_dir=test_output_dir,
+        num_processes=test_num_processes,
+        crop_area=test_crop_area
+    )
+
+    print("\n--- 测试完成 ---")
+    print(f"函数返回状态: {'成功' if result['status'] else '失败'}")
+    print(f"返回消息: {result['msg']}")
+    
+    # 检查输出目录和 task.json 是否生成
+    task_json_path = os.path.join(test_output_dir, "task.json")
+    if os.path.exists(task_json_path):
+        print(f"报告文件已生成: {task_json_path}")
+        # 可以在这里添加更多对json内容的验证
+    else:
+        print(f"错误: 未找到预期的报告文件 {task_json_path}")
+
+    print("\n" + "="*80)
+    print("###   并发解码函数测试结束   ###")
+    print("="*80 + "\n")
+
+
 if __name__ == "__main__":
-    main()
+    # 您可以在这里选择要运行的测试
+    # main()  # 运行旧的分割分析功能
+    test_concurrent_decoder() # 运行新的并发解码功能

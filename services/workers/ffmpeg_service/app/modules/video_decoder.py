@@ -8,8 +8,12 @@ import re
 import shutil
 import time
 import multiprocessing
+import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# 配置日志记录
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_video_info(video_path: str) -> dict:
     """
@@ -397,3 +401,203 @@ def split_video_by_gpu(video_path: str, output_dir: str, num_splits: int = 10, t
 
     # 按路径排序后返回成功分割的列表
     return sorted(successful_splits, key=lambda x: x['path'])
+
+# --- 新增并发解码函数 ---
+
+def _decode_concurrently_worker(args):
+    """
+    为 decode_video_concurrently 解码单个视频文件到帧图片的工作进程函数。
+    此函数必须在模块顶层定义，以便多进程可以序列化它。
+    支持裁剪。
+
+    :param args: 一个元组，包含 (video_path, output_dir, start_frame, crop_filter, process_index)。
+    :return: 一个包含解码结果和性能数据的字典。
+    """
+    video_path, output_dir, start_frame, crop_filter, process_index = args
+    start_time = time.perf_counter()
+    
+    # 直接将帧输出到最终的 frames 目录
+    frames_dir = os.path.join(output_dir, 'frames')
+    output_pattern = os.path.join(frames_dir, '%08d.jpg')
+    
+    # 构建 ffmpeg 命令
+    command = [
+        'ffmpeg',
+        '-hide_banner',
+        '-hwaccel', 'cuda',
+        '-c:v', 'h264_cuvid',  # <-- [修复] 明确指定CUDA解码器
+        '-i', video_path,
+        '-start_number', str(start_frame),
+        '-q:v', '2',  # 使用 -q:v 2 (或 -qscale:v 2) 来保证高质量JPG输出
+    ]
+
+    # 如果提供了裁剪过滤器，则添加到命令中
+    if crop_filter:
+        command.extend(['-vf', crop_filter])
+
+    command.extend(['-f', 'image2', output_pattern])
+    
+    success = False
+    error_message = ""
+    try:
+        # 执行解码命令，设置超时，并捕获输出
+        # 使用 text=True 和正确的编码来避免解码错误
+        subprocess.run(command, capture_output=True, text=True, check=True, timeout=300, encoding='utf-8', errors='ignore')
+        success = True
+    except subprocess.CalledProcessError as e:
+        # 如果 ffmpeg 返回非零退出码
+        error_message = e.stderr.strip()
+    except Exception as e:
+        # 捕获其他可能的异常，如超时
+        error_message = str(e)
+        
+    end_time = time.perf_counter()
+    duration = end_time - start_time
+    
+    # 返回该进程的执行结果
+    return {
+        'process_index': process_index,
+        'video_path': os.path.basename(video_path),
+        'duration': duration,
+        'success': success,
+        'error': error_message
+    }
+
+def decode_video_concurrently(video_path: str, output_dir: str, num_processes: int = 10, crop_area: list = None):
+    """
+    将指定视频分割并进行多进程并发解码, 保存相应的视频帧截图。
+
+    功能流程:
+    1. 获取视频信息 (时长、总帧数)。
+    2. 将视频快速分割成指定数量的子视频片段。
+    3. 多进程并发解码子视频，支持对帧进行区域裁剪。
+    4. 保存视频信息和任务执行数据到 task.json。
+    5. 在 `output_dir` 下创建 `frames` (保存图片) 和 `segments` (保存子视频) 目录。
+
+    :param video_path: [str] 需要解码的视频文件路径; 必填项。
+    :param output_dir: [str] 保存解码结果的目录; 必填项。
+    :param num_processes: [int] 并发解码的进程数量, 也是视频分割的数量; 默认: 10。
+    :param crop_area: [list] 视频帧截取的区域数据. 默认: 空; 格式: [x1, y1, x2, y2]。
+    :return: [dict] 任务信息, 格式: {"status": bool, "msg": str}。
+    """
+    total_start_time = time.time()
+    logging.info(f"开始视频并发解码任务: {video_path}")
+    num_processes = min(10, num_processes)
+    
+    # 1. 准备目录
+    frames_dir = os.path.join(output_dir, "frames")
+    segments_dir = os.path.join(output_dir, "segments")
+    # 清理可能存在的旧文件
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(frames_dir)
+    os.makedirs(segments_dir)
+    logging.info(f"输出目录已创建并清理: {output_dir}")
+
+    task_data = {
+        "video_path": video_path,
+        "output_dir": output_dir,
+        "num_processes": num_processes,
+        "crop_area": crop_area,
+        "decoding_stats": [],
+    }
+
+    # 2. 获取视频信息
+    logging.info("正在获取视频信息...")
+    video_info = get_video_info(video_path)
+    if not video_info or not video_info.get('duration') or not video_info.get('frame_count'):
+        msg = "获取视频信息失败，任务终止。"
+        logging.error(msg)
+        return {"status": False, "msg": msg}
+    
+    task_data.update({
+        'total_frames': video_info['frame_count'],
+        'total_duration': video_info['duration']
+    })
+    logging.info(f"视频信息获取成功: 总时长={task_data['total_duration']:.2f}s, 总帧数={task_data['total_frames']}")
+
+    # 3. 快速视频分割
+    logging.info(f"正在将视频快速分割成 {num_processes} 段...")
+    split_start_time = time.time()
+    
+    # 使用项目内已有的 split_video_fast 函数进行分割
+    segments = split_video_fast(video_path, segments_dir, num_processes)
+    
+    if not segments:
+        msg = "视频分割失败。"
+        logging.error(msg)
+        return {"status": False, "msg": msg}
+
+    split_duration = time.time() - split_start_time
+    task_data['split_duration'] = split_duration
+    logging.info(f"视频分割成功，耗时: {split_duration:.2f} 秒，生成 {len(segments)} 个片段。")
+
+    # 4. 并发获取各片段帧数以计算偏移量
+    logging.info("正在并发获取所有子视频的帧数信息...")
+    with ThreadPoolExecutor() as executor:
+        future_to_path = {executor.submit(get_video_info, path): path for path in segments}
+        info_map = {}
+        for future in as_completed(future_to_path):
+            path = future_to_path[future]
+            try:
+                info = future.result()
+                info_map[path] = info['frame_count'] if info else 0
+            except Exception as e:
+                logging.warning(f"获取片段 '{os.path.basename(path)}' 信息时出错: {e}")
+                info_map[path] = 0
+    
+    # 保证分段信息与分段文件列表的顺序一致
+    sorted_infos = [(path, info_map.get(path, 0)) for path in segments]
+
+    # 5. 准备并发解码任务
+    crop_filter = None
+    if crop_area and len(crop_area) == 4:
+        x1, y1, x2, y2 = crop_area
+        width = x2 - x1
+        height = y2 - y1
+        crop_filter = f"crop={width}:{height}:{x1}:{y1}"
+        logging.info(f"将应用裁剪区域: {crop_filter}")
+
+    tasks = []
+    current_frame_start = 1  # 帧编号从 1 开始
+    for i, (path, frame_count) in enumerate(sorted_infos):
+        # 如果一个片段的帧数为0，则跳过，不为其创建解码任务
+        if frame_count > 0:
+            tasks.append((path, output_dir, current_frame_start, crop_filter, i + 1))
+            current_frame_start += frame_count
+
+    # 6. 执行并发解码
+    logging.info(f"准备就绪，开始使用 {len(tasks)} 个进程进行并发解码...")
+    decoding_start_time = time.time()
+    
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        results = pool.map(_decode_concurrently_worker, tasks)
+
+    decoding_duration = time.time() - decoding_start_time
+    task_data['decoding_duration'] = decoding_duration
+    task_data['decoding_stats'] = results
+    logging.info(f"所有解码任务完成，总耗时: {decoding_duration:.2f} 秒")
+
+    # 7. 保存任务信息
+    total_task_duration = time.time() - total_start_time
+    task_data['total_task_duration'] = total_task_duration
+    
+    task_json_path = os.path.join(output_dir, "task.json")
+    try:
+        with open(task_json_path, 'w', encoding='utf-8') as f:
+            json.dump(task_data, f, ensure_ascii=False, indent=4)
+        logging.info(f"任务信息已保存到: {task_json_path}")
+    except IOError as e:
+        msg = f"保存 task.json 失败: {e}"
+        logging.error(msg)
+        return {"status": False, "msg": msg}
+
+    # 检查是否有失败的解码任务
+    if any(not r['success'] for r in results):
+        msg = "一个或多个解码任务失败，请检查日志和 task.json 获取详细信息。"
+        logging.warning(msg)
+        return {"status": False, "msg": msg}
+
+    msg = f"视频并发解码任务成功完成。任务耗时: {total_task_duration}"
+    logging.info(msg)
+    return {"status": True, "msg": msg}
