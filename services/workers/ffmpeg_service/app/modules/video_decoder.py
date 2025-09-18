@@ -9,6 +9,9 @@ import shutil
 import time
 import multiprocessing
 import logging
+import numpy as np
+import queue
+import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -127,7 +130,7 @@ def split_video_fast(video_path: str, output_dir: str, num_splits: int) -> list:
         return generated_files
     except subprocess.CalledProcessError as e:
         # 如果 ffmpeg 执行失败
-        print(f"""错误：ffmpeg 快速分割失败。\nFFmpeg Stderr: {e.stderr.strip()} """ )
+        print(f"\"错误：ffmpeg 快速分割失败。\nFFmpeg Stderr: {e.stderr.strip()} ")
         return []
     except FileNotFoundError:
         # 如果找不到 ffmpeg 命令
@@ -257,7 +260,7 @@ def decode_videos_to_frames_concurrently(video_paths: list, output_dir: str, pro
     pool.close()  # 关闭进程池，不再接受新任务
     pool.join()   # 等待所有子进程退出
     
-    total_end_time = time.perf_counter()
+    total_end_time = time.perf_counter()  # 记录结束时间
     total_duration = total_end_time - total_start_time
 
     # 5. 统计最终结果
@@ -270,7 +273,6 @@ def decode_videos_to_frames_concurrently(video_paths: list, output_dir: str, pro
         'total_time': total_duration,  # 解码总耗时
         'total_frames_in_dir': total_frames_in_dir  # 最终在目录中的总帧数
     }
-
 
 def run_ffmpeg_command(command: list):
     """
@@ -601,3 +603,74 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
     msg = f"视频并发解码任务成功完成。任务耗时: {total_task_duration}"
     logging.info(msg)
     return {"status": True, "msg": msg}
+
+def extract_random_frames(video_path: str, num_frames: int, output_dir: str) -> list:
+    """
+    (高效版) 使用 ffmpeg 'select' 滤镜从视频中随机抽取指定数量的帧。
+
+    该函数通过单次解码来高效地提取所有指定帧，避免了为每一帧启动一个新进程，
+    极大地提高了处理大批量帧时的性能和稳定性。
+
+    :param video_path: [str] 视频文件的路径。
+    :param num_frames: [int] 需要抽取的视频帧数量。
+    :param output_dir: [str] 保存提取出的帧图片的目录。
+    :return: [list] 一个包含所有成功提取的图片绝对路径的列表。
+    """
+    logging.info(f"开始从视频 '{video_path}' 中高效随机抽取 {num_frames} 帧 (select模式)...")
+
+    # 1. 获取视频总帧数
+    video_info = get_video_info(video_path)
+    if not video_info or video_info.get('frame_count', 0) == 0:
+        logging.error(f"无法获取视频 '{video_path}' 的总帧数信息，抽帧失败。")
+        return []
+
+    total_frames = video_info['frame_count']
+    
+    if num_frames > total_frames:
+        logging.warning(f"请求抽取的帧数 ({num_frames}) 大于视频总帧数 ({total_frames})。将抽取所有帧。")
+        num_frames = total_frames
+
+    if num_frames == 0:
+        logging.warning("计算出的抽帧数为 0，不执行抽帧。")
+        return []
+
+    # 2. 准备输出目录
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir)
+    logging.info(f"抽帧输出目录已创建: {output_dir}")
+
+    # 3. 计算均匀分布的帧索引
+    frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+    
+    # 4. 构建高效的 FFmpeg 'select' 滤镜命令
+    select_filter = "select='" + "+".join([f"eq(n,{i})" for i in frame_indices]) + "'"
+    
+    output_pattern = os.path.join(output_dir, "frame_%04d.jpg")
+    
+    command = [
+        'ffmpeg',
+        '-hide_banner',
+        '-i', video_path,
+        '-vf', select_filter,
+        '-vsync', 'vfr',
+        '-q:v', '2',
+        '-y',
+        output_pattern
+    ]
+    
+    logging.info("准备执行单次 FFmpeg 命令进行批量抽帧...")
+
+    # 5. 执行单个 FFmpeg 命令
+    success, output = run_ffmpeg_command(command)
+
+    if not success:
+        logging.error(f"批量抽帧失败。FFmpeg 输出:\n{output}")
+        return []
+
+    # 6. 收集输出文件并返回
+    successful_frames = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.jpg')])
+    
+    logging.info(f"抽帧任务完成，成功提取 {len(successful_frames)} / {num_frames} 帧。")
+
+    return successful_frames

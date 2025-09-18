@@ -6,7 +6,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 
 # 导入新增的并发解码函数
-from app.modules.video_decoder import decode_video_concurrently
+from app.modules.video_decoder import decode_video_concurrently, extract_random_frames, extract_random_frames_select
 
 # --- 用户配置 ---
 INPUT_VIDEO = "/app/videos/223.mp4"         # 你的视频文件名
@@ -254,8 +254,134 @@ def test_concurrent_decoder():
     print("###   并发解码函数测试结束   ###")
     print("="*80 + "\n")
 
+def test_extract_random_frames():
+    """
+    测试 extract_random_frames 函数。
+    """
+    print("\n" + "="*80)
+    print("###   开始测试随机抽帧函数 (extract_random_frames)   ###")
+    print("="*80 + "\n")
+
+    # --- 测试配置 ---
+    video_path = "/app/videos/777.mp4" # 使用容器内路径
+    output_dir = "/app/tmp/random_frames_test" # 使用容器内路径
+    num_frames = 300
+    threads = 30 # 设置并发线程数
+    # --------------------
+
+    if not os.path.exists(video_path):
+        print(f"\n错误：测试视频文件未找到: {video_path}")
+        print("请确保测试视频存在于容器内的 /app/videos/ 目录下。")
+        return
+
+    print(f"视频路径: {video_path}")
+    print(f"输出目录: {output_dir}")
+    print(f"抽帧数量: {num_frames}")
+    print(f"并发线程数: {threads}")
+    print("-" * 80)
+
+    # 调用函数
+    extracted_files = extract_random_frames(
+        video_path=video_path, 
+        num_frames=num_frames, 
+        output_dir=output_dir,
+        threads=threads
+    )
+
+    # 验证结果
+    print(f"\n--- 测试结果 ---")
+    print(f"函数返回了 {len(extracted_files)} 个文件路径。")
+    
+    if not extracted_files:
+        print("测试失败：函数没有返回任何文件。")
+        return
+
+    # 检查输出目录中的文件
+    try:
+        files_in_dir = os.listdir(output_dir)
+        print(f"在输出目录中找到了 {len(files_in_dir)} 个文件。")
+        
+        # 断言：返回的列表长度应与目录中的文件数一致
+        assert len(extracted_files) == len(files_in_dir), "返回的文件列表数量与目录中的文件数不匹配！"
+        
+        # 断言：返回的文件列表不应为空
+        assert len(extracted_files) > 0, "没有成功提取任何帧。"
+
+        print(f"成功提取的帧: {len(extracted_files)} / {num_frames}")
+        print("\n--- 随机抽帧功能测试通过 ---")
+
+    except FileNotFoundError:
+        print(f"错误: 输出目录未找到: {output_dir}")
+        print("测试失败。")
+    
+    print("\n" + "="*80)
+    print("###   随机抽帧函数测试结束   ###")
+    print("="*80 + "\n")
+
+def test_extract_random_frames_select():
+    """
+    测试 extract_random_frames_select 函数 (高效select模式)。
+    """
+    print("\n" + "="*80)
+    print("###   开始测试随机抽帧函数 (高效select模式)   ###")
+    print("="*80 + "\n")
+
+    # --- 测试配置 ---
+    video_path = "/app/videos/777.mp4" # 使用容器内路径
+    output_dir = "/app/tmp/random_frames_select_test" # 使用新的测试目录
+    num_frames = 300
+    # --------------------
+
+    if not os.path.exists(video_path):
+        print(f"\n错误：测试视频文件未找到: {video_path}")
+        print("请确保测试视频存在于容器内的 /app/videos/ 目录下。")
+        return
+
+    print(f"视频路径: {video_path}")
+    print(f"输出目录: {output_dir}")
+    print(f"抽帧数量: {num_frames}")
+    print("-" * 80)
+
+    # 调用函数
+    extracted_files = extract_random_frames_select(
+        video_path=video_path, 
+        num_frames=num_frames, 
+        output_dir=output_dir
+    )
+
+    # 验证结果
+    print(f"\n--- 测试结果 ---")
+    print(f"函数返回了 {len(extracted_files)} 个文件路径。")
+    
+    if not extracted_files:
+        print("测试失败：函数没有返回任何文件。")
+        return
+
+    # 检查输出目录中的文件
+    try:
+        files_in_dir = os.listdir(output_dir)
+        print(f"在输出目录中找到了 {len(files_in_dir)} 个文件。")
+        
+        # 断言：返回的列表长度应与目录中的文件数一致
+        assert len(extracted_files) == len(files_in_dir), "返回的文件列表数量与目录中的文件数不匹配！"
+        
+        # 断言：返回的文件列表不应为空
+        assert len(extracted_files) > 0, "没有成功提取任何帧。"
+
+        print(f"成功提取的帧: {len(extracted_files)} / {num_frames}")
+        print("\n--- 高效select模式测试通过 ---")
+
+    except FileNotFoundError:
+        print(f"错误: 输出目录未找到: {output_dir}")
+        print("测试失败。")
+    
+    print("\n" + "="*80)
+    print("###   高效select模式测试结束   ###")
+    print("="*80 + "\n")
 
 if __name__ == "__main__":
     # 您可以在这里选择要运行的测试
     # main()  # 运行旧的分割分析功能
-    test_concurrent_decoder() # 运行新的并发解码功能
+    # test_concurrent_decoder() # 运行新的并发解码功能
+    # test_extract_random_frames() # 运行随机抽帧功能
+    test_extract_random_frames_select() # 运行高效select模式的随机抽帧功能
