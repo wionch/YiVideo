@@ -210,14 +210,14 @@ def test_concurrent_decoder():
 
     # --- 测试配置 ---
     test_video_path = "/app/videos/777.mp4"
-    test_output_dir = "/app/services/workers/ffmpeg_service/tmp/concurrent_decode_output"
+    test_output_dir = "/app/tmp/ffmpeg_service/concurrent_decode_output"
     test_num_processes = 10
     # 可选：设置裁剪区域 [x1, y1, x2, y2] or None
     # 例如，从左上角(100, 50)裁剪一个 640x360 的区域
     # crop_x2 = 100 + 640
     # crop_y2 = 50 + 360
     # test_crop_area = [100, 50, crop_x2, crop_y2]
-    test_crop_area = [0, 940, 1920, 1010]
+    test_crop_area = [0, 940, 1280, 1010]
     # ---
 
     if not os.path.exists(test_video_path):

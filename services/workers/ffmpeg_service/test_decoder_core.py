@@ -17,8 +17,8 @@ def get_segment_frame_count(video_path: str) -> int:
 if __name__ == "__main__":
     # --- 配置 ---
     video_path = '/app/videos/777.mp4'
-    split_output_dir = '/app/services/workers/ffmpeg_service/tmp_output'
-    frames_output_dir = '/app/services/workers/ffmpeg_service/tmp/frames' # 新增：帧图片输出目录
+    split_output_dir = '/app/tmp/ffmpeg_service/tmp_output'
+    frames_output_dir = '/app/tmp/ffmpeg_service/frames' # 新增：帧图片输出目录
     num_splits = 10
     # ---
 
