@@ -7,6 +7,32 @@ services:
     ports:
       - "6379:6379"
 
+  # --- API Gateway (The Brain) ---
+  api_gateway:
+    container_name: api_gateway
+    build:
+      context: .
+      dockerfile: ./services/api_gateway/Dockerfile
+    ports:
+      - "8788:80" # Map host port 8788 to container port 80
+    volumes:
+      - ./services:/app/services
+      - ./videos:/app/videos
+      - ./locks:/app/locks
+      - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
+      - ./config.yml:/app/config.yml
+      - ~/.ssh:/root/.ssh
+      - ~/.gemini:/root/.gemini
+    restart: always
+    user: "0:0"
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    depends_on:
+      - redis
+
   # --- AI Worker Services ---
 
   ffmpeg_service:
@@ -19,13 +45,16 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
-    command: ["python", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "-l", "info", "-Q", "ffmpeg_queue"]
+    user: "0:0"
     entrypoint: ""
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "ffmpeg_queue"]
     environment:
+      - PYTHONPATH=/app
       - NVIDIA_VISIBLE_DEVICES=all
     deploy:
       resources:
@@ -47,12 +76,16 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
+    user: "0:0"
+    entrypoint: ""
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "paddleocr_queue"]
     environment:
+      - PYTHONPATH=/app
       - NVIDIA_VISIBLE_DEVICES=all
     deploy:
       resources:
@@ -74,11 +107,16 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: on-failure
+    user: "0:0"
+    entrypoint: ""
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "inpainting_queue"]
+    environment:
+      - PYTHONPATH=/app
     depends_on:
       - redis
 
@@ -89,14 +127,43 @@ services:
       context: .
       dockerfile: ./services/workers/whisperx_service/Dockerfile
     volumes:
+      - ./services:/app/services
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: on-failure
+    user: "0:0"
+    entrypoint: ""
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "whisperx_queue"]
+    environment:
+      - PYTHONPATH=/app
+    depends_on:
+      - redis
+
+  llm_service:
+    container_name: llm_service
+    build:
+      context: .
+      dockerfile: ./services/workers/llm_service/Dockerfile
+    volumes:
+      - ./services:/app/services
+      - ./videos:/app/videos
+      - ./locks:/app/locks
+      - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
+      - ./config.yml:/app/config.yml
+      - ~/.ssh:/root/.ssh
+      - ~/.gemini:/root/.gemini
+    restart: always
+    user: "0:0"
+    entrypoint: ""
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "llm_queue"]
+    environment:
+      - PYTHONPATH=/app
     depends_on:
       - redis
 
@@ -110,11 +177,16 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: on-failure
+    user: "0:0"
+    entrypoint: ""
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "indextts_queue"]
+    environment:
+      - PYTHONPATH=/app
     depends_on:
       - redis
 
@@ -128,10 +200,15 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
+      - ./share:/share  # <--- ADDED
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: on-failure
+    user: "0:0"
+    entrypoint: ""
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "gptsovits_queue"]
+    environment:
+      - PYTHONPATH=/app
     depends_on:
       - redis

@@ -1,1 +1,14 @@
-whisperx
+celery
+redis
+pydantic
+
+# Core whisperx dependency
+git+https://github.com/m-bain/whisperx.git
+
+# PyTorch for GPU support (ensure compatibility with your CUDA version)
+# Note: These are often large and best handled in the Dockerfile build process
+# torch==2.1.0
+# torchaudio==2.1.0
+
+# Faster whisper backend
+# faster-whisper

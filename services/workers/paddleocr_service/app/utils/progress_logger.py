@@ -101,14 +101,15 @@ class ProgressBar:
             if extra_parts:
                 progress_info += f" | {' '.join(extra_parts)}"
         
-        # 输出进度条（会覆盖上一行）
-        print(progress_info, end='', flush=True)
+        # [FIX] 输出进度条到 stderr
+        print(progress_info, end='', flush=True, file=sys.stderr)
         
         # 如果完成，换行
         if self.current >= self.total:
             elapsed = time.time() - self.start_time
             final_rate = self.current / elapsed if elapsed > 0 else 0
-            print(f"\n✅ {self.task_name}完成: {self.current}项，耗时: {self._format_time(elapsed)}, 平均速率: {final_rate:.1f}/s")
+            # [FIX] 输出完成信息到 stderr
+            print(f"\n✅ {self.task_name}完成: {self.current}项，耗时: {self._format_time(elapsed)}，平均速率: {final_rate:.1f}/s", file=sys.stderr)
     
     def _format_time(self, seconds: float) -> str:
         """格式化时间显示"""
@@ -130,7 +131,8 @@ class ProgressBar:
                 self.current = self.total
             self._display()
             if message:
-                print(f"\n{message}")
+                # [FIX] 输出结束信息到 stderr
+                print(f"\n{message}", file=sys.stderr)
 
 class MultiStageProgressLogger:
     """
@@ -147,7 +149,8 @@ class MultiStageProgressLogger:
         progress_bar = ProgressBar(total, stage_name, **kwargs)
         self.stages[stage_name] = progress_bar
         self.current_stage = stage_name
-        print(f"\n🚀 开始阶段: {stage_name} (总计: {total}项)")
+        # [FIX] 输出阶段开始信息到 stderr
+        print(f"\n🚀 开始阶段: {stage_name} (总计: {total}项)", file=sys.stderr)
         return progress_bar
     
     def get_stage(self, stage_name: str) -> Optional[ProgressBar]:
@@ -161,12 +164,13 @@ class MultiStageProgressLogger:
     
     def summary(self):
         """显示所有阶段的总结"""
-        print("\n📊 处理总结:")
+        # [FIX] 输出总结信息到 stderr
+        print("\n📊 处理总结:", file=sys.stderr)
         for stage_name, progress_bar in self.stages.items():
             elapsed = time.time() - progress_bar.start_time
             rate = progress_bar.current / elapsed if elapsed > 0 else 0
             print(f"  - {stage_name}: {progress_bar.current}/{progress_bar.total} "
-                  f"(耗时: {progress_bar._format_time(elapsed)}, 速率: {rate:.1f}/s)")
+                  f"(耗时: {progress_bar._format_time(elapsed)}, 速率: {rate:.1f}/s)", file=sys.stderr)
 
 # 全局多阶段日志管理器实例
 global_progress_logger = MultiStageProgressLogger()
@@ -180,6 +184,7 @@ def create_progress_bar(total: int, task_name: str = "处理中", **kwargs) -> P
     """创建独立的进度条"""
     return ProgressBar(total, task_name, **kwargs)
 
+# 便捷函数，在 area_detector.py 中被调用
 def create_stage_progress(stage_name: str, total: int, **kwargs) -> ProgressBar:
     """创建阶段进度条"""
     return global_progress_logger.create_stage(stage_name, total, **kwargs)

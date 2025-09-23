@@ -20,7 +20,11 @@
       "WebFetch(domain:pyimagesearch.com)",
       "Bash(find:*)",
       "Bash(cp:*)",
-      "WebFetch(domain:www.paddlepaddle.org.cn)"
+      "WebFetch(domain:www.paddlepaddle.org.cn)",
+      "Bash(for service in ffmpeg llm whisperx paddleocr)",
+      "Bash(do echo \"=== $service_service ===\")",
+      "Bash(grep:*)",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

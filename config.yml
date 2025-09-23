@@ -2,13 +2,31 @@
 # -----------------------------------
 # 已移除无效参数，修正配置问题，保留所有实际使用的参数
 
-# 1. 解码器模块配置
+# 0. 系统核心配置 (新增)
+core:
+  # 工作流状态记录在Redis中的过期时间（天）
+  workflow_ttl_days: 7
+
+# 1. Redis 配置 (新增)
+redis:
+  host: 'redis' # Docker Compose中的服务名
+  port: 6379
+  # 用于Celery Broker
+  db_broker: 0
+  # 用于Celery Backend
+  db_backend: 1
+  # 用于分布式锁
+  db_locks: 2
+  # 用于工作流状态存储
+  db_state_store: 3
+
+# 2. 解码器模块配置
 decoder:
   # GPU解码时，一次性送入显存的帧数。更大的值可以加快解码速度，但会增加显存占用。
   # 建议值: 16, 32, 64
   batch_size: 32
 
-# 2. 字幕区域检测模块配置
+# 3. 字幕区域检测模块配置
 area_detector:
   # 为了确定字幕区域，从整个视频中均匀采样的帧数。值越大，区域定位越准，但检测耗时越长。
   # 建议值: 100 ~ 500
@@ -23,7 +41,7 @@ area_detector:
   # 建议值: 5-10 (精确字幕), 10-15 (一般场景), 15-30 (有特效字幕)
   y_padding: 10
 
-# 3. 关键帧检测模块配置
+# 4. 关键帧检测模块配置
 keyframe_detector:
   # 感知哈希(dHash)的大小。更高的值可以更精确地捕捉图像内容的细节，但也可能对微小噪点更敏感。
   # 推荐值: 8, 16
@@ -45,7 +63,7 @@ keyframe_detector:
   # 建议值: 150-300像素
   min_focus_width: 200
 
-# 4. OCR识别模块配置
+# 5. OCR识别模块配置
 ocr:
   # OCR语言设置
   lang: 'en' # 英文en 中文ch
@@ -105,13 +123,13 @@ ocr:
     # 字幕场景优化设置
     subtitle_optimized: true
 
-# 5. 后处理器模块配置
+# 6. 后处理器模块配置
 postprocessor:
   # 一条字幕被认为是有效的最小持续时间（单位：秒）。用于过滤掉因检测错误而产生的快速闪现的无效字幕。
   # 建议值: 0.1 ~ 0.5
   min_duration_seconds: 0.2
 
-# 6. 流水线控制
+# 7. 流水线控制
 pipeline:
   # true: 只处理内容变化的关键帧 (推荐，性能更好)。
   # false: 处理视频的每一帧。速度极慢，但能捕捉所有微小变化。
@@ -128,3 +146,34 @@ pipeline:
   # "memory": 帧图像缓存在内存中。速度快，内存占用高。
   # "pic": 帧图像保存为临时图片文件。内存占用低，磁盘I/O开销大。
   frame_cache_strategy: "pic"
+
+# 8. LLM 服务配置
+llm_service:
+  # 如果工作流中未指定，则使用此默认提供商
+  default_provider: gemini
+  # 各个大模型提供商的配置
+  providers:
+    gemini:
+      # 在此处填入你的Gemini API Key
+      api_key: ""
+      # Gemini Pro 模型的API Endpoint
+      api_base_url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    deepseek:
+      # 在此处填入你的DeepSeek API Key
+      api_key: ""
+      # DeepSeek 模型的API Endpoint
+      api_base_url: "https://api.deepseek.com/chat/completions"
+
+# 9. WhisperX 服务配置 (新增)
+whisperx_service:
+  # WhisperX ASR 模型设置
+  # 可选: large-v1, large-v2, large-v3, medium, small, base, tiny
+  model_name: "large-v2"
+  # ASR 语言代码。如果设置为null，将自动检测。
+  language: "zh"
+  # 推理设备: "cuda" 或 "cpu"
+  device: "cuda"
+  # 推理精度: "float16", "float32", "int8"
+  compute_type: "float16"
+  # 转录时的批处理大小，根据显存调整
+  batch_size: 4

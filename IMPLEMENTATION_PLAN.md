@@ -1,88 +1,52 @@
-# 实施计划：P模块与F模块集成（代码分析修正版）
+# 实施计划：重构工作流，新增独立图像拼接任务
 
-**目标**: 基于最终版的“异步管道模型”和“分布式GPU锁”设计，重构P模块和F模块，实现包含“抽帧-区域检测-裁剪-OCR”的完整视频处理工作流，并确保过程文件的清理。
+## Stage 1: 创建独立的图像拼接任务
 
----
+**目标**: 创建一个新的Celery任务 `paddleocr.create_stitched_images`，负责将裁剪后的字幕条图像根据配置进行拼接，并生成包含详细元数据的清单文件。
 
-## Stage 1: 搭建基础环境与共享模块
+**可交付文件**:
+- `services/workers/paddleocr_service/app/tasks.py` (新增任务)
 
-**Goal**: 创建实现分布式GPU锁所必需的通用模块，并确认Celery的跨服务任务调用配置。
+**理由**: 按照您的要求，将拼接功能模块化，使其成为工作流中一个独立的、可测试的步骤，提升了架构的清晰度。
 
-**Deliverable Files**: 
-- `services/common/locks.py` (新创建)
-- `services/workers/paddleocr_service/app/celery_app.py` (分析与配置)
-- `services/workers/ffmpeg_service/app/celery_app.py` (分析与配置)
-- `docker-compose.yml` (分析与配置)
+**成功标准**:
+1.  成功在 `tasks.py` 中创建 `create_stitched_images` 任务。
+2.  该任务能够正确读取 `cropped_images/frames` 目录下的图片，按 `concat_batch_size` 配置进行拼接。
+3.  拼接后的图片保存到 `cropped_images/multi_frames` 目录。
+4.  在 `cropped_images` 目录下生成一个 `multi_frames.json` 清单文件，该文件使用我们讨论的详细格式，记录每张拼接图及其子图的详细元数据（帧号、高度、偏移量）。
 
-**Justification**: (对应设计: 分布式GPU锁) 必须先有一个可靠的、可被所有服务共享的锁机制。同时，要确保P模块能成功“发现”并调用F模块的Celery任务。
+**状态**: Complete
 
-**Success Criteria**: 
-- `services/common/locks.py` 文件被创建，并包含我们设计的`@gpu_lock`装饰器。
-- 确认P模块的Celery应用可以导入并调用F模块的Celery任务。
-- 确认`docker-compose.yml`中，`services/common`目录已通过`volumes`正确映射到P模块和F模块的容器中。
+## Stage 2: 重构OCR任务以消费拼接数据
 
-**Status**: Not Started
+**目标**: 修改现有的 `paddleocr.perform_ocr` 任务及其依赖的 `executor_ocr.py`，使其消费上一阶段生成的拼接图和清单文件来完成OCR。
 
----
+**可交付文件**:
+- `services/workers/paddleocr_service/app/tasks.py` (修改 `perform_ocr`)
+- `services/workers/paddleocr_service/app/executor_ocr.py` (重构)
+- `services/workers/paddleocr_service/app/modules/ocr.py` (可能微调)
 
-## Stage 2: 新增并暴露F模块(ffmpeg_service)的Celery任务
+**理由**: 使OCR任务适配新的工作流架构，专注于识别，而将数据准备工作完全交给上游。
 
-**Goal**: 在F模块中，将`video_decoder.py`的强大功能封装成新的Celery任务，以供P模块调用。
+**成功标准**:
+1.  `perform_ocr` 任务现在依赖 `create_stitched_images` 的输出。
+2.  `executor_ocr.py` 被重构，其主要逻辑变为：读取 `multi_frames.json`，遍历拼接图并调用OCR引擎，然后使用清单文件中的元数据进行坐标逆推。
+3.  `executor_ocr.py` 中准备拼接任务的 `_prepare_ocr_tasks` 函数被移除，因为该功能已移至上游任务。
 
-**Deliverable Files**: 
-- `services/workers/ffmpeg_service/app/tasks.py` (diff)
+**状态**: Complete
 
-**Justification**: F模块虽然有能力，但没有提供服务接口。此阶段就是构建这些接口，使其成为一个真正的视频处理微服务。
+## Stage 3: 更新工作流并清理代码
 
-**Success Criteria**: 
-- 在`tasks.py`中创建了两个新的Celery任务：
-  1.  `extract_keyframes`: 包装 `video_decoder.extract_random_frames`，接收视频路径和抽帧数量，应用`@gpu_lock`，返回帧图片路径列表。
-  2.  `crop_subtitle_images`: 包装 `video_decoder.decode_video_concurrently`，接收视频路径、裁剪区域坐标和并发数，应用`@gpu_lock`，返回裁剪后的字幕条图片路径列表。
+**目标**: 将新任务正式整合到默认工作流中，并清理因重构而产生的冗余代码。
 
-**Status**: Not Started
+**可交付文件**:
+- `services/api_gateway/app/main.py` (或定义工作流的文件)
+- `services/workers/paddleocr_service/app/executor_ocr.py` (清理)
 
----
+**理由**: 使新的工作流架构正式生效，并保持代码库的整洁。
 
-## Stage 3: 重构P模块(paddleocr_service)以调用F模块
+**成功标准**:
+1.  在API网关（或工作流定义处）的默认工作流链 `workflow_chain` 中，在 `ffmpeg.crop_subtitle_images` 之后，`paddleocr.perform_ocr` 之前，插入新的 `paddleocr.create_stitched_images` 任务。
+2.  移除 `executor_ocr.py` 中用于处理 `use_image_concat: false` 的旧逻辑分支，因为所有流程现在都将统一使用拼接模式。
 
-**Goal**: 这是本次重构的核心。在P模块中，用对F模块新任务的异步调用，替换掉本地的`GPUDecoder`和`KeyFrameDetector`实现。
-
-**Deliverable Files**: 
-- `services/workers/paddleocr_service/app/logic.py` (diff)
-- `services/workers/paddleocr_service/app/tasks.py` (diff)
-
-**Justification**: 实现P、F模块的职责分离，将视频处理的重担完全交给F模块，P模块专注于OCR和业务逻辑编排。
-
-**Success Criteria**: 
-- 在`logic.py`的`extract_subtitles_from_video`函数中：
-  - **完全移除**对本地`GPUDecoder`和`KeyFrameDetector`的调用。
-  - 逻辑被重构为构建并启动一个Celery `chain`。
-- 在`tasks.py`中创建/修改了Celery任务：
-  - `process_video_workflow` (或修改现有任务): 作为工作流入口，负责调用`logic.py`中的重构后逻辑。
-  - `detect_subtitle_area_callback`: 新的回调任务，接收`extract_keyframes`的结果，调用`SubtitleAreaDetector`，然后**负责删除关键帧图片**。
-  - `perform_ocr_callback`: 新的回调任务，接收`crop_subtitle_images`的结果，调用`MultiProcessOCREngine`，然后**负责删除字幕条图片**。
-  - `postprocess_and_finalize_callback`: 新的回调任务，接收OCR结果，调用`SubtitlePostprocessor`进行合并与格式化，生成文件，并**清理整个工作流目录**。
-
-**Status**: Not Started
-
----
-
-## Stage 4: 端到端验证
-
-**Goal**: 部署并运行整个重构后的工作流，确保所有环节按预期工作，包括功能、性能和资源清理。
-
-**Deliverable Files**: 
-- `test.py` (修改，用于触发新的工作流)
-
-**Justification**: 确保重构没有引入新的bug，并且达到了预期的架构目标。
-
-**Success Criteria**: 
-- 运行一个完整的集成测试，可以成功完成一个视频的处理。
-- 通过日志或文件系统，可以观察到：
-  1. F模块的`extract_keyframes`和`crop_subtitle_images`任务被成功调用。
-  2. P模块的回调任务按顺序执行。
-  3. 关键帧图片和字幕条图片在使用后被成功删除。
-  4. 整个`workflow_id`临时目录在最后被成功删除。
-- 最终的`.srt`和`.json`字幕文件被正确生成。
-
-**Status**: Not Started
+**状态**: Complete

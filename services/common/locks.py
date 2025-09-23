@@ -1,74 +1,83 @@
 # services/common/locks.py
+# -*- coding: utf-8 -*-
+
+"""
+提供基于Redis的分布式锁，用于控制对共享资源（如GPU）的访问。
+"""
+
 import os
-import time
-import errno
+import functools
+import logging
+from redis import Redis
+from celery import Task
 
-class GPULock:
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- Redis 连接 ---
+# 使用环境变量或默认值初始化Redis连接
+# 注意：这里创建了一个全局连接实例。在生产环境中，更健壮的做法是使用连接池
+# 并根据需要获取和释放连接，或者在应用启动时进行初始化。
+REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
+REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
+# 使用一个专门的DB来存储锁，避免与Celery Broker或Backend冲突
+REDIS_LOCK_DB = int(os.environ.get('REDIS_LOCK_DB', 2)) 
+
+try:
+    redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_LOCK_DB, decode_responses=True)
+    redis_client.ping()
+    logging.info(f"成功连接到Redis锁数据库 at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}")
+except Exception as e:
+    logging.error(f"无法连接到Redis at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}. 分布式锁将无法工作. 错误: {e}")
+    redis_client = None
+
+# --- 分布式锁装饰器 ---
+
+def gpu_lock(lock_key: str = "gpu_lock", timeout: int = 600, retry_interval: int = 10):
     """
-    一个简单的、基于文件系统的跨进程 GPU 锁。
-    通过原子性地创建和删除一个锁文件来实现。
-    设计为在 `with` 语句中使用。
+    一个分布式GPU锁装饰器，确保被装饰的Celery任务在同一时间内只有一个实例在运行。
+
+    Args:
+        lock_key (str): 在Redis中用于锁的键。
+        timeout (int): 锁的超时时间（秒），防止任务崩溃导致死锁。
+        retry_interval (int): 当获取锁失败时，任务重试前的等待时间（秒）。
     """
-    def __init__(self, lock_dir='/tmp', lock_name='gpu.lock', timeout=300):
-        """
-        初始化锁。
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self: Task, *args, **kwargs):
+            if not redis_client:
+                logging.error("Redis客户端未初始化，无法获取锁。将直接执行任务，可能导致资源冲突。")
+                return func(self, *args, **kwargs)
 
-        Args:
-            lock_dir (str): 存放锁文件的目录。
-            lock_name (str): 锁文件的名称。
-            timeout (int): 获取锁的超时时间（秒）。
-        """
-        self.lock_path = os.path.join(lock_dir, lock_name)
-        self.timeout = timeout
-        self._lock_fd = None
-        
-        # 确保锁目录存在
-        if not os.path.exists(lock_dir):
             try:
-                os.makedirs(lock_dir)
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise
-
-    def acquire(self):
-        """尝试在超时时间内获取锁。"""
-        start_time = time.time()
-        while time.time() - start_time < self.timeout:
-            try:
-                # O_CREAT: 如果文件不存在则创建
-                # O_EXCL: 如果文件已存在，则失败 (这是原子操作的关键)
-                # O_WRONLY: 以只写模式打开
-                self._lock_fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                # 如果成功获取锁，立即返回
-                print(f"成功获取 GPU 锁: {self.lock_path}")
-                return
-            except OSError as e:
-                if e.errno == errno.EEXIST:
-                    # 文件已存在，意味着锁被其他进程持有
-                    time.sleep(1)
+                # 尝试获取锁 (SETNX)
+                # set(key, value, nx=True, ex=timeout)
+                # nx=True: 只在键不存在时设置
+                # ex=timeout: 设置键的过期时间
+                if redis_client.set(lock_key, "locked", nx=True, ex=timeout):
+                    logging.info(f"任务 {self.name} 成功获取锁 '{lock_key}'。")
+                    try:
+                        # 成功获取锁，执行任务
+                        result = func(self, *args, **kwargs)
+                        return result
+                    finally:
+                        # 任务执行完毕，释放锁
+                        logging.info(f"任务 {self.name} 执行完毕，释放锁 '{lock_key}'。")
+                        redis_client.delete(lock_key)
                 else:
-                    # 其他类型的 OS 错误
-                    raise
-        # 如果循环结束仍未获取锁，则超时
-        raise TimeoutError(f"获取 GPU 锁超时 ({self.timeout}s): {self.lock_path}")
+                    # 未能获取锁，说明有其他任务正在执行
+                    logging.warning(f"任务 {self.name} 获取锁 '{lock_key}' 失败，将在 {retry_interval} 秒后重试。")
+                    # 使用Celery的重试机制
+                    raise self.retry(countdown=retry_interval, exc=Exception("Could not acquire lock."))
+            
+            except Exception as e:
+                # 捕获包括重试异常在内的所有异常
+                logging.error(f"任务 {self.name} 在处理锁时发生异常: {e}")
+                # 如果不是Celery的重试异常，则需要决定是否要重试
+                if not isinstance(e, self.MaxRetriesExceededError):
+                     raise self.retry(countdown=retry_interval, exc=e)
+                else:
+                     raise e
 
-    def release(self):
-        """释放锁。"""
-        if self._lock_fd is not None:
-            try:
-                os.close(self._lock_fd)
-                os.remove(self.lock_path)
-                self._lock_fd = None
-                print(f"成功释放 GPU 锁: {self.lock_path}")
-            except OSError as e:
-                # 如果文件在关闭或删除时出现问题，记录警告
-                print(f"警告: 释放 GPU 锁时发生错误: {e}")
-
-    def __enter__(self):
-        """上下文管理器的进入方法。"""
-        self.acquire()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """上下文管理器的退出方法，确保锁被释放。"""
-        self.release()
+        return wrapper
+    return decorator

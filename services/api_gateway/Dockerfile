@@ -1,15 +1,27 @@
+# services/api_gateway/Dockerfile
 
-# ./services/api_gateway/Dockerfile
-FROM yivideo-base:latest
+# 1. 使用轻量级的官方Python镜像
+FROM python:3.10-slim-buster
 
-COPY requirements.txt .
-# 安装所有依赖, 包括 gunicorn
+# 2. 设置环境变量
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONPATH /app
+
+# 3. 创建并设置工作目录
+WORKDIR /app
+
+# 4. 复制并安装依赖
+# 这一步保持不变，它需要从构建上下文中找到正确的文件
+COPY ./services/api_gateway/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ./app .
+# 5. 复制所有服务代码到工作目录
+# 这将创建 /app/services/api_gateway, /app/services/common 等结构
+COPY ./services /app/services/
 
-# 使用 Gunicorn 启动 4 个 Uvicorn worker 进程
-# -w 4: 指定 4 个 worker 进程 (可根据 CPU 核心数调整)
-# -k uvicorn.workers.UvicornWorker: 指定使用 Uvicorn 作为 worker 类
-# main:app: 指向 main.py 文件中的 app 实例
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 6. 暴露容器的80端口
+EXPOSE 80
+
+# 7. 定义容器启动时执行的命令
+# 使用完整的模块路径来指定FastAPI应用实例
+CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "services.api_gateway.app.main:app", "--bind", "0.0.0.0:80"]

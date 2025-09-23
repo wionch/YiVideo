@@ -124,7 +124,10 @@ class SubtitlePostprocessor:
 
         current_segment = None
         # 遍历所有帧的OCR结果
-        for i, (frame_idx, (text, bbox)) in enumerate(sorted_frames):
+        for i, (frame_idx_str, (text, bbox)) in enumerate(sorted_frames):
+            # [FIX] 将从JSON键转换而来的字符串帧号转换为整数
+            frame_idx = int(frame_idx_str)
+
             # 处理空文本帧
             if not text or not text.strip():
                 # 如果当前有活跃segment，则结束它

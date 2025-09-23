@@ -1,3 +1,6 @@
+# services/api_gateway/requirements.txt
+#
+# api-gateway的最小依赖集
 
 fastapi
 uvicorn

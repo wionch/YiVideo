@@ -11,11 +11,24 @@ import sys
 import gc
 import os
 import av
+import logging
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
 # 导入我们自己的解码器
 from .decoder import GPUDecoder
 from ..utils.progress_logger import create_stage_progress
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Set the multiprocessing start method to 'spawn' to avoid issues with Celery.
+# This must be done at the top level of the module, before any other
+# multiprocessing-related code is executed.
+if __name__ != '__main__':
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass # It's ok if it's already set.
 
 # --- 多进程工作函数 ---
 
@@ -32,7 +45,7 @@ def initialize_worker():
     
     # 设置信号处理，确保子进程能够正确响应终止信号
     def signal_handler(signum, frame):
-        print(f"[PID: {os.getpid()}] 收到信号 {signum}，正在清理资源...")
+        logging.info(f"[PID: {os.getpid()}] 收到信号 {signum}，正在清理资源...")
         try:
             if worker_text_detector:
                 del worker_text_detector
@@ -52,10 +65,10 @@ def initialize_worker():
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
         from utils.config_loader import get_ocr_lang
         lang = get_ocr_lang(default_lang='ch')
-        print(f"[PID: {os.getpid()}] 从配置加载语言设置: {lang}")
+        logging.info(f"[PID: {os.getpid()}] 从配置加载语言设置: {lang}")
     except Exception as e:
         lang = 'ch'  # 后备默认值
-        print(f"[PID: {os.getpid()}] 配置加载失败，使用默认语言: {lang}，错误: {e}")
+        logging.warning(f"[PID: {os.getpid()}] 配置加载失败，使用默认语言: {lang}，错误: {e}")
     
     try:
         # 使用统一的模型配置加载器
@@ -67,23 +80,23 @@ def initialize_worker():
         
         # 获取语言设置
         lang = get_ocr_lang(default_lang='zh')
-        print(f"[PID: {os.getpid()}] 从配置加载语言设置: {lang}")
+        logging.info(f"[PID: {os.getpid()}] 从配置加载语言设置: {lang}")
         
         # 获取统一的模型配置
         det_model = get_detection_model()
         rec_model = get_recognition_model_for_lang(lang)
         models_config = get_ocr_models_config()
         
-        print(f"[PID: {os.getpid()}] 使用模型配置: 检测={det_model}, 识别={rec_model}")
+        logging.info(f"[PID: {os.getpid()}] 使用模型配置: 检测={det_model}, 识别={rec_model}")
         
         # 使用PaddleOCR 3.x的分离模块API - 应用字幕场景优化设置
         worker_text_detector = TextDetection(model_name=det_model)
         worker_text_recognizer = TextRecognition(model_name=rec_model)
         
-        print(f"[PID: {os.getpid()}] TextDetection和TextRecognition模块初始化完成 (语言: {lang})")
+        logging.info(f"[PID: {os.getpid()}] TextDetection和TextRecognition模块初始化完成 (语言: {lang})")
         
     except Exception as e:
-        print(f"[PID: {os.getpid()}] OCR模块初始化失败: {e}")
+        logging.error(f"[PID: {os.getpid()}] OCR模块初始化失败: {e}")
         worker_text_detector = None
         worker_text_recognizer = None
 
@@ -100,10 +113,10 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
     
     if worker_text_detector is None or worker_text_recognizer is None:
         # 如果初始化函数没有被调用（理论上不应该发生），则作为后备。
-        print(f"[PID: {pid}] 警告：OCR模块未初始化，尝试重新初始化...")
+        logging.warning(f"[PID: {pid}] 警告：OCR模块未初始化，尝试重新初始化...")
         initialize_worker()
         if worker_text_detector is None or worker_text_recognizer is None:
-            print(f"[PID: {pid}] OCR模块初始化失败，跳过帧 {frame_index}")
+            logging.error(f"[PID: {pid}] OCR模块初始化失败，跳过帧 {frame_index}")
             return []
 
     try:
@@ -153,7 +166,7 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
                             
                         except Exception as rec_e:
                             # 如果识别失败，仍然保留检测框，但文本为空
-                            print(f"[PID: {pid}] 文本识别失败: {rec_e}")
+                            logging.warning(f"[PID: {pid}] 文本识别失败: {rec_e}")
                             detections_with_text.append((box_np, ""))
                             
                         # 清理文本区域数据
@@ -165,7 +178,6 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
         # 输出处理信息 - 减少日志输出，改用进度条显示
         detection_count = len(detections_with_text)
         text_count = sum(1 for _, text in detections_with_text if len(text.strip()) > 0)
-        # print(f"[PID: {pid}] 帧 {frame_index+1}: 检测到 {detection_count} 个文本框，成功识别 {text_count} 个文本 (总耗时: {process_duration:.4f} 秒)")
         
         # 强制垃圾回收，释放临时变量
         del det_result
@@ -185,9 +197,8 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
         return detections_with_text
         
     except Exception as e:
-        print(f"[PID: {pid}] 处理帧 {frame_index+1} 时发生错误: {e}")
+        logging.error(f"[PID: {pid}] 处理帧 {frame_index+1} 时发生错误: {e}")
         return []
-
 
 class SubtitleAreaDetector:
     """
@@ -206,30 +217,30 @@ class SubtitleAreaDetector:
         default_workers = min(multiprocessing.cpu_count(), 4)
         self.num_workers = area_detector_config.get('num_workers', default_workers)
         
-        print("模块: 字幕区域检测器已加载 (PaddleOCR 3.x API, 已恢复文本长度加权算法)。")
-        print(f"    - [配置] 字幕区域检测器将使用 {self.num_workers} 个工作进程。")
+        logging.info("模块: 字幕区域检测器已加载 (PaddleOCR 3.x API, 已恢复文本长度加权算法)。")
+        logging.info(f"    - [配置] 字幕区域检测器将使用 {self.num_workers} 个工作进程。")
 
     def detect(self, video_path: str, decoder: GPUDecoder) -> Tuple[int, int, int, int]:
         """
         执行字幕区域检测。
         """
-        print("开始智能检测字幕区域...")
+        logging.info("开始智能检测字幕区域...")
         
         frame_samples = self._sample_frames(video_path, decoder)
         if not frame_samples:
             raise RuntimeError("无法从视频中采样到任何帧来进行字幕区域检测。")
         
         video_height, video_width = frame_samples[0].shape[:2]
-        print(f"  - [进度] 已采样 {len(frame_samples)} 帧，视频尺寸: {video_width}x{video_height}")
+        logging.info(f"  - [进度] 已采样 {len(frame_samples)} 帧，视频尺寸: {video_width}x{video_height}")
 
         all_detections = self._detect_text_in_samples(frame_samples)
         if not all_detections:
-            print("  - [警告] 在采样帧中未能检测到任何文本框，无法确定字幕区域，任务退出")
+            logging.warning("  - [警告] 在采样帧中未能检测到任何文本框，无法确定字幕区域，任务退出")
             return None  # 返回 None 表示未检测到字幕区域
-        print(f"  - [进度] 在采样帧中检测到 {len(all_detections)} 个文本片段。")
+        logging.info(f"  - [进度] 在采样帧中检测到 {len(all_detections)} 个文本片段。")
 
         subtitle_area = self._find_stable_area(all_detections, video_width, video_height)
-        print(f"检测完成，最终字幕区域: {subtitle_area}")
+        logging.info(f"检测完成，最终字幕区域: {subtitle_area}")
         
         return subtitle_area
 
@@ -247,7 +258,7 @@ class SubtitleAreaDetector:
             duration = float(stream.duration * stream.time_base)  # 总时长（秒）
             container.close()
         except Exception as e:
-            print(f"警告: 无法获取视频元数据: {e}, 使用估算值")
+            logging.warning(f"警告: 无法获取视频元数据: {e}, 使用估算值")
             duration = 300  # 估算5分钟
             total_frames = 5000
 
@@ -256,16 +267,16 @@ class SubtitleAreaDetector:
         if duration == 0:
             duration = 300
 
-        print(f"  - [信息] 视频时长: {duration:.1f}秒, 总帧数: {total_frames}")
+        logging.info(f"  - [信息] 视频时长: {duration:.1f}秒, 总帧数: {total_frames}")
 
         # 优化策略选择
         if total_frames <= self.sample_count * 2:
             # 短视频：使用传统方法（避免过度seek）
-            print(f"  - [策略] 短视频检测，使用传统采样方法")
+            logging.info(f"  - [策略] 短视频检测，使用传统采样方法")
             return self._sample_frames_traditional(video_path, decoder)
         else:
             # 长视频：使用精准采样（显著提升效率）
-            print(f"  - [策略] 长视频检测，使用精准采样方法")
+            logging.info(f"  - [策略] 长视频检测，使用精准采样方法")
             return self._sample_frames_precise(video_path, decoder, duration)
 
     def _sample_frames_traditional(self, video_path: str, decoder: GPUDecoder) -> List[np.ndarray]:
@@ -334,7 +345,7 @@ class SubtitleAreaDetector:
             
             # 获取视频的时间基准，用于更准确的seek
             time_base = float(stream.time_base)
-            print(f"  - [信息] 视频时间基准: {time_base}, 流时长: {duration:.1f}s")
+            logging.info(f"  - [信息] 视频时间基准: {time_base}, 流时长: {duration:.1f}s")
             
             for i, timestamp in enumerate(target_timestamps):
                 try:
@@ -385,30 +396,30 @@ class SubtitleAreaDetector:
                             # 清理帧数据
                             del frame_np, frame
                         except Exception as convert_e:
-                            print(f"    转换错误 {timestamp:.1f}s: {convert_e}")
+                            logging.warning(f"    转换错误 {timestamp:.1f}s: {convert_e}")
                             failed_count += 1
                     else:
                         failed_count += 1
                         if i < 5:  # 只对前5次失败打印警告，减少日志噪音
-                            print(f"    警告: 时间戳 {timestamp:.1f}s 采样失败 (检查了{frames_checked}帧)")
+                            logging.warning(f"    警告: 时间戳 {timestamp:.1f}s 采样失败 (检查了{frames_checked}帧)")
                         
                 except Exception as e:
                     failed_count += 1
                     if i < 3:  # 只对前3次失败打印详细错误
-                        print(f"    seek错误 {timestamp:.1f}s: {e}")
+                        logging.warning(f"    seek错误 {timestamp:.1f}s: {e}")
                 
                 # 更新进度
                 sampling_progress.update(1, 成功=successful_samples, 失败=failed_count)
                 
                 # 调整提前终止条件，更宽松
                 if i > 100 and successful_samples < i * 0.2:
-                    print(f"  - [终止] 成功率过低 ({successful_samples}/{i+1})，提前终止精准采样")
+                    logging.warning(f"  - [终止] 成功率过低 ({successful_samples}/{i+1})，提前终止精准采样")
                     break
             
             container.close()
             
         except Exception as e:
-            print(f"精准采样过程出错: {e}")
+            logging.error(f"精准采样过程出错: {e}")
             # 回退到传统方法
             sampling_progress.finish("⚠️  精准采样失败，回退到传统方法")
             # 清理已采样的数据，避免内存泄漏
@@ -420,7 +431,7 @@ class SubtitleAreaDetector:
         
         # 降低回退阈值到30%，更宽松的成功标准
         if len(frames) < self.sample_count * 0.3:
-            print(f"  - [回退] 采样成功率过低 ({len(frames)}/{self.sample_count})，使用传统方法")
+            logging.warning(f"  - [回退] 采样成功率过低 ({len(frames)}/{self.sample_count})，使用传统方法")
             # 清理当前采样结果
             frames.clear()
             return self._sample_frames_traditional(video_path, decoder)
@@ -435,16 +446,11 @@ class SubtitleAreaDetector:
         """
         对采样帧进行文本检测和识别 (使用PaddleOCR 3.x API)。
         现在返回检测框和对应的识别文本。
+        
+        解决方案：使用进程上下文替代修改daemon状态，避免序列化问题。
         """
         all_detections = []
         start_time = time.time()
-
-        # 为提高兼容性（尤其是在Windows/macOS上），设置启动方法为'spawn'
-        try:
-            multiprocessing.set_start_method('spawn', force=True)
-        except RuntimeError:
-            # 如果启动方法已经设置，则忽略错误
-            pass
 
         # 使用配置中定义的进程数
         num_processes = self.num_workers
@@ -455,14 +461,14 @@ class SubtitleAreaDetector:
         # 准备任务数据：添加索引以便跟踪处理进度
         indexed_frames = [(i, frame) for i, frame in enumerate(frames)]
         
-        # 方案1：使用 ProcessPoolExecutor 替代 multiprocessing.Pool，提供更好的异常处理
         try:
+            # 方案1：使用独立进程上下文的 ProcessPoolExecutor
             self._process_frames_with_executor(indexed_frames, num_processes, all_detections, start_time, progress_bar)
         except Exception as e:
-            print(f"    - [警告] ProcessPoolExecutor 方式失败: {e}，回退到传统 Pool 方式...")
-            # 方案2：回退到改进的 multiprocessing.Pool
+            logging.warning(f"    - [警告] ProcessPoolExecutor 方式失败: {e}，回退到传统 Pool 方式...")
+            # 方案2：回退到独立进程上下文的 multiprocessing.Pool
             self._process_frames_with_pool(indexed_frames, num_processes, all_detections, start_time, progress_bar)
-        
+
         total_elapsed = time.time() - start_time
         progress_bar.finish(f"✅ 区域检测完成，总耗时: {total_elapsed:.2f}s")
         
@@ -473,15 +479,20 @@ class SubtitleAreaDetector:
         使用 ProcessPoolExecutor 处理帧 - 更好的异常处理和资源管理
         现在处理带有文本内容的棄测结果
         """
-        print("    - [方法] 使用 ProcessPoolExecutor 进行处理")
+        logging.info("    - [方法] 使用 ProcessPoolExecutor 进行处理（独立进程上下文）")
+        
+        # 使用独立的进程上下文，避免影响当前进程的 daemon 状态
+        ctx = multiprocessing.get_context('spawn')
         
         # 总进度条统计变量
         total_detections = 0
         total_recognized_texts = 0
         
+        # 使用独立上下文的 ProcessPoolExecutor
         with ProcessPoolExecutor(
             max_workers=num_processes,
-            initializer=initialize_worker
+            initializer=initialize_worker,
+            mp_context=ctx  # 关键：使用独立的进程上下文
         ) as executor:
             # 提交所有任务
             future_to_index = {}
@@ -514,30 +525,33 @@ class SubtitleAreaDetector:
                 except TimeoutError:
                     frame_index = future_to_index[future]
                     frame_actual_index, _ = indexed_frames[frame_index] 
-                    print(f"    - [警告] 帧 {frame_actual_index+1} 处理超时，跳过")
+                    logging.warning(f"    - [警告] 帧 {frame_actual_index+1} 处理超时，跳过")
                 except Exception as e:
                     frame_index = future_to_index[future]
                     frame_actual_index, _ = indexed_frames[frame_index]
-                    print(f"    - [警告] 帧 {frame_actual_index+1} 处理失败: {e}")
+                    logging.warning(f"    - [警告] 帧 {frame_actual_index+1} 处理失败: {e}")
     
     def _process_frames_with_pool(self, indexed_frames, num_processes, all_detections, start_time, progress_bar):
         """
         使用改进的 multiprocessing.Pool 处理帧 - 回退方案
         现在处理带有文本内容的检测结果
         """
-        print("    - [方法] 使用 multiprocessing.Pool 进行处理")
+        logging.info("    - [方法] 使用 multiprocessing.Pool 进行处理（独立进程上下文）")
+        
+        # 使用独立的进程上下文，避免影响当前进程的 daemon 状态
+        ctx = multiprocessing.get_context('spawn')
         
         pool = None
         try:
-            # 使用手动池管理以便更好地控制资源清理
-            pool = multiprocessing.Pool(
+            # 使用独立上下文创建进程池
+            pool = ctx.Pool(
                 processes=num_processes, 
                 initializer=initialize_worker,
                 maxtasksperchild=50  # 防止内存泄露
             )
             
             # 使用 map 而不是 imap_unordered 来确保所有任务完成
-            print("    - [执行] 开始批处理所有帧...")
+            logging.info("    - [执行] 开始批处理所有帧...")
             results = pool.map(process_frame_worker, indexed_frames)
             
             # 处理结果
@@ -554,19 +568,19 @@ class SubtitleAreaDetector:
                                       检测框=total_detections, 识别文本=total_texts)
                     
         except Exception as e:
-            print(f"    - [错误] 多进程处理期间发生错误: {e}")
+            logging.error(f"    - [错误] 多进程处理期间发生错误: {e}")
             if pool:
-                print("    - [清理] 强制终止进程池...")
+                logging.info("    - [清理] 强制终止进程池...")
                 pool.terminate()
                 pool.join()
             raise
         finally:
             # 确保进程池被正确关闭
             if pool:
-                print("    - [清理] 正常关闭进程池...")
+                logging.info("    - [清理] 正常关闭进程池...")
                 pool.close()
                 pool.join()
-                print("    - [清理] 进程池已关闭")
+                logging.info("    - [清理] 进程池已关闭")
 
     def _find_stable_area(self, detections: List[Tuple[np.ndarray, str]], width: int, height: int) -> Tuple[int, int, int, int]:
         """恢复使用文本长度加权的字幕区域检测算法。"""
@@ -585,7 +599,7 @@ class SubtitleAreaDetector:
         
         if np.sum(y_histogram) == 0:
             # 如果所有检测到的文本都太短, 回退到不加权的方式
-            print("  - [警告] 未发现足够长的文本进行加权，回退到标准区域检测。")
+            logging.warning("  - [警告] 未发现足够长的文本进行加权，回退到标准区域检测。")
             all_boxes = [d[0] for d in detections]
             return self._find_stable_area_no_weight(all_boxes, width, height)
 
