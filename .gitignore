@@ -229,3 +229,5 @@ PaddleOCR/
 videos/
 pipline/
 run_pipeline.py
+.tmp.driveupload/
+.tmp.drivedownload/

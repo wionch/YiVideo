@@ -29,7 +29,9 @@ class SubtitlePostprocessor:
         self.config = config.get('postprocessor', {})
         # 最小字幕持续时间阈值(秒)，过短的字幕将被过滤
         self.min_duration_seconds = self.config.get('min_duration_seconds', 0.2)
-        logging.info("Subtitle Postprocessor loaded (V3 - Multi-Mode).")
+        # [FIX] 将相似度阈值设为可配置，并降低默认值以容忍OCR波动
+        self.similarity_threshold = self.config.get('similarity_threshold', 0.6)
+        logging.info(f"Subtitle Postprocessor loaded (V3 - Multi-Mode). Thresholds: min_duration={self.min_duration_seconds}s, similarity={self.similarity_threshold}")
 
     def format_from_keyframes(self, segments: List[Dict], ocr_results: Dict[int, Tuple[str, Any]], fps: float) -> List[Dict[str, Any]]:
         """
@@ -116,8 +118,8 @@ class SubtitlePostprocessor:
 
         # 1. 从原始逐帧OCR结果构建字幕段
         segments = []
-        # 按帧号排序，确保时间顺序正确
-        sorted_frames = sorted(ocr_results.items())
+        # [BUG FIX] 按帧号的整数值排序，而不是字符串字典序
+        sorted_frames = sorted(ocr_results.items(), key=lambda item: int(item[0]))
         
         if not sorted_frames:
             return []
@@ -146,8 +148,8 @@ class SubtitlePostprocessor:
                 }
             else:
                 # 判断是否应该合并到当前segment
-                # 检查文本相似度（阈值0.8）
-                is_similar_text = self._are_texts_similar(text, current_segment['text'])
+                # [FIX] 使用可配置的相似度阈值
+                is_similar_text = self._are_texts_similar(text, current_segment['text'], self.similarity_threshold)
                 # 检查帧连续性（相邻帧）
                 is_continuous_frame = (frame_idx == current_segment['end_frame'] + 1)
 
@@ -261,8 +263,8 @@ class SubtitlePostprocessor:
         
         # 逐一比较相邻字幕
         for next_sub in subtitles[1:]:
-            # 检查文本相似度（使用0.8阈值）
-            is_similar = self._are_texts_similar(current_sub['text'], next_sub['text'])
+            # [FIX] 使用可配置的相似度阈值
+            is_similar = self._are_texts_similar(current_sub['text'], next_sub['text'], self.similarity_threshold)
             # 检查时间连续性：间隙小于1秒视为连续
             time_gap = next_sub['startTime'] - current_sub['endTime']
             is_continuous = time_gap < 1.0
@@ -283,7 +285,7 @@ class SubtitlePostprocessor:
         merged.append(current_sub)
         return merged
     
-    def _are_texts_similar(self, text1: str, text2: str, threshold: float = 0.8) -> bool:
+    def _are_texts_similar(self, text1: str, text2: str, threshold: float) -> bool:
         """
         比较两个文本的相似度
         
@@ -293,7 +295,7 @@ class SubtitlePostprocessor:
         Args:
             text1: 第一个文本
             text2: 第二个文本  
-            threshold: 相似度阈值，默认0.8（80%相似）
+            threshold: 相似度阈值
             
         Returns:
             bool: 如果相似度超过阈值返回True，否则返回False

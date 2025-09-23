@@ -23,6 +23,18 @@ from services.common.config_loader import CONFIG
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [OCRExecutor] - %(levelname)s - %(message)s')
 
+class NumpyEncoder(json.JSONEncoder):
+    """ 自定义JSON编码器，用于处理Numpy数据类型 """
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(NumpyEncoder, self).default(obj)
+
 def _transform_coordinates(ocr_data: List[Tuple[str, Any]], sub_images_meta: List[Dict[str, Any]]) -> Dict[int, Tuple[str, Any]]:
     """
     将单张拼接图的OCR结果，根据其子图元数据，转换回原始帧的坐标和文本。
@@ -108,7 +120,7 @@ def main():
 
         # 5. 输出最终结果
         string_key_results = {str(k): v for k, v in final_ocr_results.items()}
-        print(json.dumps(string_key_results))
+        print(json.dumps(string_key_results, cls=NumpyEncoder))
 
     except Exception as e:
         logging.error(f"An error occurred during OCR execution: {e}", exc_info=True)
@@ -116,4 +128,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
