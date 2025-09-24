@@ -220,26 +220,24 @@ class SubtitlePostprocessor:
 
     def _format_bbox(self, bbox: Any) -> List[List[int]]:
         """
-        格式化边界框为标准格式
+        [FIXED] 格式化边界框为标准格式
         
-        将输入的边界框转换为标准的四个顶点坐标格式。
-        输入格式通常为 (x1, y1, x2, y2)，输出为 [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+        将输入的边界框（通常是包含多个[x, y]坐标点的列表）转换为标准的整数坐标列表。
         
         Args:
-            bbox: 边界框，通常为(x1, y1, x2, y2)格式
+            bbox: 边界框，格式为 [[x1, y1], [x2, y2], ...]
             
         Returns:
-            List[List[int]]: 标准化的四个顶点坐标列表，顺时针顺序
+            List[List[int]]: 标准化的顶点坐标列表
         """
-        if not bbox:
+        if not bbox or not isinstance(bbox, list):
             return []
         try:
-            # 解析边界框坐标 (左上角x, 左上角y, 右下角x, 右下角y)
-            x1, y1, x2, y2 = bbox
-            # 返回四个顶点坐标：左上、右上、右下、左下（顺时针）
-            return [[int(x1), int(y1)], [int(x2), int(y1)], [int(x2), int(y2)], [int(x1), int(y2)]]
-        except Exception:
-            # 边界框格式异常时返回空列表
+            # 遍历每个点 [x, y]，并确保坐标是整数
+            return [[int(p[0]), int(p[1])] for p in bbox]
+        except (TypeError, IndexError, ValueError) as e:
+            # 如果bbox的结构不是预期的 [[x,y], ...], 记录警告并返回空列表
+            logging.warning(f"Failed to format bbox due to unexpected structure: {bbox}. Error: {e}")
             return []
 
     def _merge_duplicate_subtitles(self, subtitles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -185,20 +185,20 @@ def create_stitched_images(self: Task, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
-        # 1. 获取输入和输出路径
-        prev_stage = workflow_context.stages.get("ffmpeg.crop_subtitle_images")
-        prev_stage_output = prev_stage.output if prev_stage else {}
-        input_dir_str = prev_stage_output.get('cropped_images_path')
-        
-        if not input_dir_str:
-            raise ValueError("在上下文中未找到来自上一阶段的 'cropped_images_path'。")
-        
-        input_dir = Path(input_dir_str)
-        if not input_dir.is_dir():
-            raise FileNotFoundError(f"输入目录不存在: {input_dir}")
+        # 1. 获取输入路径和字幕区域
+        crop_stage = workflow_context.stages.get("ffmpeg.crop_subtitle_images")
+        area_stage = workflow_context.stages.get("paddleocr.detect_subtitle_area")
+
+        input_dir_str = crop_stage.output.get('cropped_images_path') if crop_stage else None
+        subtitle_area = area_stage.output.get('subtitle_area') if area_stage else None
+
+        if not input_dir_str or not Path(input_dir_str).is_dir():
+            raise FileNotFoundError(f"输入目录不存在或无效: {input_dir_str}")
+        if not subtitle_area:
+            raise ValueError("在上下文中未找到来自 'detect_subtitle_area' 阶段的 'subtitle_area'。")
 
         # 输出根目录是输入目录的父目录
-        output_root_dir = input_dir.parent
+        output_root_dir = Path(input_dir_str).parent
 
         # 2. 获取配置
         pipeline_config = CONFIG.get('pipeline', {})
@@ -207,22 +207,23 @@ def create_stitched_images(self: Task, context: dict) -> dict:
 
         logging.info(f"[{stage_name}] 准备通过外部脚本拼接图像...")
         logging.info(f"[{stage_name}]   - 输入目录: {input_dir_str}")
-        logging.info(f"[{stage_name}]   - 输出根目录: {output_root_dir}")
-        logging.info(f"[{stage_name}]   - 并发数: {max_workers}, 批次大小: {batch_size}")
+        logging.info(f"[{stage_name}]   - 字幕区域: {subtitle_area}")
 
         # 3. 调用外部脚本执行拼接
         try:
             executor_script_path = os.path.join(os.path.dirname(__file__), "executor_stitch_images.py")
+            subtitle_area_json = json.dumps(subtitle_area)
+            
             command = [
                 sys.executable,
                 executor_script_path,
-                "--input-dir", str(input_dir),
+                "--input-dir", str(input_dir_str),
                 "--output-root", str(output_root_dir),
                 "--batch-size", str(batch_size),
-                "--workers", str(max_workers)
+                "--workers", str(max_workers),
+                "--subtitle-area-json", subtitle_area_json # [核心修正] 传递字幕区域
             ]
             
-            # 设置一个合理的超时，例如30分钟
             result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
             
             if result.stderr:

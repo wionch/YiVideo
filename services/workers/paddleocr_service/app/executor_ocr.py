@@ -53,12 +53,28 @@ def _transform_coordinates(ocr_data: List[Tuple[str, Any]], sub_images_meta: Lis
         for meta in sub_images_meta:
             if meta['y_offset'] <= center_y < meta['y_offset'] + meta['height']:
                 frame_idx = meta['frame_idx']
+                
+                # [核心修正] 计算反推后的真实坐标
+                # 子图的x偏移（即字幕区域的x1）
+                x_offset = meta.get('x_offset', 0) 
+                # 子图在拼接图中的y偏移
+                y_offset = meta['y_offset']
+                
+                # 创建一个新的box，将坐标转换回去
+                # 新x = 当前x + 字幕区域的x1
+                # 新y = 当前y - 子图在拼接图中的y偏移
+                transformed_box = [[p[0] + x_offset, p[1] - y_offset] for p in box]
+
                 if frame_idx not in transformed_results:
-                    transformed_results[frame_idx] = (text, None)
+                    # 存储包含真实坐标的结果
+                    transformed_results[frame_idx] = (text, transformed_box)
                 else:
                     # 如果一帧内有多行文本，将它们拼接起来
+                    # 注意：这里的坐标合并策略可能需要根据实际需求调整
+                    # 当前简单地使用新识别到的文本和其坐标，覆盖旧的
                     existing_text, _ = transformed_results[frame_idx]
-                    transformed_results[frame_idx] = (existing_text + " " + text, None)
+                    # 拼接文本，但保留新检测到的box作为代表
+                    transformed_results[frame_idx] = (existing_text + " " + text, transformed_box)
                 break
     return transformed_results
 

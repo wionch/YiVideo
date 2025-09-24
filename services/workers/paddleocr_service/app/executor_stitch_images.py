@@ -43,6 +43,7 @@ def _process_batch_for_stitching(batch_info: dict) -> dict | None:
             - batch_index (int): The index of the batch.
             - batch_files (list): A list of image file paths for this batch.
             - output_dir (str): The directory to save the stitched image.
+            - x_offset (int): The horizontal offset (x1) of the subtitle area.
 
     Returns:
         dict | None: A dictionary with metadata for the manifest file, or None on failure.
@@ -50,6 +51,7 @@ def _process_batch_for_stitching(batch_info: dict) -> dict | None:
     batch_index = batch_info['batch_index']
     batch_files = batch_info['batch_files']
     output_dir = Path(batch_info['output_dir'])
+    x_offset = batch_info.get('x_offset', 0) # [核心修正] 获取x_offset
 
     images_to_concat = []
     sub_image_meta = []
@@ -84,7 +86,8 @@ def _process_batch_for_stitching(batch_info: dict) -> dict | None:
             final_sub_images.append({
                 "frame_idx": meta["frame_idx"],
                 "height": height,
-                "y_offset": y_offset
+                "y_offset": y_offset,
+                "x_offset": x_offset  # [核心修正] 将x_offset添加到元数据
             })
             y_offset += height
         
@@ -105,7 +108,7 @@ def _process_batch_for_stitching(batch_info: dict) -> dict | None:
         logging.error(f"[Batch {batch_index}] Unknown error during processing: {e}")
         return None
 
-def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size: int, max_workers: int):
+def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size: int, max_workers: int, subtitle_area_json: str):
     """
     Executes image stitching in parallel using a process pool.
 
@@ -114,6 +117,7 @@ def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size:
         output_root_str (str): Root directory for output. 'multi_frames' and 'multi_frames.json' will be created here.
         batch_size (int): Number of source images per stitched image.
         max_workers (int): Number of concurrent processes.
+        subtitle_area_json (str): JSON string of the subtitle area coordinates.
     """
     start_time = time.time()
 
@@ -121,6 +125,18 @@ def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size:
     output_root = Path(output_root_str)
     output_dir = output_root / "multi_frames"
     output_dir.mkdir(exist_ok=True, parents=True)
+
+    # [核心修正] 解析字幕区域坐标 (兼容列表格式)
+    try:
+        subtitle_area = json.loads(subtitle_area_json)
+        if isinstance(subtitle_area, list) and len(subtitle_area) >= 1:
+            x_offset = subtitle_area[0]
+        else:
+            logging.warning(f"Subtitle area is not a valid list, defaulting x_offset to 0. Data: {subtitle_area}")
+            x_offset = 0
+    except (json.JSONDecodeError, TypeError):
+        logging.warning(f"Could not parse subtitle_area_json, defaulting x_offset to 0. JSON: {subtitle_area_json}")
+        x_offset = 0
 
     # 1. Collect and sort image files
     image_files = []
@@ -162,7 +178,8 @@ def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size:
         tasks.append({
             'batch_index': batch_index,
             'batch_files': batch_files,
-            'output_dir': str(output_dir)
+            'output_dir': str(output_dir),
+            'x_offset': x_offset # [核心修正] 将x_offset传递给子进程
         })
 
     # 3. Use ProcessPoolExecutor for parallel processing
@@ -198,12 +215,15 @@ if __name__ == '__main__':
     parser.add_argument('--output-root', required=True, help="Root directory for output ('multi_frames' and manifest).")
     parser.add_argument('--batch-size', type=int, required=True, help='Number of source images per stitched image.')
     parser.add_argument('--workers', type=int, required=True, help='Number of concurrent processes.')
-    
+    # [核心修正] 添加新的命令行参数
+    parser.add_argument('--subtitle-area-json', type=str, default='{}', help='JSON string of the subtitle area coordinates.')
+
     args = parser.parse_args()
 
     run_parallel_stitching(
         input_dir_str=args.input_dir,
         output_root_str=args.output_root,
         batch_size=args.batch_size,
-        max_workers=args.workers
+        max_workers=args.workers,
+        subtitle_area_json=args.subtitle_area_json # [核心修正] 传递参数
     )
