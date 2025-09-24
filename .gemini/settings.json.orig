@@ -1,0 +1,25 @@
+{
+    // "mcpServers": {
+    //     "INDEXTTS": {
+    //         "httpUrl": "https://gitmcp.io/index-tts/index-tts"
+    //     },
+    //     "VIDEO_SUBTITLE_REMOVER": {
+    //         "httpUrl": "https://gitmcp.io/YaoFANGUK/video-subtitle-remover"
+    //     },
+    //     "PaddleOCR": {
+    //         "httpUrl": "https://gitmcp.io/PaddlePaddle/PaddleOCR"
+    //     },
+    //     "EasyOCR": {
+    //         "httpUrl": "https://gitmcp.io/JaidedAI/EasyOCR"
+    //     },
+    //     "GEMINI_CLI": {
+    //         "httpUrl": "https://gitmcp.io/google-gemini/gemini-cli"
+    //     },
+    //     "VIDEO_LINGO": {
+    //         "httpUrl": "https://gitmcp.io/Huanshere/VideoLingo"
+    //     }
+    // },
+    "checkpointing": {
+        "enabled": false
+    }
+}

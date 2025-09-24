@@ -228,6 +228,7 @@ __marimo__/
 PaddleOCR/
 videos/
 pipline/
+share/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/
