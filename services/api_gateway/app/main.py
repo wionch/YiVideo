@@ -10,6 +10,7 @@ API Gateway的主应用文件。
 import os
 import uuid
 import logging
+from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Any
@@ -63,6 +64,7 @@ def create_workflow(request: WorkflowRequest) -> Dict[str, str]:
         # 1. 创建初始工作流上下文
         initial_context = WorkflowContext(
             workflow_id=workflow_id,
+            create_at=datetime.now().isoformat(),
             input_params={"video_path": request.video_path, **request.workflow_config},
             shared_storage_path=shared_storage_path,
             stages={},

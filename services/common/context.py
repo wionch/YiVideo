@@ -28,11 +28,11 @@ class WorkflowContext(BaseModel):
     这个对象在整个工作流的生命周期中被传递和修改，作为所有任务间通信的唯一载体。
     """
     workflow_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="工作流的唯一标识符")
+    create_at: Optional[str] = Field(None, description="工作流创建时的ISO 8601格式日期时间字符串")
     input_params: Dict[str, Any] = Field(default_factory=dict, description="从API请求传入的原始参数")
     shared_storage_path: str = Field(..., description="该工作流独有的、用于存放所有中间和最终文件的共享存储根路径")
     
     stages: Dict[str, StageExecution] = Field(default_factory=dict, description="工作流中所有阶段的执行状态和结果的集合")
-    execution_summary: Dict[str, Any] = Field(default_factory=dict, description="工作流结束时，各阶段耗时及总耗时的摘要")
     
     error: Optional[str] = Field(None, description="顶层错误信息，当任何阶段失败时，应在此处记录摘要")
 
