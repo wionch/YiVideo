@@ -97,12 +97,12 @@ def _process_batch_for_stitching(batch_info: dict) -> dict | None:
                 "sub_images": final_sub_images
             }
         }
-        logging.info(f"[Batch {batch_index}] Successfully stitched {len(batch_files)} images into {stitched_filename}.")
+        # logging.info(f"[Batch {batch_index}] Successfully stitched {len(batch_files)} images into {stitched_filename}.")
         return manifest_entry
 
     except cv2.error as e:
         logging.error(f"[Batch {batch_index}] OpenCV error during concatenation: {e}")
-        logging.error(f"[Batch {batch_index}] Files in batch: {[p for _, p in batch_files]}")
+        # logging.error(f"[Batch {batch_index}] Files in batch: {[p for _, p in batch_files]}")
         return None
     except Exception as e:
         logging.error(f"[Batch {batch_index}] Unknown error during processing: {e}")
@@ -132,10 +132,10 @@ def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size:
         if isinstance(subtitle_area, list) and len(subtitle_area) >= 1:
             x_offset = subtitle_area[0]
         else:
-            logging.warning(f"Subtitle area is not a valid list, defaulting x_offset to 0. Data: {subtitle_area}")
+            # logging.warning(f"Subtitle area is not a valid list, defaulting x_offset to 0. Data: {subtitle_area}")
             x_offset = 0
     except (json.JSONDecodeError, TypeError):
-        logging.warning(f"Could not parse subtitle_area_json, defaulting x_offset to 0. JSON: {subtitle_area_json}")
+        # logging.warning(f"Could not parse subtitle_area_json, defaulting x_offset to 0. JSON: {subtitle_area_json}")
         x_offset = 0
 
     # 1. Collect and sort image files
@@ -161,14 +161,14 @@ def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size:
                     image_path = str(input_dir / filename)
                     image_files.append((frame_idx, image_path))
             except (AttributeError, ValueError):
-                logging.warning(f"Could not extract frame index from filename '{filename}', skipping.")
+                # logging.warning(f"Could not extract frame index from filename '{filename}', skipping.")
                 continue
     
     if not image_files:
-        logging.info("No valid image files found in the input directory.")
+        # logging.info("No valid image files found in the input directory.")
         return
 
-    logging.info(f"Found {len(image_files)} valid images. Processing in batches of {batch_size}.")
+    # logging.info(f"Found {len(image_files)} valid images. Processing in batches of {batch_size}.")
 
     # 2. Prepare batch processing tasks
     tasks = []
@@ -193,7 +193,7 @@ def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size:
                 if result:
                     manifest_data.update(result)
             except Exception as e:
-                logging.error(f"A subprocess task failed: {e}")
+                pass  # logging.error(f"A subprocess task failed: {e}")
 
     # 4. Save the final manifest file
     manifest_path = output_root / "multi_frames.json"
@@ -201,13 +201,13 @@ def run_parallel_stitching(input_dir_str: str, output_root_str: str, batch_size:
         json.dump(manifest_data, f, indent=2)
 
     duration = time.time() - start_time
-    logging.info("--- Stitching complete ---")
-    logging.info(f"Total time: {duration:.2f} seconds")
-    logging.info(f"Input directory: {input_dir_str}")
-    logging.info(f"Output directory: {output_dir}")
-    logging.info(f"Manifest file: {manifest_path}")
-    logging.info(f"Concurrency: {max_workers} workers")
-    logging.info(f"Generated {len(manifest_data)} stitched images.")
+    # logging.info("--- Stitching complete ---")
+    # logging.info(f"Total time: {duration:.2f} seconds")
+    # logging.info(f"Input directory: {input_dir_str}")
+    # logging.info(f"Output directory: {output_dir}")
+    # logging.info(f"Manifest file: {manifest_path}")
+    # logging.info(f"Concurrency: {max_workers} workers")
+    # logging.info(f"Generated {len(manifest_data)} stitched images.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Parallel image stitcher for YiVideo.')

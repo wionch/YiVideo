@@ -98,7 +98,7 @@ def main():
             manifest_data = json.load(f)
         
         if not manifest_data:
-            logging.warning("Manifest file is empty. No images to process.")
+            # logging.warning("Manifest file is empty. No images to process.")
             print(json.dumps({}))
             return
 
@@ -110,7 +110,7 @@ def main():
                 # 任务ID设为拼接图文件名，方便后续匹配
                 ocr_tasks.append((stitched_filename, image_path))
             else:
-                logging.warning(f"Image file listed in manifest not found: {image_path}")
+                pass  # logging.warning(f"Image file listed in manifest not found: {image_path}")
 
         if not ocr_tasks:
             logging.error("No valid image files found based on the manifest.")
@@ -118,11 +118,11 @@ def main():
             return
 
         # 3. 执行批量OCR
-        logging.info(f"Starting batch OCR on {len(ocr_tasks)} stitched images.")
+        # logging.info(f"Starting batch OCR on {len(ocr_tasks)} stitched images.")
         ocr_engine = MultiProcessOCREngine(CONFIG.get('ocr', {}))
         # recognize_stitched 返回一个字典 {stitched_filename: ocr_data}
         raw_results_map = ocr_engine.recognize_stitched(ocr_tasks)
-        logging.info(f"Batch OCR completed. Received results for {len(raw_results_map)} images.")
+        # logging.info(f"Batch OCR completed. Received results for {len(raw_results_map)} images.")
 
         # 4. 坐标反推和结果聚合
         final_ocr_results = {}
@@ -132,7 +132,7 @@ def main():
                 transformed_part = _transform_coordinates(ocr_data, sub_images_meta)
                 final_ocr_results.update(transformed_part)
             else:
-                logging.warning(f"Received OCR result for an unknown image not in manifest: {stitched_filename}")
+                pass  # logging.warning(f"Received OCR result for an unknown image not in manifest: {stitched_filename}")
 
         # 5. 输出最终结果
         string_key_results = {str(k): v for k, v in final_ocr_results.items()}

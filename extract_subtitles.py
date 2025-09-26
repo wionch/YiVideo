@@ -48,7 +48,7 @@ def main():
     
     # 检查输入文件
     if not os.path.exists(args.input):
-        print(f"错误: 输入文件不存在: {args.input}")
+        # print(f"错误: 输入文件不存在: {args.input}")
         sys.exit(1)
     
     # 检查配置文件
@@ -57,7 +57,7 @@ def main():
         config_path = os.path.join(os.path.dirname(__file__), 'config.yml')
     
     if not os.path.exists(config_path):
-        print(f"错误: 配置文件不存在: {config_path}")
+        # print(f"错误: 配置文件不存在: {config_path}")
         sys.exit(1)
     
     # 加载配置
@@ -103,12 +103,12 @@ def main():
             f.write(srt_content)
         
         # 输出统计信息和文件路径
-        print(f"执行时间: {execution_time:.2f}秒, 提取有效字幕: {valid_subtitle_count}条")
-        print(f"JSON文件: {json_path}")
-        print(f"SRT文件: {srt_path}")
+        # print(f"执行时间: {execution_time:.2f}秒, 提取有效字幕: {valid_subtitle_count}条")
+        # print(f"JSON文件: {json_path}")
+        # print(f"SRT文件: {srt_path}")
         
     except Exception as e:
-        print(f"字幕提取失败: {e}")
+        # print(f"字幕提取失败: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

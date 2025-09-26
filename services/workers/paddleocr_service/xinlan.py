@@ -28,15 +28,15 @@ class XinlanOCR:
             text_recognition_model_name: 识别模型名称，默认为PP-OCRv5_server_rec
         """
         self.text_recognition_model_name = text_recognition_model_name
-        logger.info(f"初始化PaddleOCR引擎，使用模型: {text_recognition_model_name}")
+        # logger.info(f"初始化PaddleOCR引擎，使用模型: {text_recognition_model_name}")
         
         try:
             # 完全按照现有OCR模块的成功方式，最简化初始化
             ocr_kwargs = {'lang': 'ch'}  # 只保留最基本的语言参数
             
-            logger.info(f"PaddleOCR初始化参数: {ocr_kwargs}")
+            # logger.info(f"PaddleOCR初始化参数: {ocr_kwargs}")
             self.ocr = PaddleOCR(**ocr_kwargs)
-            logger.info("PaddleOCR引擎初始化成功")
+            # logger.info("PaddleOCR引擎初始化成功")
         except Exception as e:
             logger.error(f"PaddleOCR引擎初始化失败: {e}")
             raise
@@ -56,12 +56,12 @@ class XinlanOCR:
             return []
         
         try:
-            logger.info(f"开始识别图片: {image_path}")
+            # logger.info(f"开始识别图片: {image_path}")
             # 使用PaddleOCR进行文字识别
             results = self.ocr.predict(image_path)
             
             if not results or len(results) == 0:
-                logger.warning(f"图片中未识别到文字: {image_path}")
+                # logger.warning(f"图片中未识别到文字: {image_path}")
                 return []
             
             # 解析predict()方法返回的结果结构
@@ -73,7 +73,7 @@ class XinlanOCR:
             polys = result_data.get('rec_polys', [])
             
             if not texts:
-                logger.warning(f"图片中未识别到文字内容: {image_path}")
+                # logger.warning(f"图片中未识别到文字内容: {image_path}")
                 return []
             
             # 构建解析结果
@@ -92,7 +92,7 @@ class XinlanOCR:
                         'box': box
                     })
             
-            logger.info(f"识别完成，共识别到 {len(parsed_results)} 条文字")
+            # logger.info(f"识别完成，共识别到 {len(parsed_results)} 条文字")
             return parsed_results
             
         except Exception as e:
@@ -151,7 +151,7 @@ class XinlanOCR:
         Returns:
             完整的Markdown格式报告
         """
-        logger.info(f"开始批量处理 {len(image_paths)} 张图片")
+        # logger.info(f"开始批量处理 {len(image_paths)} 张图片")
         
         # Markdown文档头部
         markdown_parts = []
@@ -193,7 +193,7 @@ class XinlanOCR:
         markdown_parts.append(f"- **识别失败:** {len(image_paths) - successful_count}")
         
         final_markdown = "\n".join(markdown_parts)
-        logger.info(f"批量处理完成，成功识别 {successful_count}/{len(image_paths)} 张图片")
+        # logger.info(f"批量处理完成，成功识别 {successful_count}/{len(image_paths)} 张图片")
         
         return final_markdown
 
@@ -217,9 +217,9 @@ def main():
         for path in image_paths:
             if os.path.exists(path):
                 valid_paths.append(path)
-                logger.info(f"找到图片文件: {path}")
+                # logger.info(f"找到图片文件: {path}")
             else:
-                logger.warning(f"图片文件不存在: {path}")
+                pass  # logger.warning(f"图片文件不存在: {path}")
         
         if not valid_paths:
             logger.error("没有找到有效的图片文件")
@@ -239,9 +239,9 @@ def main():
         try:
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(markdown_result)
-            logger.info(f"识别结果已保存到文件: {output_file}")
+            # logger.info(f"识别结果已保存到文件: {output_file}")
         except Exception as e:
-            logger.warning(f"保存文件失败: {e}")
+            pass  # logger.warning(f"保存文件失败: {e}")
             
     except Exception as e:
         logger.error(f"程序执行失败: {e}")

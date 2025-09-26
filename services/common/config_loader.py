@@ -60,5 +60,48 @@ def get_config() -> Dict[str, Any]:
         _config_cache = {}
         return _config_cache
 
+def get_cleanup_temp_files_config() -> bool:
+    """
+    获取临时文件清理配置。
+    
+    注意：为了支持实时配置变更，此函数每次都会重新读取配置文件，
+    不使用全局缓存机制。
+    
+    Returns:
+        bool: True表示需要清理临时文件，False表示保留临时文件。默认为True。
+    """
+    try:
+        # 每次都重新读取配置文件，确保获取最新配置
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(current_dir, '..', '..', 'config.yml')
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        if not config:
+            logging.warning("配置文件为空，使用默认值 cleanup_temp_files=True")
+            return True
+            
+        core_config = config.get('core', {})
+        cleanup_config = core_config.get('cleanup_temp_files', True)  # 默认为True
+        
+        logging.info(f"实时读取配置 cleanup_temp_files: {cleanup_config}")
+        
+        # 确保返回的是boolean类型
+        if isinstance(cleanup_config, bool):
+            return cleanup_config
+        elif isinstance(cleanup_config, str):
+            return cleanup_config.lower() in ('true', '1', 'yes', 'on')
+        else:
+            logging.warning(f"cleanup_temp_files 配置值 '{cleanup_config}' 格式不正确，使用默认值 True")
+            return True
+            
+    except FileNotFoundError:
+        logging.error("配置文件未找到，使用默认值 cleanup_temp_files=True")
+        return True
+    except Exception as e:
+        logging.error(f"读取配置文件时出错: {e}，使用默认值 cleanup_temp_files=True")
+        return True
+
 # 在模块加载时执行一次，以便尽早发现配置问题
 CONFIG = get_config()

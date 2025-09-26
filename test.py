@@ -64,29 +64,29 @@ ASR_PROOFREAD_WORKFLOW_CONFIG = {
 
 def run_test(workflow_name: str, payload: dict):
     """执行单个工作流测试的全过程。"""
-    print("="*80)
-    print(f"🚀 开始执行 '{workflow_name}' 工作流测试")
-    print("="*80)
+    # print("="*80)
+    # print(f"🚀 开始执行 '{workflow_name}' 工作流测试")
+    # print("="*80)
 
     try:
-        print(f"📤 正在向 {API_BASE_URL}/v1/workflows 发送POST请求...")
-        print(f"   - 视频路径: {payload['video_path']}")
+        # print(f"📤 正在向 {API_BASE_URL}/v1/workflows 发送POST请求...")
+        # print(f"   - 视频路径: {payload['video_path']}")
         chain_str = " -> ".join(payload['workflow_config']['workflow_chain'])
-        print(f"   - 工作流链: {chain_str}")
+        # print(f"   - 工作流链: {chain_str}")
 
         start_time = time.time()
         response = requests.post(f"{API_BASE_URL}/v1/workflows", json=payload, timeout=30)
         response.raise_for_status()
 
         workflow_id = response.json()["workflow_id"]
-        print(f"✅ 请求成功，工作流已启动。 Workflow ID: {workflow_id}")
+        # print(f"✅ 请求成功，工作流已启动。 Workflow ID: {workflow_id}")
 
     except requests.exceptions.RequestException as e:
-        print(f"❌ 启动工作流失败: {e}")
+        # print(f"❌ 启动工作流失败: {e}")
         return
 
     status_url = f"{API_BASE_URL}/v1/workflows/status/{workflow_id}"
-    print(f"🔄 开始轮询状态: {status_url}")
+    # print(f"🔄 开始轮询状态: {status_url}")
 
     polling_interval = 5
     final_status = None
@@ -100,9 +100,9 @@ def run_test(workflow_name: str, payload: dict):
             current_top_level_status = status_data.get("status", "UNKNOWN")
             stages = status_data.get("stages", {})
 
-            print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 工作流状态: {current_top_level_status}")
+            # print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] 工作流状态: {current_top_level_status}")
             for stage_name, stage_info in stages.items():
-                print(f"    - 阶段: {stage_name:<35} | 状态: {stage_info.get('status', 'N/A')}")
+                pass  # print(f"    - 阶段: {stage_name:<35} | 状态: {stage_info.get('status', 'N/A')}")
 
             if current_top_level_status in ["SUCCESS", "FAILED"]:
                 final_status = status_data
@@ -111,19 +111,19 @@ def run_test(workflow_name: str, payload: dict):
             time.sleep(polling_interval)
 
         except requests.exceptions.RequestException as e:
-            print(f"❌ 轮询状态时发生错误: {e}")
+            # print(f"❌ 轮询状态时发生错误: {e}")
             time.sleep(polling_interval)
         except KeyboardInterrupt:
-            print("\n🛑 用户中断测试。")
+            # print("\n🛑 用户中断测试。")
             return
 
     end_time = time.time()
     total_duration = end_time - start_time
-    print("="*80)
-    print(f"🏁 工作流 '{workflow_id}' 已结束，总耗时: {total_duration:.2f} 秒")
-    print("="*80)
-    print("最终状态和结果:")
-    print(json.dumps(final_status, indent=2, ensure_ascii=False))
+    # print("="*80)
+    # print(f"🏁 工作流 '{workflow_id}' 已结束，总耗时: {total_duration:.2f} 秒")
+    # print("="*80)
+    # print("最终状态和结果:")
+    # print(json.dumps(final_status, indent=2, ensure_ascii=False))
 
 if __name__ == "__main__":
     # --- 在这里选择要运行的测试 ---
