@@ -25,7 +25,10 @@
       "Bash(do echo \"=== $service_service ===\")",
       "Bash(grep:*)",
       "Bash(done)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(cat:*)",
+      "mcp__web-search-prime__webSearchPrime",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []

@@ -10,7 +10,7 @@ core:
   # 工作流执行完成后是否删除临时文件
   # true: 执行完后删除临时文件，节省磁盘空间（推荐）
   # false: 保留临时文件，便于调试和问题排查
-  cleanup_temp_files: true
+  cleanup_temp_files: false
 
 # 1. Redis 配置 (新增)
 redis:
@@ -185,17 +185,3 @@ whisperx_service:
   compute_type: "float16"
   # 转录时的批处理大小，根据显存调整
   batch_size: 4
-
-# 10. GPU锁配置 (新增)
-# 用于优化GPU资源的并发访问控制，提升系统吞吐量
-gpu_lock:
-  # 初始轮询间隔（秒）
-  poll_interval: 2
-  # 最大等待时间（秒）
-  max_wait_time: 1800
-  # 锁超时时间（秒）- 防止任务崩溃导致死锁
-  lock_timeout: 3600
-  # 启用指数退避 - 动态调整轮询间隔，避免固定间隔的 thundering herd 问题
-  exponential_backoff: true
-  # 最大轮询间隔（秒）- 指数退避的上限
-  max_poll_interval: 10

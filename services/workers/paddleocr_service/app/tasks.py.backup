@@ -38,8 +38,7 @@ from services.common.config_loader import get_cleanup_temp_files_config
 # 导入标准上下文、锁和状态管理器
 from services.common.context import StageExecution
 from services.common.context import WorkflowContext
-# 使用智能锁选择器，根据配置自动选择V1或V2
-from services.common.lock_selector import gpu_lock
+from services.common.locks import gpu_lock
 
 # --- 日志配置 ---
 # 日志已统一管理，使用 services.common.logger
@@ -104,7 +103,7 @@ def natural_sort_key(s: str) -> list:
 # --- Celery 任务定义 ---
 
 @celery_app.task(bind=True, name='paddleocr.detect_subtitle_area')
-@gpu_lock()  # 使用配置化的GPU锁，支持运行时参数调整
+@gpu_lock(lock_key="gpu_lock:0", timeout=600)
 def detect_subtitle_area(self: Task, context: dict) -> dict:
     """[工作流任务] 通过调用外部脚本，检测视频关键帧中的字幕区域。"""
     start_time = time.time()
@@ -291,7 +290,7 @@ def create_stitched_images(self: Task, context: dict) -> dict:
 
 
 @celery_app.task(bind=True, name='paddleocr.perform_ocr')
-@gpu_lock()  # 使用配置化的GPU锁，支持运行时参数调整
+@gpu_lock(lock_key="gpu_lock:0", timeout=3600)
 def perform_ocr(self: Task, context: dict) -> dict:
     """[工作流任务] 调用外部脚本对拼接好的图片执行OCR。"""
     start_time = time.time()

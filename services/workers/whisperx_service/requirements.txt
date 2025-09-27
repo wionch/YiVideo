@@ -1,6 +1,7 @@
 celery
 redis
 pydantic
+PyYAML
 
 # Core whisperx dependency
 git+https://github.com/m-bain/whisperx.git
