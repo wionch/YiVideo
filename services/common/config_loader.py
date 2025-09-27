@@ -9,15 +9,21 @@
 """
 
 import os
-import yaml
+
+from services.common.logger import get_logger
+
+logger = get_logger('config_loader')
 import logging
-from typing import Dict, Any
+from typing import Any
+from typing import Dict
+
+import yaml
 
 # --- 全局缓存 ---
 _config_cache: Dict[str, Any] = None
 
 # --- 日志配置 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 def get_config() -> Dict[str, Any]:
     """
@@ -44,19 +50,19 @@ def get_config() -> Dict[str, Any]:
             _config_cache = yaml.safe_load(f)
         
         if _config_cache:
-            logging.info(f"通用配置加载器: {config_path} 加载成功。")
+            logger.info(f"通用配置加载器: {config_path} 加载成功。")
             return _config_cache
         else:
-            logging.error(f"通用配置加载器: {config_path} 文件为空或格式错误。")
+            logger.error(f"通用配置加载器: {config_path} 文件为空或格式错误。")
             _config_cache = {}
             return _config_cache
 
     except FileNotFoundError:
-        logging.error(f"通用配置加载器: 无法在路径 '{config_path}' 找到 config.yml 文件。")
+        logger.error(f"通用配置加载器: 无法在路径 '{config_path}' 找到 config.yml 文件。")
         _config_cache = {}
         return _config_cache
     except Exception as e:
-        logging.error(f"通用配置加载器: 加载 config.yml 时发生未知错误: {e}")
+        logger.error(f"通用配置加载器: 加载 config.yml 时发生未知错误: {e}")
         _config_cache = {}
         return _config_cache
 
@@ -79,13 +85,13 @@ def get_cleanup_temp_files_config() -> bool:
             config = yaml.safe_load(f)
         
         if not config:
-            logging.warning("配置文件为空，使用默认值 cleanup_temp_files=True")
+            logger.warning("配置文件为空，使用默认值 cleanup_temp_files=True")
             return True
             
         core_config = config.get('core', {})
         cleanup_config = core_config.get('cleanup_temp_files', True)  # 默认为True
         
-        logging.info(f"实时读取配置 cleanup_temp_files: {cleanup_config}")
+        logger.info(f"实时读取配置 cleanup_temp_files: {cleanup_config}")
         
         # 确保返回的是boolean类型
         if isinstance(cleanup_config, bool):
@@ -93,14 +99,14 @@ def get_cleanup_temp_files_config() -> bool:
         elif isinstance(cleanup_config, str):
             return cleanup_config.lower() in ('true', '1', 'yes', 'on')
         else:
-            logging.warning(f"cleanup_temp_files 配置值 '{cleanup_config}' 格式不正确，使用默认值 True")
+            logger.warning(f"cleanup_temp_files 配置值 '{cleanup_config}' 格式不正确，使用默认值 True")
             return True
             
     except FileNotFoundError:
-        logging.error("配置文件未找到，使用默认值 cleanup_temp_files=True")
+        logger.error("配置文件未找到，使用默认值 cleanup_temp_files=True")
         return True
     except Exception as e:
-        logging.error(f"读取配置文件时出错: {e}，使用默认值 cleanup_temp_files=True")
+        logger.error(f"读取配置文件时出错: {e}，使用默认值 cleanup_temp_files=True")
         return True
 
 # 在模块加载时执行一次，以便尽早发现配置问题

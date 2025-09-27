@@ -6,11 +6,12 @@
 """
 
 import argparse
-import yaml
 import json
 import os
 import sys
 import time
+
+import yaml
 
 # 添加服务路径到 Python 路径
 SERVICE_ROOT = os.path.join(os.path.dirname(__file__), 'services', 'workers', 'paddleocr_service')
@@ -18,6 +19,7 @@ APP_ROOT = os.path.join(SERVICE_ROOT, 'app')
 sys.path.insert(0, APP_ROOT)
 
 from logic import extract_subtitles_from_video
+
 
 def format_time_srt(seconds):
     """将秒转换为SRT格式的时间戳 (HH:MM:SS,mmm)"""

@@ -6,13 +6,18 @@
 """
 
 import os
+
+from services.common.logger import get_logger
+
+logger = get_logger('locks')
 import functools
 import logging
-from redis import Redis
+
 from celery import Task
+from redis import Redis
 
 # 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 # --- Redis 连接 ---
 # 使用环境变量或默认值初始化Redis连接
@@ -26,9 +31,9 @@ REDIS_LOCK_DB = int(os.environ.get('REDIS_LOCK_DB', 2))
 try:
     redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_LOCK_DB, decode_responses=True)
     redis_client.ping()
-    logging.info(f"成功连接到Redis锁数据库 at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}")
+    logger.info(f"成功连接到Redis锁数据库 at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}")
 except Exception as e:
-    logging.error(f"无法连接到Redis at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}. 分布式锁将无法工作. 错误: {e}")
+    logger.error(f"无法连接到Redis at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}. 分布式锁将无法工作. 错误: {e}")
     redis_client = None
 
 # --- 分布式锁装饰器 ---
@@ -46,7 +51,7 @@ def gpu_lock(lock_key: str = "gpu_lock", timeout: int = 600, retry_interval: int
         @functools.wraps(func)
         def wrapper(self: Task, *args, **kwargs):
             if not redis_client:
-                logging.error("Redis客户端未初始化，无法获取锁。将直接执行任务，可能导致资源冲突。")
+                logger.error("Redis客户端未初始化，无法获取锁。将直接执行任务，可能导致资源冲突。")
                 return func(self, *args, **kwargs)
 
             try:
@@ -55,24 +60,24 @@ def gpu_lock(lock_key: str = "gpu_lock", timeout: int = 600, retry_interval: int
                 # nx=True: 只在键不存在时设置
                 # ex=timeout: 设置键的过期时间
                 if redis_client.set(lock_key, "locked", nx=True, ex=timeout):
-                    logging.info(f"任务 {self.name} 成功获取锁 '{lock_key}'。")
+                    logger.info(f"任务 {self.name} 成功获取锁 '{lock_key}'。")
                     try:
                         # 成功获取锁，执行任务
                         result = func(self, *args, **kwargs)
                         return result
                     finally:
                         # 任务执行完毕，释放锁
-                        logging.info(f"任务 {self.name} 执行完毕，释放锁 '{lock_key}'。")
+                        logger.info(f"任务 {self.name} 执行完毕，释放锁 '{lock_key}'。")
                         redis_client.delete(lock_key)
                 else:
                     # 未能获取锁，说明有其他任务正在执行
-                    logging.warning(f"任务 {self.name} 获取锁 '{lock_key}' 失败，将在 {retry_interval} 秒后重试。")
+                    logger.warning(f"任务 {self.name} 获取锁 '{lock_key}' 失败，将在 {retry_interval} 秒后重试。")
                     # 使用Celery的重试机制
                     raise self.retry(countdown=retry_interval, exc=Exception("Could not acquire lock."))
             
             except Exception as e:
                 # 捕获包括重试异常在内的所有异常
-                logging.error(f"任务 {self.name} 在处理锁时发生异常: {e}")
+                logger.error(f"任务 {self.name} 在处理锁时发生异常: {e}")
                 # 如果不是Celery的重试异常，则需要决定是否要重试
                 if not isinstance(e, self.MaxRetriesExceededError):
                      raise self.retry(countdown=retry_interval, exc=e)

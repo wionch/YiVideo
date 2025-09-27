@@ -6,8 +6,11 @@
 """
 
 import os
+from typing import Any
+from typing import Dict
+from typing import Optional
+
 import yaml
-from typing import Dict, Any, Optional
 
 
 def load_global_config() -> Dict[str, Any]:

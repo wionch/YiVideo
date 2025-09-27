@@ -10,10 +10,11 @@
 3. 打印最终结果。
 """
 
-import requests
-import time
 import json
 import os
+import time
+
+import requests
 
 # --- 配置 ---
 API_BASE_URL = "http://localhost:8000"

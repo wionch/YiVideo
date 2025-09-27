@@ -1,22 +1,26 @@
 # -*- coding: utf-8 -*- 
 
-import subprocess
 import json
+import logging
 import math
+import multiprocessing
 import os
+import queue
 import re
 import shutil
-import time
-import multiprocessing
-import logging
-import numpy as np
-import queue
+import subprocess
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import numpy as np
+
+from services.common.logger import get_logger
 
 # 配置日志记录
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = get_logger('video_decoder')
 
 def get_video_info(video_path: str) -> dict:
     frame_count = 0
@@ -25,10 +29,10 @@ def get_video_info(video_path: str) -> dict:
         result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10)
         frame_count = int(result.stdout.strip())
     except FileNotFoundError:
-        logging.error("错误: 'mediainfo' 命令未找到。请确保它已安装并在系统的 PATH 中。")
+        logger.error("错误: 'mediainfo' 命令未找到。请确保它已安装并在系统的 PATH 中。")
         return None
     except (subprocess.CalledProcessError, ValueError) as e:
-        logging.warning(f"使用 mediainfo 获取帧数失败: {e}")
+        logger.warning(f"使用 mediainfo 获取帧数失败: {e}")
         pass
 
     duration = 0.0
@@ -40,10 +44,10 @@ def get_video_info(video_path: str) -> dict:
         result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10)
         duration = float(result.stdout.strip())
     except FileNotFoundError:
-        logging.error("错误: 'ffprobe' 命令未找到。请确保它已安装并在系统的 PATH 中。")
+        logger.error("错误: 'ffprobe' 命令未找到。请确保它已安装并在系统的 PATH 中。")
         return None
     except (subprocess.CalledProcessError, ValueError) as e:
-        logging.warning(f"使用 ffprobe 获取时长失败: {e}")
+        logger.warning(f"使用 ffprobe 获取时长失败: {e}")
         if frame_count == 0:
             return None
 
@@ -55,7 +59,7 @@ def get_video_info(video_path: str) -> dict:
 def split_video_fast(video_path: str, output_dir: str, num_splits: int) -> list:
     video_info = get_video_info(video_path)
     if not video_info or video_info['duration'] == 0:
-        logging.error(f"无法获取视频 '{video_path}' 的时长信息，分割失败。")
+        logger.error(f"无法获取视频 '{video_path}' 的时长信息，分割失败。")
         return []
 
     total_duration = video_info['duration']
@@ -84,10 +88,10 @@ def split_video_fast(video_path: str, output_dir: str, num_splits: int) -> list:
         generated_files = [os.path.join(output_dir, f) for f in sorted(os.listdir(output_dir)) if f.startswith('segment_')]
         return generated_files
     except subprocess.CalledProcessError as e:
-        logging.error(f"错误：ffmpeg 快速分割失败。\nFFmpeg Stderr: {e.stderr.strip()}")
+        logger.error(f"错误：ffmpeg 快速分割失败。\nFFmpeg Stderr: {e.stderr.strip()}")
         return []
     except FileNotFoundError:
-        logging.error("错误: 'ffmpeg' 命令未找到。请确保它已安装并在系统的 PATH 中。")
+        logger.error("错误: 'ffmpeg' 命令未找到。请确保它已安装并在系统的 PATH 中。")
         return []
 
 def _decode_concurrently_worker(args):
@@ -135,7 +139,7 @@ def _decode_concurrently_worker(args):
 
 def decode_video_concurrently(video_path: str, output_dir: str, num_processes: int = 10, crop_area: list = None):
     total_start_time = time.time()
-    logging.info(f"开始视频并发解码任务: {video_path}")
+    logger.info(f"开始视频并发解码任务: {video_path}")
     num_processes = min(10, num_processes)
     
     frames_dir = os.path.join(output_dir, "frames")
@@ -144,7 +148,7 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
         shutil.rmtree(output_dir)
     os.makedirs(frames_dir)
     os.makedirs(segments_dir)
-    logging.info(f"输出目录已创建并清理: {output_dir}")
+    logger.info(f"输出目录已创建并清理: {output_dir}")
 
     task_data = {
         "video_path": video_path,
@@ -154,34 +158,34 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
         "decoding_stats": [],
     }
 
-    logging.info("正在获取视频信息...")
+    logger.info("正在获取视频信息...")
     video_info = get_video_info(video_path)
     if not video_info or not video_info.get('duration') or not video_info.get('frame_count'):
         msg = "获取视频信息失败，任务终止。"
-        logging.error(msg)
+        logger.error(msg)
         return {"status": False, "msg": msg}
     
     task_data.update({
         'total_frames': video_info['frame_count'],
         'total_duration': video_info['duration']
     })
-    logging.info(f"视频信息获取成功: 总时长={task_data['total_duration']:.2f}s, 总帧数={task_data['total_frames']}")
+    logger.info(f"视频信息获取成功: 总时长={task_data['total_duration']:.2f}s, 总帧数={task_data['total_frames']}")
 
-    logging.info(f"正在将视频快速分割成 {num_processes} 段...")
+    logger.info(f"正在将视频快速分割成 {num_processes} 段...")
     split_start_time = time.time()
     
     segments = split_video_fast(video_path, segments_dir, num_processes)
     
     if not segments:
         msg = "视频分割失败。"
-        logging.error(msg)
+        logger.error(msg)
         return {"status": False, "msg": msg}
 
     split_duration = time.time() - split_start_time
     task_data['split_duration'] = split_duration
-    logging.info(f"视频分割成功，耗时: {split_duration:.2f} 秒，生成 {len(segments)} 个片段。")
+    logger.info(f"视频分割成功，耗时: {split_duration:.2f} 秒，生成 {len(segments)} 个片段。")
 
-    logging.info("正在并发获取所有子视频的帧数信息...")
+    logger.info("正在并发获取所有子视频的帧数信息...")
     with ThreadPoolExecutor() as executor:
         future_to_path = {executor.submit(get_video_info, path): path for path in segments}
         info_map = {}
@@ -191,7 +195,7 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
                 info = future.result()
                 info_map[path] = info['frame_count'] if info else 0
             except Exception as e:
-                logging.warning(f"获取片段 '{os.path.basename(path)}' 信息时出错: {e}")
+                logger.warning(f"获取片段 '{os.path.basename(path)}' 信息时出错: {e}")
                 info_map[path] = 0
     
     sorted_infos = [(path, info_map.get(path, 0)) for path in segments]
@@ -202,7 +206,7 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
         width = x2 - x1
         height = y2 - y1
         crop_filter = f"crop={width}:{height}:{x1}:{y1}"
-        logging.info(f"将应用裁剪区域: {crop_filter}")
+        logger.info(f"将应用裁剪区域: {crop_filter}")
 
     tasks = []
     current_frame_start = 1
@@ -211,7 +215,7 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
             tasks.append((path, output_dir, current_frame_start, crop_filter, i + 1))
             current_frame_start += frame_count
 
-    logging.info(f"准备就绪，开始使用 {len(tasks)} 个进程进行并发解码...")
+    logger.info(f"准备就绪，开始使用 {len(tasks)} 个进程进行并发解码...")
     decoding_start_time = time.time()
     
     with multiprocessing.Pool(processes=num_processes) as pool:
@@ -220,7 +224,7 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
     decoding_duration = time.time() - decoding_start_time
     task_data['decoding_duration'] = decoding_duration
     task_data['decoding_stats'] = results
-    logging.info(f"所有解码任务完成，总耗时: {decoding_duration:.2f} 秒")
+    logger.info(f"所有解码任务完成，总耗时: {decoding_duration:.2f} 秒")
 
     total_task_duration = time.time() - total_start_time
     task_data['total_task_duration'] = total_task_duration
@@ -229,43 +233,43 @@ def decode_video_concurrently(video_path: str, output_dir: str, num_processes: i
     try:
         with open(task_json_path, 'w', encoding='utf-8') as f:
             json.dump(task_data, f, ensure_ascii=False, indent=4)
-        logging.info(f"任务信息已保存到: {task_json_path}")
+        logger.info(f"任务信息已保存到: {task_json_path}")
     except IOError as e:
         msg = f"保存 task.json 失败: {e}"
-        logging.error(msg)
+        logger.error(msg)
         return {"status": False, "msg": msg}
 
     if any(not r['success'] for r in results):
         msg = "一个或多个解码任务失败，请检查日志和 task.json 获取详细信息。"
-        logging.warning(msg)
+        logger.warning(msg)
         return {"status": False, "msg": msg}
 
     msg = f"视频并发解码任务成功完成。任务耗时: {total_task_duration}"
-    logging.info(msg)
+    logger.info(msg)
     return {"status": True, "msg": msg}
 
 def extract_random_frames(video_path: str, num_frames: int, output_dir: str) -> list:
-    logging.info(f"开始从视频 '{video_path}' 中高效随机抽取 {num_frames} 帧 (select模式)...")
+    logger.info(f"开始从视频 '{video_path}' 中高效随机抽取 {num_frames} 帧 (select模式)...")
 
     video_info = get_video_info(video_path)
     if not video_info or video_info.get('frame_count', 0) == 0:
-        logging.error(f"无法获取视频 '{video_path}' 的总帧数信息，抽帧失败。")
+        logger.error(f"无法获取视频 '{video_path}' 的总帧数信息，抽帧失败。")
         return []
 
     total_frames = video_info['frame_count']
     
     if num_frames > total_frames:
-        logging.warning(f"请求抽取的帧数 ({num_frames}) 大于视频总帧数 ({total_frames})。将抽取所有帧。")
+        logger.warning(f"请求抽取的帧数 ({num_frames}) 大于视频总帧数 ({total_frames})。将抽取所有帧。")
         num_frames = total_frames
 
     if num_frames == 0:
-        logging.warning("计算出的抽帧数为 0，不执行抽帧。")
+        logger.warning("计算出的抽帧数为 0，不执行抽帧。")
         return []
 
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
-    logging.info(f"抽帧输出目录已创建: {output_dir}")
+    logger.info(f"抽帧输出目录已创建: {output_dir}")
 
     frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
     
@@ -284,16 +288,16 @@ def extract_random_frames(video_path: str, num_frames: int, output_dir: str) -> 
         output_pattern
     ]
     
-    logging.info("准备执行单次 FFmpeg 命令进行批量抽帧...")
+    logger.info("准备执行单次 FFmpeg 命令进行批量抽帧...")
 
     try:
         subprocess.run(command, capture_output=True, text=True, check=True)
     except subprocess.CalledProcessError as e:
-        logging.error(f"批量抽帧失败。FFmpeg 输出:\n{e.stderr}")
+        logger.error(f"批量抽帧失败。FFmpeg 输出:\n{e.stderr}")
         return []
 
     successful_frames = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.jpg')])
     
-    logging.info(f"抽帧任务完成，成功提取 {len(successful_frames)} / {num_frames} 帧。")
+    logger.info(f"抽帧任务完成，成功提取 {len(successful_frames)} / {num_frames} 帧。")
 
     return successful_frames

@@ -4,26 +4,26 @@ This script is executed via subprocess by a Celery task.
 It's designed to run in a separate process to avoid the "daemonic processes
 are not allowed to have children" error when using ProcessPoolExecutor
 from within a Celery worker.
+from services.common.logger import get_logger
 
 This script handles the concurrent stitching of cropped subtitle images into
 larger "multi-frame" images for efficient batch OCR processing.
 """
 
+import argparse
+import json
+import logging
 import os
 import re
 import time
-import json
-import cv2
-import logging
-import argparse
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+
+import cv2
 
 # --- Logging Configuration ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(process)d - %(levelname)s - %(message)s'
-)
+# 日志已统一管理，使用 services.common.logger
 
 # --- Helper Functions ---
 

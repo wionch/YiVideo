@@ -8,30 +8,40 @@ paddleocr_service 的 Celery 任务定义。
 """
 
 import os
-import sys
-import shutil
-import json
-import time
-import cv2
-import av
-import logging
-import subprocess
-import re
-from pathlib import Path
-from celery import Celery, Task
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
-# 导入标准上下文、锁和状态管理器
-from services.common.context import WorkflowContext, StageExecution
-from services.common.locks import gpu_lock
-from services.common import state_manager
-from services.common.config_loader import CONFIG, get_cleanup_temp_files_config
+from services.common.logger import get_logger
+
+logger = get_logger('tasks')
+import json
+import logging
+import re
+import shutil
+import subprocess
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
+from pathlib import Path
+
+import av
+import cv2
 
 # 导入此服务内部的核心逻辑模块
 from app.modules.postprocessor import SubtitlePostprocessor
+from celery import Celery
+from celery import Task
+
+from services.common import state_manager
+from services.common.config_loader import CONFIG
+from services.common.config_loader import get_cleanup_temp_files_config
+
+# 导入标准上下文、锁和状态管理器
+from services.common.context import StageExecution
+from services.common.context import WorkflowContext
+from services.common.locks import gpu_lock
 
 # --- 日志配置 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 # --- Celery App 初始化 ---
 BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
@@ -58,7 +68,7 @@ def _get_video_fps(video_path: str) -> float:
         with av.open(video_path) as container:
             return float(container.streams.video[0].average_rate)
     except Exception as e:
-        logging.warning(f"Could not get FPS from video metadata using PyAV: {e}. Defaulting to 30.0")
+        logger.warning(f"Could not get FPS from video metadata using PyAV: {e}. Defaulting to 30.0")
         return 30.0
 
 def _write_srt_file(subtitles: list, srt_path: str):
@@ -120,7 +130,7 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
         if not keyframe_paths:
             raise ValueError("关键帧目录为空，无法进行字幕区域检测。")
 
-        # logging.info(f"[{stage_name}] 准备通过外部脚本从 {len(keyframe_paths)} 个关键帧检测字幕区域...")
+        # logger.info(f"[{stage_name}] 准备通过外部脚本从 {len(keyframe_paths)} 个关键帧检测字幕区域...")
         
         result_str = ""
         try:
@@ -139,32 +149,32 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
             result_str = result.stdout.strip()
 
             if result.stderr:
-                pass  # logging.warning(f"[{stage_name}] 字幕区域检测子进程有 stderr 输出:\n{result.stderr.strip()}")
+                pass  # logger.warning(f"[{stage_name}] 字幕区域检测子进程有 stderr 输出:\n{result.stderr.strip()}")
 
             if not result_str:
                 raise RuntimeError("字幕区域检测脚本执行成功，但没有返回任何输出 (stdout is empty)。")
             
             output_data = json.loads(result_str)
-            # logging.info(f"[{stage_name}] 外部脚本完成字幕区域检测: {output_data.get('subtitle_area')}")
+            # logger.info(f"[{stage_name}] 外部脚本完成字幕区域检测: {output_data.get('subtitle_area')}")
         
         except json.JSONDecodeError as e:
-            logging.error(f"[{stage_name}] JSON解码失败。接收到的原始 stdout 是:\n---\n{result_str}\n---")
+            logger.error(f"[{stage_name}] JSON解码失败。接收到的原始 stdout 是:\n---\n{result_str}\n---")
             raise RuntimeError("Failed to decode JSON from subprocess.") from e
         except subprocess.TimeoutExpired as e:
             stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logging.error(f"[{stage_name}] 字幕区域检测子进程执行超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
+            logger.error(f"[{stage_name}] 字幕区域检测子进程执行超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
             raise RuntimeError(f"Area detection subprocess timed out after {e.timeout} seconds.") from e
         except subprocess.CalledProcessError as e:
             stdout_output = e.stdout.strip() if e.stdout else "(empty)"
             stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logging.error(f"[{stage_name}] 字幕区域检测子进程执行失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
+            logger.error(f"[{stage_name}] 字幕区域检测子进程执行失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
             raise RuntimeError(f"Area detection subprocess failed with exit code {e.returncode}.") from e
         
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
@@ -176,9 +186,9 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
         if get_cleanup_temp_files_config() and keyframe_dir and os.path.isdir(keyframe_dir):
             try:
                 shutil.rmtree(keyframe_dir)
-                # logging.info(f"[{stage_name}] 清理临时关键帧目录: {keyframe_dir}")
+                # logger.info(f"[{stage_name}] 清理临时关键帧目录: {keyframe_dir}")
             except Exception as e:
-                logging.warning(f"[{stage_name}] 清理关键帧目录失败: {e}")
+                logger.warning(f"[{stage_name}] 清理关键帧目录失败: {e}")
 
     return workflow_context.model_dump()
 
@@ -214,9 +224,9 @@ def create_stitched_images(self: Task, context: dict) -> dict:
         batch_size = pipeline_config.get('concat_batch_size', 50)
         max_workers = pipeline_config.get('stitching_workers', 10)
 
-        # logging.info(f"[{stage_name}] 准备通过外部脚本拼接图像...")
-        # logging.info(f"[{stage_name}]   - 输入目录: {input_dir_str}")
-        # logging.info(f"[{stage_name}]   - 字幕区域: {subtitle_area}")
+        # logger.info(f"[{stage_name}] 准备通过外部脚本拼接图像...")
+        # logger.info(f"[{stage_name}]   - 输入目录: {input_dir_str}")
+        # logger.info(f"[{stage_name}]   - 字幕区域: {subtitle_area}")
 
         # 3. 调用外部脚本执行拼接
         try:
@@ -236,18 +246,18 @@ def create_stitched_images(self: Task, context: dict) -> dict:
             result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
             
             if result.stderr:
-                pass  # logging.warning(f"[{stage_name}] 图像拼接子进程有 stderr 输出:\n{result.stderr.strip()}")
+                pass  # logger.warning(f"[{stage_name}] 图像拼接子进程有 stderr 输出:\n{result.stderr.strip()}")
 
-            # logging.info(f"[{stage_name}] 外部脚本成功完成图像拼接。")
+            # logger.info(f"[{stage_name}] 外部脚本成功完成图像拼接。")
 
         except subprocess.TimeoutExpired as e:
             stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logging.error(f"[{stage_name}] 图像拼接子进程执行超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
+            logger.error(f"[{stage_name}] 图像拼接子进程执行超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
             raise RuntimeError(f"Image stitching subprocess timed out after {e.timeout} seconds.") from e
         except subprocess.CalledProcessError as e:
             stdout_output = e.stdout.strip() if e.stdout else "(empty)"
             stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logging.error(f"[{stage_name}] 图像拼接子进程执行失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
+            logger.error(f"[{stage_name}] 图像拼接子进程执行失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
             raise RuntimeError(f"Image stitching subprocess failed with exit code {e.returncode}.") from e
 
         # 4. 构造输出并更新上下文
@@ -259,7 +269,7 @@ def create_stitched_images(self: Task, context: dict) -> dict:
         workflow_context.stages[stage_name].output = output_data
 
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
@@ -272,9 +282,9 @@ def create_stitched_images(self: Task, context: dict) -> dict:
             try:
                 # 只删除 frames 子目录，不删除整个 cropped_images 目录
                 shutil.rmtree(input_dir_str)
-                # logging.info(f"[{stage_name}] 清理临时裁剪图像帧目录: {input_dir_str}")
+                # logger.info(f"[{stage_name}] 清理临时裁剪图像帧目录: {input_dir_str}")
             except Exception as e:
-                logging.warning(f"[{stage_name}] 清理裁剪图像帧目录失败: {e}")
+                logger.warning(f"[{stage_name}] 清理裁剪图像帧目录失败: {e}")
 
     return workflow_context.model_dump()
 
@@ -303,7 +313,7 @@ def perform_ocr(self: Task, context: dict) -> dict:
         if not multi_frames_path or not os.path.isdir(multi_frames_path):
             raise ValueError(f"上下文中缺少或无效的 'multi_frames_path' 信息: {multi_frames_path}")
 
-        # logging.info(f"[{stage_name}] 准备通过外部脚本对清单 {manifest_path} 中的图片执行OCR...")
+        # logger.info(f"[{stage_name}] 准备通过外部脚本对清单 {manifest_path} 中的图片执行OCR...")
         
         try:
             executor_script_path = os.path.join(os.path.dirname(__file__), "executor_ocr.py")
@@ -319,32 +329,32 @@ def perform_ocr(self: Task, context: dict) -> dict:
             result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=3600)
 
             if result.stderr:
-                pass  # logging.info(f"[{stage_name}] OCR 子进程 stderr 输出:\n{result.stderr.strip()}")
+                pass  # logger.info(f"[{stage_name}] OCR 子进程 stderr 输出:\n{result.stderr.strip()}")
             
             ocr_results_str = result.stdout.strip()
             if not ocr_results_str:
                 raise RuntimeError("OCR执行脚本没有返回任何输出。")
             ocr_results = json.loads(ocr_results_str)
-            # logging.info(f"[{stage_name}] 外部脚本OCR完成，识别出 {len(ocr_results)} 帧的文本。")
+            # logger.info(f"[{stage_name}] 外部脚本OCR完成，识别出 {len(ocr_results)} 帧的文本。")
 
         except subprocess.TimeoutExpired as e:
-            logging.error(f"[{stage_name}] OCR子进程执行超时({e.timeout}秒)。Stderr: {e.stderr}")
+            logger.error(f"[{stage_name}] OCR子进程执行超时({e.timeout}秒)。Stderr: {e.stderr}")
             raise RuntimeError(f"OCR subprocess timed out after {e.timeout} seconds.") from e
         except subprocess.CalledProcessError as e:
-            logging.error(f"[{stage_name}] OCR子进程执行失败，返回码: {e.returncode}。Stderr: {e.stderr}")
+            logger.error(f"[{stage_name}] OCR子进程执行失败，返回码: {e.returncode}。Stderr: {e.stderr}")
             raise RuntimeError(f"OCR subprocess failed with exit code {e.returncode}.") from e
 
         ocr_results_path = os.path.join(workflow_context.shared_storage_path, "ocr_results.json")
         with open(ocr_results_path, 'w', encoding='utf-8') as f:
             json.dump(ocr_results, f, ensure_ascii=False)
-        # logging.info(f"[{stage_name}] OCR结果已保存到文件: {ocr_results_path}")
+        # logger.info(f"[{stage_name}] OCR结果已保存到文件: {ocr_results_path}")
 
         output_data = {"ocr_results_path": ocr_results_path}
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
@@ -358,12 +368,12 @@ def perform_ocr(self: Task, context: dict) -> dict:
                 # 删除 multi_frames 目录
                 if multi_frames_path and os.path.isdir(multi_frames_path):
                     shutil.rmtree(multi_frames_path)
-                    # logging.info(f"[{stage_name}] 清理临时多帧图像目录: {multi_frames_path}")
+                    # logger.info(f"[{stage_name}] 清理临时多帧图像目录: {multi_frames_path}")
                 
                 # 删除 manifest 文件
                 if manifest_path and os.path.exists(manifest_path):
                     os.remove(manifest_path)
-                    # logging.info(f"[{stage_name}] 清理临时清单文件: {manifest_path}")
+                    # logger.info(f"[{stage_name}] 清理临时清单文件: {manifest_path}")
                 
                 # 删除整个 cropped_images 目录（现在应该只剩空目录或其他临时文件）
                 if multi_frames_path:
@@ -371,13 +381,13 @@ def perform_ocr(self: Task, context: dict) -> dict:
                     if cropped_images_parent.exists() and cropped_images_parent.name == "cropped_images":
                         try:
                             shutil.rmtree(str(cropped_images_parent))
-                            # logging.info(f"[{stage_name}] 清理整个裁剪图像目录: {cropped_images_parent}")
+                            # logger.info(f"[{stage_name}] 清理整个裁剪图像目录: {cropped_images_parent}")
                         except Exception as e:
                             # 如果删除失败，可能是目录不为空，记录警告但不影响主流程
-                            logging.warning(f"[{stage_name}] 清理cropped_images目录失败（可能不为空）: {e}")
+                            logger.warning(f"[{stage_name}] 清理cropped_images目录失败（可能不为空）: {e}")
                 
             except Exception as e:
-                logging.warning(f"[{stage_name}] 清理多帧图像文件失败: {e}")
+                logger.warning(f"[{stage_name}] 清理多帧图像文件失败: {e}")
 
     return workflow_context.model_dump()
 
@@ -398,7 +408,7 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
         if not ocr_results_path or not os.path.exists(ocr_results_path):
             raise ValueError(f"上下文中缺少或无效的 'ocr_results_path' 信息: {ocr_results_path}")
         
-        # logging.info(f"[{stage_name}] 正在从文件加载OCR结果: {ocr_results_path}")
+        # logger.info(f"[{stage_name}] 正在从文件加载OCR结果: {ocr_results_path}")
         with open(ocr_results_path, 'r', encoding='utf-8') as f:
             ocr_results = json.load(f)
 
@@ -406,14 +416,14 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
         if not video_path:
             raise ValueError("上下文中缺少 'video_path' 信息，无法获取FPS。")
 
-        # logging.info(f"[{stage_name}] 开始对 {len(ocr_results)} 条OCR结果进行后处理...")
+        # logger.info(f"[{stage_name}] 开始对 {len(ocr_results)} 条OCR结果进行后处理...")
         
         fps = _get_video_fps(video_path)
 
         final_subtitles = postprocessor.format_from_full_frames(ocr_results, fps)
 
         if not final_subtitles:
-            logging.warning(f"[{stage_name}] 后处理完成，但未生成任何有效字幕，任务结束。")
+            logger.warning(f"[{stage_name}] 后处理完成，但未生成任何有效字幕，任务结束。")
             output_data = {"srt_file": None, "json_file": None}
         else:
             video_basename = os.path.basename(video_path)
@@ -426,14 +436,14 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
             with open(final_json_path, 'w', encoding='utf-8') as f:
                 json.dump(final_subtitles, f, ensure_ascii=False, indent=4)
 
-            # logging.info(f"[{stage_name}] 后处理完成，生成最终文件: {final_json_path}")
+            # logger.info(f"[{stage_name}] 后处理完成，生成最终文件: {final_json_path}")
             output_data = {"srt_file": final_srt_path, "json_file": final_json_path}
 
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
@@ -447,6 +457,6 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
             ocr_results_path_to_clean = prev_ocr_stage.output.get("ocr_results_path") if prev_ocr_stage else None
             if ocr_results_path_to_clean and os.path.exists(ocr_results_path_to_clean):
                 os.remove(ocr_results_path_to_clean)
-                # logging.info(f"[{stage_name}] 清理临时OCR结果文件: {ocr_results_path_to_clean}")
+                # logger.info(f"[{stage_name}] 清理临时OCR结果文件: {ocr_results_path_to_clean}")
 
     return workflow_context.model_dump()

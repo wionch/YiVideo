@@ -5,9 +5,9 @@
 快速获取原视频和所有子视频的帧数，验证分割是否完整
 """
 
-import subprocess
-import os
 import json
+import os
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 

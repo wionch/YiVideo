@@ -7,7 +7,10 @@ import time
 # 将上层目录添加到sys.path中，以便导入app模块
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from app.modules.new_decoder import get_video_info, split_video, split_video_pyav
+from app.modules.new_decoder import get_video_info
+from app.modules.new_decoder import split_video
+from app.modules.new_decoder import split_video_pyav
+
 
 def test_decoder(video_path: str, num_splits: int, temp_dir: str):
     """

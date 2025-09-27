@@ -1,8 +1,11 @@
 # services/workers/paddleocr_service/app/utils/progress_logger.py
 import sys
 import time
-from typing import Optional, Dict, Any
 from threading import Lock
+from typing import Any
+from typing import Dict
+from typing import Optional
+
 
 class ProgressBar:
     """

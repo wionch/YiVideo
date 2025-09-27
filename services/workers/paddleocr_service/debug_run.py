@@ -1,9 +1,10 @@
 # services/workers/paddleocr_service/debug_run.py
 import argparse
-import yaml
 import json
 import os
 import sys
+
+import yaml
 
 # --- Setup sys.path ---
 # This allows the script to be run from the project root 

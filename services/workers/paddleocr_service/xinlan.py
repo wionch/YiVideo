@@ -5,10 +5,13 @@
 使用PP-OCRv5_server_rec模型识别指定图片，并以Markdown格式输出识别结果
 """
 
+import logging
 import os
 import sys
-from typing import List, Dict, Any
-import logging
+from typing import Any
+from typing import Dict
+from typing import List
+
 from paddleocr import PaddleOCR
 
 # 配置日志

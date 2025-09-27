@@ -6,17 +6,25 @@ ffmpeg_service 的 Celery 任务定义。
 """
 
 import os
-import sys
+
+from services.common.logger import get_logger
+
+logger = get_logger('tasks')
 import json
-import time
 import logging
 import subprocess
-from celery import Celery, Task
+import sys
+import time
+
+from celery import Celery
+from celery import Task
+
+from services.common import state_manager
 
 # 导入项目定义的标准上下文、状态管理和分布式锁
-from services.common.context import WorkflowContext, StageExecution
+from services.common.context import StageExecution
+from services.common.context import WorkflowContext
 from services.common.locks import gpu_lock
-from services.common import state_manager
 
 # 导入该服务内部的核心视频处理逻辑模块
 from .modules.video_decoder import extract_random_frames
@@ -62,7 +70,7 @@ def extract_keyframes(self: Task, context: dict) -> dict:
         num_frames = workflow_context.input_params.get("keyframe_sample_count", 100)
         keyframes_dir = os.path.join(workflow_context.shared_storage_path, "keyframes")
 
-        logging.info(f"[{stage_name}] 开始从 {video_path} 抽取 {num_frames} 帧...")
+        logger.info(f"[{stage_name}] 开始从 {video_path} 抽取 {num_frames} 帧...")
         
         frame_paths = extract_random_frames(video_path, num_frames, keyframes_dir)
 
@@ -72,10 +80,10 @@ def extract_keyframes(self: Task, context: dict) -> dict:
         output_data = {"keyframe_dir": keyframes_dir}
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
-        logging.info(f"[{stage_name}] 抽帧完成，产物目录: {keyframes_dir}。")
+        logger.info(f"[{stage_name}] 抽帧完成，产物目录: {keyframes_dir}。")
 
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
@@ -109,7 +117,7 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
 
         cropped_images_dir = os.path.join(workflow_context.shared_storage_path, "cropped_images")
 
-        logging.info(f"[{stage_name}] 准备通过外部脚本从 {video_path} 并发解码并裁剪字幕区域: {crop_area}...")
+        logger.info(f"[{stage_name}] 准备通过外部脚本从 {video_path} 并发解码并裁剪字幕区域: {crop_area}...")
         
         result_str = ""
         try:
@@ -130,7 +138,7 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
             result_str = result.stdout.strip()
 
             if result.stderr:
-                logging.warning(f"[{stage_name}] 视频解码子进程有 stderr 输出:\n{result.stderr.strip()}")
+                logger.warning(f"[{stage_name}] 视频解码子进程有 stderr 输出:\n{result.stderr.strip()}")
 
             if not result_str:
                 raise RuntimeError("视频解码脚本执行成功，但没有返回任何输出。")
@@ -140,26 +148,26 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
                 raise RuntimeError(f"核心函数 decode_video_concurrently 未能成功完成: {result_data.get('msg')}")
 
         except json.JSONDecodeError as e:
-            logging.error(f"[{stage_name}] JSON解码失败。接收到的原始 stdout 是:\n---\n{result_str}\n---")
+            logger.error(f"[{stage_name}] JSON解码失败。接收到的原始 stdout 是:\n---\n{result_str}\n---")
             raise RuntimeError("Failed to decode JSON from video decoder subprocess.") from e
         except subprocess.TimeoutExpired as e:
             stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logging.error(f"[{stage_name}] 视频解码子进程执行超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
+            logger.error(f"[{stage_name}] 视频解码子进程执行超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
             raise RuntimeError(f"Video decoding subprocess timed out after {e.timeout} seconds.") from e
         except subprocess.CalledProcessError as e:
             stdout_output = e.stdout.strip() if e.stdout else "(empty)"
             stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logging.error(f"[{stage_name}] 视频解码子进程执行失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
+            logger.error(f"[{stage_name}] 视频解码子进程执行失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
             raise RuntimeError(f"Video decoding subprocess failed with exit code {e.returncode}.") from e
 
         final_frames_path = os.path.join(cropped_images_dir, "frames")
         output_data = {"cropped_images_path": final_frames_path}
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
-        logging.info(f"[{stage_name}] 字幕条裁剪完成。")
+        logger.info(f"[{stage_name}] 字幕条裁剪完成。")
 
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"

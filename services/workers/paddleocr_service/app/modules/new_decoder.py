@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
-import subprocess
 import json
 import os
-from multiprocessing import Process, Queue
-from typing import List, Callable
+import subprocess
+from multiprocessing import Process
+from multiprocessing import Queue
+from typing import Callable
+from typing import List
+
 
 def get_video_info(video_path: str) -> dict:
     """
@@ -114,6 +117,7 @@ def split_video(video_path: str, num_splits: int, output_dir: str) -> List[str]:
     return sub_video_paths
 
 import av
+
 
 def split_video_pyav(video_path: str, num_splits: int, output_dir: str) -> List[str]:
     """

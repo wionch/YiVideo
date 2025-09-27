@@ -8,9 +8,14 @@
 不同任务之间传递的数据拥有一致、可预测且经过验证的结构。
 """
 
-from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
 import uuid
+from typing import Any
+from typing import Dict
+from typing import Optional
+
+from pydantic import BaseModel
+from pydantic import Field
+
 
 class StageExecution(BaseModel):
     """

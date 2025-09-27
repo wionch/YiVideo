@@ -9,10 +9,18 @@
 """
 
 import logging
-from celery import chain, signature
-from typing import Dict, Any, List
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from services.common.logger import get_logger
+
+logger = get_logger('workflow_factory')
+from typing import Any
+from typing import Dict
+from typing import List
+
+from celery import chain
+from celery import signature
+
+# 日志已统一管理，使用 services.common.logger
 
 def build_workflow_chain(workflow_config: Dict[str, Any], initial_context: Dict[str, Any]) -> chain:
     """
@@ -34,7 +42,7 @@ def build_workflow_chain(workflow_config: Dict[str, Any], initial_context: Dict[
     if not task_names or not isinstance(task_names, list):
         raise ValueError("工作流配置中缺少或无效的 'workflow_chain' 列表。")
 
-    logging.info(f"正在为工作流构建任务链: {' -> '.join(task_names)}")
+    logger.info(f"正在为工作流构建任务链: {' -> '.join(task_names)}")
 
     task_signatures = []
     for i, task_name in enumerate(task_names):
@@ -63,6 +71,6 @@ def build_workflow_chain(workflow_config: Dict[str, Any], initial_context: Dict[
 
     # 将所有任务签名连接成一个链
     workflow_chain = chain(task_signatures)
-    logging.info("成功构建动态、解耦的工作流任务链。")
+    logger.info("成功构建动态、解耦的工作流任务链。")
     
     return workflow_chain

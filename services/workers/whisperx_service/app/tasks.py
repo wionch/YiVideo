@@ -1,19 +1,28 @@
 # services/workers/whisperx_service/app/tasks.py
 import os
-import subprocess
-import whisperx
-import logging
-from celery import Celery, Task
 
-# 导入标准上下文和锁
-from services.common.context import WorkflowContext, StageExecution
-from services.common.locks import gpu_lock
+from services.common.logger import get_logger
+
+logger = get_logger('tasks')
+import logging
+import subprocess
+
+import whisperx
+from celery import Celery
+from celery import Task
+
 from services import state_manager
+
 # 导入新的通用配置加载器
 from services.common.config_loader import CONFIG
 
+# 导入标准上下文和锁
+from services.common.context import StageExecution
+from services.common.context import WorkflowContext
+from services.common.locks import gpu_lock
+
 # --- 日志配置 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 # --- Celery App Configuration ---
 BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
@@ -52,7 +61,7 @@ def get_whisperx_models():
         device = cfg.get('device', 'cuda')
         compute_type = cfg.get('compute_type', 'float16')
 
-        logging.info(f"Loading WhisperX ASR model '{model_name}'...")
+        logger.info(f"Loading WhisperX ASR model '{model_name}'...")
         ASR_MODEL = whisperx.load_model(
             model_name, 
             device, 
@@ -62,12 +71,12 @@ def get_whisperx_models():
         
         # 仅当语言代码有效时才加载对齐模型
         if language:
-            logging.info(f"Loading WhisperX Alignment model for language '{language}'...")
+            logger.info(f"Loading WhisperX Alignment model for language '{language}'...")
             ALIGN_MODEL, ALIGN_METADATA = whisperx.load_align_model(
                 language_code=language, 
                 device=device
             )
-        logging.info("WhisperX models loaded.")
+        logger.info("WhisperX models loaded.")
 
 def segments_to_srt(segments: list) -> str:
     """Converts whisperx segments to SRT format."""
@@ -104,10 +113,10 @@ def generate_subtitles(self: Task, context: dict) -> dict:
         if not video_path or not os.path.exists(video_path):
             raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
-        logging.info(f"[{stage_name}] 开始处理: {video_path}")
+        logger.info(f"[{stage_name}] 开始处理: {video_path}")
 
         temp_audio_path = os.path.join(workflow_context.shared_storage_path, f"{workflow_context.workflow_id}.wav")
-        logging.info(f"[{stage_name}] 提取音频到: {temp_audio_path}")
+        logger.info(f"[{stage_name}] 提取音频到: {temp_audio_path}")
         command = [
             "ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
             "-ar", "16000", "-ac", "1", "-y", temp_audio_path
@@ -118,16 +127,16 @@ def generate_subtitles(self: Task, context: dict) -> dict:
         batch_size = cfg.get('batch_size', 4)
         device = cfg.get('device', 'cuda')
 
-        logging.info(f"[{stage_name}] 开始转录音频...")
+        logger.info(f"[{stage_name}] 开始转录音频...")
         audio = whisperx.load_audio(temp_audio_path)
         result = ASR_MODEL.transcribe(audio, batch_size=batch_size)
 
         # 仅当对齐模型加载成功时才执行对齐
         if ALIGN_MODEL is not None:
-            logging.info(f"[{stage_name}] 开始对齐结果...")
+            logger.info(f"[{stage_name}] 开始对齐结果...")
             result = whisperx.align(result["segments"], ALIGN_MODEL, ALIGN_METADATA, audio, device, return_char_alignments=False)
         else:
-            logging.warning(f"[{stage_name}] 未加载对齐模型，跳过对齐步骤。")
+            logger.warning(f"[{stage_name}] 未加载对齐模型，跳过对齐步骤。")
 
         subtitle_filename = f"{os.path.splitext(os.path.basename(video_path))[0]}.srt"
         subtitle_path = os.path.join(workflow_context.shared_storage_path, subtitle_filename)
@@ -135,14 +144,14 @@ def generate_subtitles(self: Task, context: dict) -> dict:
         with open(subtitle_path, 'w', encoding='utf-8') as f:
             f.write(srt_content)
         
-        logging.info(f"[{stage_name}] 处理完成，生成文件: {subtitle_path}")
+        logger.info(f"[{stage_name}] 处理完成，生成文件: {subtitle_path}")
 
         output_data = {"subtitle_file": subtitle_path}
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
         
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         if isinstance(e, subprocess.CalledProcessError):
             error_message = e.stderr or str(e)
             workflow_context.stages[stage_name].error = f"FFmpeg 错误: {error_message}"
@@ -154,7 +163,7 @@ def generate_subtitles(self: Task, context: dict) -> dict:
     finally:
         if temp_audio_path and os.path.exists(temp_audio_path):
             os.remove(temp_audio_path)
-            logging.info(f"[{stage_name}] 清理临时文件: {temp_audio_path}")
+            logger.info(f"[{stage_name}] 清理临时文件: {temp_audio_path}")
 
     state_manager.update_workflow_state(workflow_context)
     return workflow_context.dict()

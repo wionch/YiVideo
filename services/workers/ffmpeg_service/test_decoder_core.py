@@ -1,10 +1,14 @@
 import os
-import time
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 
 # 导入更新后的核心模块函数
-from app.modules.video_decoder import get_video_info, split_video_fast, decode_videos_to_frames_concurrently
+from app.modules.video_decoder import decode_videos_to_frames_concurrently
+from app.modules.video_decoder import get_video_info
+from app.modules.video_decoder import split_video_fast
+
 
 def get_segment_frame_count(video_path: str) -> int:
     """线程安全的辅助函数，用于获取单个视频文件的帧数。"""

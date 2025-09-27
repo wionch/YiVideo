@@ -8,10 +8,11 @@ check_env.py
 包括 CUDA, cuDNN, PyTorch, PaddlePaddle, 和 FFmpeg.
 """
 
-import sys
-import subprocess
-import re
 import os
+import re
+import subprocess
+import sys
+
 
 # 用于彩色输出的辅助函数
 def green(text):

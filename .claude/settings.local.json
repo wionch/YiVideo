@@ -24,7 +24,8 @@
       "Bash(for service in ffmpeg llm whisperx paddleocr)",
       "Bash(do echo \"=== $service_service ===\")",
       "Bash(grep:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []

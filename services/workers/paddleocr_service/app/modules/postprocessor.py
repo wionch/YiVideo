@@ -1,13 +1,20 @@
 # services/workers/paddleocr_service/app/modules/postprocessor.py
 # 字幕后处理模块 - 支持关键帧驱动和全帧处理两种模式
 import numpy as np
-import re
+
+from services.common.logger import get_logger
+
+logger = get_logger('postprocessor')
 import difflib  # 用于文本相似度比较
 import logging
-from typing import List, Dict, Tuple, Any
+import re
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Tuple
 
 # 配置日志输出格式
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 class SubtitlePostprocessor:
     """
@@ -31,7 +38,7 @@ class SubtitlePostprocessor:
         self.min_duration_seconds = self.config.get('min_duration_seconds', 0.2)
         # [FIX] 将相似度阈值设为可配置，并降低默认值以容忍OCR波动
         self.similarity_threshold = self.config.get('similarity_threshold', 0.6)
-        logging.info(f"Subtitle Postprocessor loaded (V3 - Multi-Mode). Thresholds: min_duration={self.min_duration_seconds}s, similarity={self.similarity_threshold}")
+        logger.info(f"Subtitle Postprocessor loaded (V3 - Multi-Mode). Thresholds: min_duration={self.min_duration_seconds}s, similarity={self.similarity_threshold}")
 
     def format_from_keyframes(self, segments: List[Dict], ocr_results: Dict[int, Tuple[str, Any]], fps: float) -> List[Dict[str, Any]]:
         """
@@ -50,10 +57,10 @@ class SubtitlePostprocessor:
         """
         # 输入验证 - 检查关键输入参数
         if not segments or not ocr_results:
-            logging.warning("Segments or OCR results are empty, skipping keyframe post-processing.")
+            logger.warning("Segments or OCR results are empty, skipping keyframe post-processing.")
             return []
             
-        logging.info(f"Starting keyframe-driven post-processing: {len(segments)} segments, {len(ocr_results)} OCR results.")
+        logger.info(f"Starting keyframe-driven post-processing: {len(segments)} segments, {len(ocr_results)} OCR results.")
         
         final_subtitles = []
         # 遍历每个预处理的segment
@@ -91,7 +98,7 @@ class SubtitlePostprocessor:
         
         # 合并重复的相似字幕
         merged_subtitles = self._merge_duplicate_subtitles(final_subtitles)
-        logging.info(f"Keyframe post-processing complete: {len(merged_subtitles)} subtitles generated.")
+        logger.info(f"Keyframe post-processing complete: {len(merged_subtitles)} subtitles generated.")
         # 重新分配连续ID并返回
         return self._reassign_ids(merged_subtitles)
 
@@ -111,10 +118,10 @@ class SubtitlePostprocessor:
         """
         # 输入验证
         if not ocr_results:
-            logging.warning("OCR results are empty, skipping full-frame post-processing.")
+            logger.warning("OCR results are empty, skipping full-frame post-processing.")
             return []
 
-        logging.info(f"Starting full-frame post-processing for {len(ocr_results)} frames.")
+        logger.info(f"Starting full-frame post-processing for {len(ocr_results)} frames.")
 
         # 1. 从原始逐帧OCR结果构建字幕段
         segments = []
@@ -176,7 +183,7 @@ class SubtitlePostprocessor:
         
         # 3. 合并可能因小间隙而产生的重复字幕
         merged_subtitles = self._merge_duplicate_subtitles(final_subtitles)
-        logging.info(f"Full-frame post-processing complete: {len(merged_subtitles)} subtitles generated.")
+        logger.info(f"Full-frame post-processing complete: {len(merged_subtitles)} subtitles generated.")
         return self._reassign_ids(merged_subtitles)
 
     def _clean_and_format_segments(self, segments: List[Dict], fps: float) -> List[Dict]:
@@ -237,7 +244,7 @@ class SubtitlePostprocessor:
             return [[int(p[0]), int(p[1])] for p in bbox]
         except (TypeError, IndexError, ValueError) as e:
             # 如果bbox的结构不是预期的 [[x,y], ...], 记录警告并返回空列表
-            logging.warning(f"Failed to format bbox due to unexpected structure: {bbox}. Error: {e}")
+            logger.warning(f"Failed to format bbox due to unexpected structure: {bbox}. Error: {e}")
             return []
 
     def _merge_duplicate_subtitles(self, subtitles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

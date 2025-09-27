@@ -8,19 +8,27 @@ API Gateway的主应用文件。
 """
 
 import os
-import uuid
+
+from services.common.logger import get_logger
+
+logger = get_logger('main')
 import logging
+import uuid
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from typing import Dict, Any
+from typing import Any
+from typing import Dict
+
+from fastapi import FastAPI
+from fastapi import HTTPException
+from pydantic import BaseModel
+from pydantic import Field
+
+# 导入共享的数据结构
+from services.common.context import WorkflowContext
 
 # 导入本服务的核心逻辑模块
 from . import state_manager
 from . import workflow_factory
-
-# 导入共享的数据结构
-from services.common.context import WorkflowContext
 
 # --- FastAPI 应用初始化 ---
 
@@ -30,7 +38,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 # --- API 请求/响应 模型定义 ---
 
@@ -50,7 +58,7 @@ def create_workflow(request: WorkflowRequest) -> Dict[str, str]:
     """
     创建并启动一个新的AI处理工作流。
     """
-    logging.info(f"接收到新的工作流请求: video_path='{request.video_path}', config='{request.workflow_config}'")
+    logger.info(f"接收到新的工作流请求: video_path='{request.video_path}', config='{request.workflow_config}'")
     
     workflow_id = str(uuid.uuid4())
     shared_storage_path = f"/share/workflows/{workflow_id}"
@@ -59,7 +67,7 @@ def create_workflow(request: WorkflowRequest) -> Dict[str, str]:
         # 关键步骤：确保工作流的独立目录存在
         os.makedirs(shared_storage_path, exist_ok=True)
         os.chmod(shared_storage_path, 0o777) # 赋予777权限，允许任何worker服务写入
-        logging.info(f"已为 workflow_id='{workflow_id}' 创建共享目录: {shared_storage_path}")
+        logger.info(f"已为 workflow_id='{workflow_id}' 创建共享目录: {shared_storage_path}")
 
         # 1. 创建初始工作流上下文
         initial_context = WorkflowContext(
@@ -81,17 +89,17 @@ def create_workflow(request: WorkflowRequest) -> Dict[str, str]:
         )
 
         # 4. 异步执行任务链
-        logging.info(f"正在为 workflow_id='{workflow_id}' 启动任务链...")
+        logger.info(f"正在为 workflow_id='{workflow_id}' 启动任务链...")
         workflow_chain.apply_async()
 
         # 5. 立即返回，表示请求已被接受处理
         return {"workflow_id": workflow_id}
 
     except ValueError as e:
-        logging.error(f"工作流构建失败: {e}")
+        logger.error(f"工作流构建失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logging.error(f"创建工作流时发生未知错误: {e}", exc_info=True)
+        logger.error(f"创建工作流时发生未知错误: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An internal error occurred while creating the workflow.")
 
 
@@ -100,7 +108,7 @@ def get_workflow_status(workflow_id: str) -> Dict[str, Any]:
     """
     查询一个工作流的当前状态。
     """
-    logging.info(f"正在查询 workflow_id='{workflow_id}' 的状态...")
+    logger.info(f"正在查询 workflow_id='{workflow_id}' 的状态...")
     state = state_manager.get_workflow_state(workflow_id)
     
     if state.get("error"):

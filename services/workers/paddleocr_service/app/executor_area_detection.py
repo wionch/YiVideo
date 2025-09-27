@@ -4,13 +4,16 @@
 此脚本通过动态修正 sys.path 来确保可以正确导入项目模块，
 并在一个干净的、非守护的进程环境中运行，可以安全地创建多进程池。
 """
-import sys
+import argparse
 import json
 import logging
-import argparse
-import cv2
 import os
+import sys
 from pathlib import Path
+
+import cv2
+
+from services.common.logger import get_logger
 
 # [核心修正] 动态将项目根目录('/app')添加到 sys.path
 # 这确保了无论此脚本从何处被调用，都能找到 'common' 和 'services' 等顶级模块。
@@ -20,11 +23,12 @@ project_root = Path(__file__).resolve().parents[4]
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
-# 使用绝对路径导入，确保无歧义
-from services.workers.paddleocr_service.app.modules.area_detector import SubtitleAreaDetector
 from services.common.config_loader import CONFIG
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [AreaDetectorExecutor] - %(levelname)s - %(message)s')
+# 使用绝对路径导入，确保无歧义
+from services.workers.paddleocr_service.app.modules.area_detector import SubtitleAreaDetector
+
+# 日志已统一管理，使用 services.common.logger
 
 def main():
     """主执行函数"""

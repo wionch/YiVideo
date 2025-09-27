@@ -2,11 +2,13 @@
 """
 独立的视频并发解码执行脚本。
 """
-import sys
+import argparse
 import json
 import logging
-import argparse
+import sys
 from pathlib import Path
+
+from services.common.logger import get_logger
 
 # [核心修正] 动态将项目根目录('/app')添加到 sys.path
 project_root = Path(__file__).resolve().parents[4]
@@ -16,7 +18,7 @@ if str(project_root) not in sys.path:
 # 使用绝对路径导入
 from services.workers.ffmpeg_service.app.modules.video_decoder import decode_video_concurrently
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [VideoDecodeExecutor] - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 def main():
     """主执行函数"""

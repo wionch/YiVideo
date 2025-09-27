@@ -1,12 +1,20 @@
 # pipeline/modules/change_detector.py
-import torch
-import numpy as np
-import cv2
-from typing import List, Tuple
-from enum import Enum, auto
+from enum import Enum
+from enum import auto
+from typing import List
+from typing import Tuple
 
-from .decoder import GPUDecoder
+import cv2
+import numpy as np
+import torch
+
 from ..utils.progress_logger import create_stage_progress
+from .decoder import GPUDecoder
+from .base_detector import BaseDetector, ConfigManager
+from services.common.logger import get_logger
+
+logger = get_logger('change_detector')
+
 
 class ChangeType(Enum):
     """
@@ -16,21 +24,42 @@ class ChangeType(Enum):
     TEXT_DISAPPEARED = auto()   # 文本消失 (从有到无)
     CONTENT_CHANGED = auto()    # 文本内容变化 (从有到有，但内容不同)
 
-class ChangeDetector:
+class ChangeDetector(BaseDetector):
     """
     通过dHash和像素标准差的混合方法，高效检测字幕变化的关键帧及其变化类型。
     """
     def __init__(self, config):
-        self.config = config
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
-        # dHash配置
-        self.hash_size = config.get('dhash_size', 8)
-        
-        # 变化检测阈值
-        self.hamming_threshold = config.get('hamming_threshold', 3)
-        
-        print("模块: 变化检测器已加载 (V2 - 事件驱动)。")
+        """
+        初始化变化检测器
+
+        Args:
+            config: 检测器配置
+        """
+        # 使用ConfigManager验证和规范化配置
+        required_keys = []
+        optional_keys = {
+            'dhash_size': 8,
+            'hamming_threshold': 3,
+            'frame_memory_estimate_mb': 0.307,
+            'progress_interval_frames': 1000,
+            'progress_interval_batches': 50
+        }
+
+        validated_config = ConfigManager.validate_config(config, required_keys, optional_keys)
+
+        # 调用父类初始化
+        super().__init__(validated_config)
+
+        # 设置变化检测器特有的配置
+        self.hash_size = ConfigManager.validate_range(
+            validated_config['dhash_size'], 1, 32, 'dhash_size'
+        )
+
+        self.hamming_threshold = ConfigManager.validate_range(
+            validated_config['hamming_threshold'], 0, 64, 'hamming_threshold'
+        )
+
+        logger.info("变化检测器已加载 (V2 - 事件驱动)")
 
     def find_key_frames(self, video_path: str, decoder: GPUDecoder, subtitle_area: Tuple[int, int, int, int]) -> List[Tuple[int, ChangeType]]:
         """
@@ -160,5 +189,34 @@ class ChangeDetector:
                 print(f"  🔍 变化检测进度: {i}/{len(hashes)} ({progress_percent:.1f}%), 已找到 {len(key_events)} 个事件")
         
         print(f"✅ 变化检测完成，共找到 {len(key_events)} 个关键事件")
-        
+
         return key_events
+
+    def detect(self, video_path: str, decoder, subtitle_area: Tuple[int, int, int], **kwargs) -> List[Tuple[int, ChangeType]]:
+        """
+        实现基类的抽象检测方法
+
+        Args:
+            video_path: 视频文件路径
+            decoder: GPU解码器实例
+            subtitle_area: 字幕区域坐标
+            **kwargs: 其他参数
+
+        Returns:
+            关键事件列表 (帧索引, 变化类型)
+        """
+        self._start_processing()
+        try:
+            key_events = self.find_key_frames(video_path, decoder, subtitle_area)
+            return key_events
+        finally:
+            self._finish_processing()
+
+    def get_detector_name(self) -> str:
+        """
+        获取检测器名称
+
+        Returns:
+            检测器名称
+        """
+        return "ChangeDetector"

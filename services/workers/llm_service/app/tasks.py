@@ -1,18 +1,28 @@
 # services/workers/llm_service/app/tasks.py
 import os
-import requests
-import yaml
+
+from services.common.logger import get_logger
+
+logger = get_logger('tasks')
 import json
 import logging
-from celery import Celery, Task
-from typing import Dict, Any, Optional
+from typing import Any
+from typing import Dict
+from typing import Optional
 
-# 导入标准上下文
-from services.common.context import WorkflowContext, StageExecution
+import requests
+import yaml
+from celery import Celery
+from celery import Task
+
 from services.common import state_manager
 
+# 导入标准上下文
+from services.common.context import StageExecution
+from services.common.context import WorkflowContext
+
 # --- 日志配置 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 # --- 配置加载 ---
 CONFIG = {}
@@ -24,9 +34,9 @@ def load_config():
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             CONFIG = yaml.safe_load(f)
-        logging.info("LLM Service: 主配置文件加载成功。")
+        logger.info("LLM Service: 主配置文件加载成功。")
     except Exception as e:
-        logging.error(f"LLM Service: 加载配置文件时出错: {e}")
+        logger.error(f"LLM Service: 加载配置文件时出错: {e}")
 
 # --- LLM API 客户端 ---
 
@@ -97,9 +107,9 @@ def setup_llm_clients(sender, **kwargs):
         try:
             if provider_config.get('api_key'): # 只初始化配置了API Key的客户端
                 LLM_CLIENTS[name] = LLMClient(name, provider_config)
-                logging.info(f"成功初始化LLM客户端: {name}")
+                logger.info(f"成功初始化LLM客户端: {name}")
         except ValueError as e:
-            logging.warning(f"初始化LLM客户端 '{name}' 失败: {e}")
+            logger.warning(f"初始化LLM客户端 '{name}' 失败: {e}")
 
 def _find_input_file_from_previous_stage(self: Task, context: WorkflowContext) -> Optional[str]:
     """在工作流中动态查找上一个阶段的输出文件作为本阶段的输入。"""
@@ -115,10 +125,10 @@ def _find_input_file_from_previous_stage(self: Task, context: WorkflowContext) -
         for key, value in previous_stage_output.items():
             if isinstance(value, str) and ('_file' in key or '_path' in key):
                 if os.path.exists(value):
-                    logging.info(f"从上一阶段 '{previous_stage_name}' 找到输入文件: {value}")
+                    logger.info(f"从上一阶段 '{previous_stage_name}' 找到输入文件: {value}")
                     return value
     except (KeyError, ValueError, IndexError) as e:
-        logging.warning(f"无法从上一阶段动态确定输入文件: {e}")
+        logger.warning(f"无法从上一阶段动态确定输入文件: {e}")
     return None
 
 @celery_app.task(bind=True, name='llm.process_text')
@@ -155,7 +165,7 @@ def process_text(self: Task, context: dict) -> dict:
 
         prompt = prompt_template.format(text=text_content)
 
-        logging.info(f"[{stage_name}] 开始使用 '{provider}' 执行 '{action}' 操作...")
+        logger.info(f"[{stage_name}] 开始使用 '{provider}' 执行 '{action}' 操作...")
         client = LLM_CLIENTS[provider]
         processed_text = client.generate(prompt)
 
@@ -163,14 +173,14 @@ def process_text(self: Task, context: dict) -> dict:
         output_file = os.path.join(workflow_context.shared_storage_path, output_filename)
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(processed_text)
-        logging.info(f"[{stage_name}] 操作完成，结果已保存至: {output_file}")
+        logger.info(f"[{stage_name}] 操作完成，结果已保存至: {output_file}")
 
         output_data = {"output_file": output_file, "provider": provider}
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
         
     except Exception as e:
-        logging.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"

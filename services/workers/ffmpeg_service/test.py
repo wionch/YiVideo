@@ -1,12 +1,14 @@
-import subprocess
-import os
 import json
-import time
+import os
 import shutil
+import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 # 导入新增的并发解码函数
-from app.modules.video_decoder import decode_video_concurrently, extract_random_frames, extract_random_frames_select
+from app.modules.video_decoder import decode_video_concurrently
+from app.modules.video_decoder import extract_random_frames
+from app.modules.video_decoder import extract_random_frames_select
 
 # --- 用户配置 ---
 INPUT_VIDEO = "/app/videos/223.mp4"         # 你的视频文件名

@@ -1,15 +1,24 @@
 # app/modules/keyframe_detector.py
-import torch
-import numpy as np
-import cv2
+import gc  # 🆕 内存优化: 引入垃圾回收模块
 import json
 import os
-import gc # 🆕 内存优化: 引入垃圾回收模块
 from datetime import datetime
-from typing import List, Tuple, Dict
-from .decoder import GPUDecoder
+from typing import Dict
+from typing import List
+from typing import Tuple
 
-class KeyFrameDetector:
+import cv2
+import numpy as np
+import torch
+
+from .decoder import GPUDecoder
+from .base_detector import BaseDetector, ConfigManager, ProgressTracker
+from services.common.logger import get_logger
+
+logger = get_logger('keyframe_detector')
+
+
+class KeyFrameDetector(BaseDetector):
     """
     关键帧检测器 - 简化版本 (仅dHash)
     基于dHash相似度的关键帧检测，已移除标准差和大津算法
@@ -26,42 +35,51 @@ class KeyFrameDetector:
     """
     
     def __init__(self, config):
-        self.config = config
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
-        # dHash配置
-        self.hash_size = config.get('dhash_size', 8)
-        if self.hash_size <= 0 or not isinstance(self.hash_size, int):
-            raise ValueError(f"dhash_size必须是正整数，当前值: {self.hash_size}")
-        
-        # 相似度阈值配置 (基于dHash汉明距离)
-        self.similarity_threshold = config.get('similarity_threshold', 0.90)  # 90%默认
-        if not (0 < self.similarity_threshold < 1):
-            raise ValueError(f"similarity_threshold必须在(0,1)范围内，当前值: {self.similarity_threshold}")
-        
-        self.frame_memory_estimate_mb = config.get('frame_memory_estimate_mb', 0.307)  # 每帧内存估算(MB)
-        if self.frame_memory_estimate_mb <= 0:
-            raise ValueError(f"frame_memory_estimate_mb必须大于0，当前值: {self.frame_memory_estimate_mb}")
-        
-        # dHash区域优化配置
-        self.dhash_focus_ratio = config.get('dhash_focus_ratio', 3.0)  # 高差倍数，用于计算中心区域宽度
-        self.min_focus_width = config.get('min_focus_width', 200)      # 最小焦点宽度保护
-        if self.dhash_focus_ratio <= 0:
-            raise ValueError(f"dhash_focus_ratio必须大于0，当前值: {self.dhash_focus_ratio}")
-        if self.min_focus_width <= 0:
-            raise ValueError(f"min_focus_width必须大于0，当前值: {self.min_focus_width}")
-        
-        # 进度显示配置
-        self.progress_interval_frames = config.get('progress_interval_frames', 1000)  # 进度显示间隔
-        if self.progress_interval_frames <= 0 or not isinstance(self.progress_interval_frames, int):
-            raise ValueError(f"progress_interval_frames必须是正整数，当前值: {self.progress_interval_frames}")
-            
-        self.progress_interval_batches = config.get('progress_interval_batches', 50)  # batch进度显示间隔
-        if self.progress_interval_batches <= 0 or not isinstance(self.progress_interval_batches, int):
-            raise ValueError(f"progress_interval_batches必须是正整数，当前值: {self.progress_interval_batches}")
-        
-        print(f"模块: 关键帧检测器已加载 (简化版本-仅dHash) - 相似度阈值: {self.similarity_threshold:.0%}, "
-              f"dHash焦点区域: 高差×{self.dhash_focus_ratio}")
+        """
+        初始化关键帧检测器
+
+        Args:
+            config: 检测器配置
+        """
+        # 使用ConfigManager验证和规范化配置
+        required_keys = []  # 关键帧检测器没有必需的配置项
+        optional_keys = {
+            'dhash_size': 8,
+            'similarity_threshold': 0.90,
+            'frame_memory_estimate_mb': 0.307,
+            'dhash_focus_ratio': 3.0,
+            'min_focus_width': 200,
+            'progress_interval_frames': 1000,
+            'progress_interval_batches': 50
+        }
+
+        validated_config = ConfigManager.validate_config(config, required_keys, optional_keys)
+
+        # 调用父类初始化
+        super().__init__(validated_config)
+
+        # 设置关键帧检测器特有的配置
+        self.hash_size = ConfigManager.validate_range(
+            validated_config['dhash_size'], 1, 32, 'dhash_size'
+        )
+
+        self.similarity_threshold = ConfigManager.validate_range(
+            validated_config['similarity_threshold'], 0.0, 1.0, 'similarity_threshold'
+        )
+
+        self.dhash_focus_ratio = ConfigManager.validate_range(
+            validated_config['dhash_focus_ratio'], 0.1, 10.0, 'dhash_focus_ratio'
+        )
+
+        self.min_focus_width = ConfigManager.validate_range(
+            validated_config['min_focus_width'], 1, 1000, 'min_focus_width'
+        )
+
+        # 初始化进度跟踪器
+        self.progress_tracker = None
+
+        logger.info(f"关键帧检测器已加载 - 相似度阈值: {self.similarity_threshold:.0%}, "
+                   f"dHash焦点区域: 高差×{self.dhash_focus_ratio}")
 
     def _optimize_dhash_region(self, subtitle_area: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """
@@ -724,3 +742,32 @@ class KeyFrameDetector:
         
         print(f"✅ 生成了 {len(segments)} 个字幕段落")
         return segments
+
+    def detect(self, video_path: str, decoder, subtitle_area: Tuple[int, int, int], **kwargs) -> List[int]:
+        """
+        实现基类的抽象检测方法
+
+        Args:
+            video_path: 视频文件路径
+            decoder: GPU解码器实例
+            subtitle_area: 字幕区域坐标
+            **kwargs: 其他参数
+
+        Returns:
+            关键帧索引列表
+        """
+        self._start_processing()
+        try:
+            keyframes = self.detect_keyframes(video_path, decoder, subtitle_area)
+            return keyframes
+        finally:
+            self._finish_processing()
+
+    def get_detector_name(self) -> str:
+        """
+        获取检测器名称
+
+        Returns:
+            检测器名称
+        """
+        return "KeyFrameDetector"

@@ -1,10 +1,14 @@
 # pipeline/modules/decoder.py
-import av
-import torch
-import numpy as np
-from typing import Generator, Tuple
 import time
+from typing import Generator
+from typing import Tuple
+
+import av
+import numpy as np
+import torch
+
 from ..utils.progress_logger import create_progress_bar
+
 
 class GPUDecoder:
     """

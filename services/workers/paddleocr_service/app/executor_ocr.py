@@ -3,25 +3,32 @@
 独立的OCR执行脚本，通过subprocess调用。
 此脚本消费由上游任务生成的拼接图片和清单(manifest)文件，执行OCR并进行坐标反推。
 """
-import os
-import sys
+import argparse
 import json
 import logging
-import argparse
-import numpy as np
+import os
+import sys
 from pathlib import Path
-from typing import List, Dict, Tuple, Any
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Tuple
+
+import numpy as np
+
+from services.common.logger import get_logger
 
 # [核心修正] 动态将项目根目录('/app')添加到 sys.path
 project_root = Path(__file__).resolve().parents[4]
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
-# 使用绝对路径导入，确保无歧义
-from services.workers.paddleocr_service.app.modules.ocr import MultiProcessOCREngine
 from services.common.config_loader import CONFIG
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [OCRExecutor] - %(levelname)s - %(message)s')
+# 使用绝对路径导入，确保无歧义
+from services.workers.paddleocr_service.app.modules.ocr import MultiProcessOCREngine
+
+# 日志已统一管理，使用 services.common.logger
 
 class NumpyEncoder(json.JSONEncoder):
     """ 自定义JSON编码器，用于处理Numpy数据类型 """

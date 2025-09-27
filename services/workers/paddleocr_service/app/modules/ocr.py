@@ -1,18 +1,27 @@
 # services/workers/paddleocr_service/app/modules/ocr.py
 import numpy as np
+
+from services.common.logger import get_logger
+
+logger = get_logger('ocr')
+import logging
 import multiprocessing
 import os
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Tuple
+
 import cv2
-import logging
 import torch
 from paddleocr import PaddleOCR
-from typing import List, Tuple, Dict, Any
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from ..utils.progress_logger import create_stage_progress
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志已统一管理，使用 services.common.logger
 
 # --- Global variables for worker processes ---
 full_ocr_engine_process_global = None
@@ -25,7 +34,7 @@ class MultiProcessOCREngine:
         self.config = config
         self.lang = config.get('lang', 'en')
         self.num_workers = config.get('num_workers', 4)
-        logging.info(f"OCR Engine loaded (V6), lang: {self.lang}, workers: {self.num_workers}")
+        logger.info(f"OCR Engine loaded (V6), lang: {self.lang}, workers: {self.num_workers}")
 
     def recognize_stitched(self, ocr_tasks: List[Tuple[str, str]]) -> Dict[str, List[Tuple[str, Any]]]:
         """
@@ -41,7 +50,7 @@ class MultiProcessOCREngine:
         if not ocr_tasks:
             return {}
         
-        logging.info(f"Starting batch OCR on {len(ocr_tasks)} stitched images.")
+        logger.info(f"Starting batch OCR on {len(ocr_tasks)} stitched images.")
 
         # The worker task will return (stitched_filename, texts, boxes)
         raw_results = self._multiprocess_ocr_batch(ocr_tasks)
@@ -54,7 +63,7 @@ class MultiProcessOCREngine:
                 ocr_data_for_image.append((text, box))
             final_results_map[stitched_filename] = ocr_data_for_image
         
-        logging.info(f"Finished batch OCR, returning results for {len(final_results_map)} images.")
+        logger.info(f"Finished batch OCR, returning results for {len(final_results_map)} images.")
         return final_results_map
 
     def _multiprocess_ocr_batch(self, tasks: List[Any]) -> List[Any]:
@@ -85,16 +94,16 @@ class MultiProcessOCREngine:
                             results.append(result)
                         progress_bar.update(1)
                     except Exception as e:
-                        logging.error(f"A task failed: {e}", exc_info=True)
+                        logger.error(f"A task failed: {e}", exc_info=True)
                         progress_bar.update(1)
             
             progress_bar.finish(f"✅ 拼接图像OCR完成")
             
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-                logging.info("主进程 GPU 缓存已清理")
+                logger.info("主进程 GPU 缓存已清理")
         except Exception as e:
-            logging.error(f"Multi-process OCR failed: {e}", exc_info=True)
+            logger.error(f"Multi-process OCR failed: {e}", exc_info=True)
             progress_bar.finish(f"❌ 拼接图像OCR失败")
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -111,13 +120,13 @@ def _full_ocr_worker_initializer(full_config: Dict):
         paddle_config = ocr_config.get('paddleocr_config', {})
         lang = ocr_config.get('lang', 'en')
 
-        logging.info(f"[PID: {pid}] Initializing full PaddleOCR engine for lang '{lang}'")
+        logger.info(f"[PID: {pid}] Initializing full PaddleOCR engine for lang '{lang}'")
         
         full_ocr_engine_process_global = PaddleOCR(lang=lang, **paddle_config)
-        logging.info(f"[PID: {pid}] Full PaddleOCR engine initialized successfully.")
+        logger.info(f"[PID: {pid}] Full PaddleOCR engine initialized successfully.")
 
     except Exception as e:
-        logging.error(f"[PID: {pid}] ❌ Full PaddleOCR engine initialization failed: {e}", exc_info=True)
+        logger.error(f"[PID: {pid}] ❌ Full PaddleOCR engine initialization failed: {e}", exc_info=True)
         full_ocr_engine_process_global = None
 
 
@@ -131,7 +140,7 @@ def _full_ocr_worker_task(task: Tuple[str, str]) -> Tuple[str, List[str], List[A
     try:
         image_data = cv2.imread(image_path)
         if image_data is None:
-            logging.warning(f"Could not read image file for task {task_id}: {image_path}")
+            logger.warning(f"Could not read image file for task {task_id}: {image_path}")
             return (task_id, [], [])
 
         ocr_output = full_ocr_engine_process_global.predict(image_data)
@@ -154,5 +163,5 @@ def _full_ocr_worker_task(task: Tuple[str, str]) -> Tuple[str, List[str], List[A
         return (task_id, final_texts, final_boxes)
 
     except Exception as e:
-        logging.error(f"Full OCR task {task_id} execution failed: {e}", exc_info=True)
+        logger.error(f"Full OCR task {task_id} execution failed: {e}", exc_info=True)
         return (task_id, [], [])
