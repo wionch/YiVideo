@@ -30,6 +30,9 @@ from services.common.context import WorkflowContext
 from . import state_manager
 from . import workflow_factory
 
+# 导入监控模块
+from .monitoring import monitoring_api
+
 # --- FastAPI 应用初始化 ---
 
 app = FastAPI(
@@ -37,6 +40,10 @@ app = FastAPI(
     description="一个用于动态编排AI视频处理工作流的引擎。",
     version="1.0.0"
 )
+
+# 集成监控API路由
+monitoring_router = monitoring_api.get_router()
+app.include_router(monitoring_router)
 
 # 日志已统一管理，使用 services.common.logger
 
@@ -115,6 +122,21 @@ def get_workflow_status(workflow_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=state["error"])
         
     return state
+
+@app.on_event("startup")
+async def startup_event():
+    """应用启动事件"""
+    logger.info("正在初始化API Gateway...")
+
+    try:
+        # 初始化监控服务
+        monitoring_api.initialize_monitoring()
+        logger.info("监控服务初始化完成")
+    except Exception as e:
+        logger.error(f"监控服务初始化失败: {e}")
+
+    logger.info("API Gateway 初始化完成")
+
 
 @app.get("/", include_in_schema=False)
 def root():

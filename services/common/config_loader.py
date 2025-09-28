@@ -119,11 +119,13 @@ def get_gpu_lock_config() -> Dict[str, Any]:
 
     Returns:
         Dict[str, Any]: 包含GPU锁配置的字典，包含以下键：
-            - retry_interval: 重试间隔（秒）
-            - max_retries: 最大重试次数
+            - poll_interval: 轮询间隔（秒）
+            - max_wait_time: 最大等待时间（秒）
             - lock_timeout: 锁超时时间（秒）
             - exponential_backoff: 是否启用指数退避
-            - max_retry_interval: 最大重试间隔（秒）
+            - max_poll_interval: 最大轮询间隔（秒）
+            - use_event_driven: 是否启用事件驱动机制（Redis Pub/Sub）
+            - fallback_timeout: 事件驱动回退超时时间（秒）
     """
     try:
         # 每次都重新读取配置文件，确保获取最新配置
@@ -161,16 +163,138 @@ def _get_default_gpu_lock_config() -> Dict[str, Any]:
     """
     获取默认的GPU锁配置。
 
+    优化后的配置参数，更适合生产环境使用：
+    - 减少等待时间，提高响应性
+    - 保持合理的锁超时时间
+    - 启用智能退避机制
+    - 支持事件驱动机制，显著提高响应速度
+
     Returns:
         Dict[str, Any]: 默认GPU锁配置
     """
     return {
-        'poll_interval': 1,            # 轮询间隔（秒）
-        'max_wait_time': 6000,         # 最大等待时间（秒）
-        'lock_timeout': 9000,         # 锁超时时间（秒）
-        'exponential_backoff': True,  # 启用指数退避
-        'max_poll_interval': 10        # 最大轮询间隔（秒）
+        'poll_interval': 0.5,          # 轮询间隔（秒）- 快速响应
+        'max_wait_time': 300,          # 最大等待时间（秒）- 5分钟
+        'lock_timeout': 600,           # 锁超时时间（秒）- 10分钟
+        'exponential_backoff': True,   # 启用指数退避
+        'max_poll_interval': 5,        # 最大轮询间隔（秒）- 避免过长等待
+        'use_event_driven': True,      # 启用事件驱动机制（Redis Pub/Sub）
+        'fallback_timeout': 30         # 事件驱动回退超时时间（秒）
     }
+
+
+def get_gpu_lock_monitor_config() -> Dict[str, Any]:
+    """
+    获取GPU锁监控配置参数。
+
+    Returns:
+        Dict[str, Any]: 包含GPU锁监控配置的字典
+    """
+    try:
+        # 每次都重新读取配置文件，确保获取最新配置
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(current_dir, '..', '..', 'config.yml')
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        if not config:
+            logger.warning("配置文件为空，使用默认GPU锁监控配置")
+            return _get_default_gpu_lock_monitor_config()
+
+        monitor_config = config.get('gpu_lock_monitor', {})
+
+        # 使用默认值填充缺失的配置项
+        default_config = _get_default_gpu_lock_monitor_config()
+        for key, value in default_config.items():
+            if key not in monitor_config:
+                monitor_config[key] = value
+
+        # 验证配置的合法性
+        validated_config = _validate_gpu_lock_monitor_config(monitor_config)
+        return validated_config
+
+    except Exception as e:
+        logger.error(f"读取GPU锁监控配置失败: {e}，使用默认配置")
+        return _get_default_gpu_lock_monitor_config()
+
+
+def _get_default_gpu_lock_monitor_config() -> Dict[str, Any]:
+    """
+    获取默认的GPU锁监控配置。
+
+    Returns:
+        Dict[str, Any]: 默认GPU锁监控配置
+    """
+    return {
+        'monitor_interval': 30,
+        'timeout_levels': {
+            'warning': 1800,
+            'soft_timeout': 3600,
+            'hard_timeout': 7200
+        },
+        'heartbeat': {
+            'interval': 60,
+            'timeout': 300
+        },
+        'cleanup': {
+            'max_retry': 3,
+            'retry_delay': 60
+        },
+        'enabled': True,
+        'auto_recovery': True,
+        'health_thresholds': {
+            'min_success_rate': 0.8,
+            'max_timeout_rate': 0.2,
+            'max_lock_age': 3600,
+            'recent_window_size': 20
+        }
+    }
+
+
+def _validate_gpu_lock_monitor_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    验证GPU锁监控配置的合法性。
+
+    Args:
+        config: 原始配置
+
+    Returns:
+        Dict[str, Any]: 验证后的配置
+    """
+    validated_config = config.copy()
+
+    # 验证监控间隔
+    if 'monitor_interval' in validated_config:
+        validated_config['monitor_interval'] = max(10, min(300, validated_config['monitor_interval']))
+
+    # 验证超时级别
+    if 'timeout_levels' in validated_config:
+        levels = validated_config['timeout_levels']
+        if 'warning' in levels:
+            levels['warning'] = max(60, min(7200, levels['warning']))
+        if 'soft_timeout' in levels:
+            levels['soft_timeout'] = max(levels.get('warning', 1800), min(7200, levels['soft_timeout']))
+        if 'hard_timeout' in levels:
+            levels['hard_timeout'] = max(levels.get('soft_timeout', 3600), min(14400, levels['hard_timeout']))
+
+    # 验证心跳配置
+    if 'heartbeat' in validated_config:
+        heartbeat = validated_config['heartbeat']
+        if 'interval' in heartbeat:
+            heartbeat['interval'] = max(10, min(300, heartbeat['interval']))
+        if 'timeout' in heartbeat:
+            heartbeat['timeout'] = max(heartbeat.get('interval', 60), min(600, heartbeat['timeout']))
+
+    # 验证健康阈值
+    if 'health_thresholds' in validated_config:
+        thresholds = validated_config['health_thresholds']
+        if 'min_success_rate' in thresholds:
+            thresholds['min_success_rate'] = max(0.0, min(1.0, thresholds['min_success_rate']))
+        if 'max_timeout_rate' in thresholds:
+            thresholds['max_timeout_rate'] = max(0.0, min(1.0, thresholds['max_timeout_rate']))
+
+    return validated_config
 
 
 def _validate_gpu_lock_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,6 +343,20 @@ def _validate_gpu_lock_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(max_poll_interval, (int, float)) or max_poll_interval <= 0:
             logger.warning(f"max_poll_interval 值 '{max_poll_interval}' 不合法，使用默认值 10")
             validated_config['max_poll_interval'] = 10
+
+    # 验证事件驱动机制
+    if 'use_event_driven' in validated_config:
+        use_event_driven = validated_config['use_event_driven']
+        if not isinstance(use_event_driven, bool):
+            logger.warning(f"use_event_driven 值 '{use_event_driven}' 不合法，使用默认值 True")
+            validated_config['use_event_driven'] = True
+
+    # 验证回退超时时间
+    if 'fallback_timeout' in validated_config:
+        fallback_timeout = validated_config['fallback_timeout']
+        if not isinstance(fallback_timeout, (int, float)) or fallback_timeout <= 0:
+            logger.warning(f"fallback_timeout 值 '{fallback_timeout}' 不合法，使用默认值 30")
+            validated_config['fallback_timeout'] = 30
 
     return validated_config
 

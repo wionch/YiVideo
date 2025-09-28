@@ -199,3 +199,36 @@ gpu_lock:
   exponential_backoff: true
   # 最大轮询间隔（秒）- 指数退避的上限
   max_poll_interval: 10
+
+# 11. GPU锁监控配置 (新增)
+# 用于主动监控GPU锁状态，自动检测和恢复死锁
+gpu_lock_monitor:
+  # 监控间隔（秒）
+  monitor_interval: 30
+
+  # 分级超时配置
+  timeout_levels:
+    warning: 1800      # 30分钟 - 记录警告日志
+    soft_timeout: 3600  # 60分钟 - 尝试优雅终止
+    hard_timeout: 7200  # 120分钟 - 强制释放锁
+
+  # 心跳配置
+  heartbeat:
+    interval: 60       # 任务心跳间隔
+    timeout: 300       # 心跳超时时间
+
+  # 清理配置
+  cleanup:
+    max_retry: 3       # 最大重试次数
+    retry_delay: 60    # 重试间隔
+
+  # 监控开关
+  enabled: true       # 是否启用监控功能
+  auto_recovery: true # 是否启用自动恢复
+
+  # 健康检查阈值
+  health_thresholds:
+    min_success_rate: 0.8     # 最小成功率
+    max_timeout_rate: 0.2     # 最大超时率
+    max_lock_age: 3600        # 最大锁持有时间
+    recent_window_size: 20    # 最近统计窗口大小

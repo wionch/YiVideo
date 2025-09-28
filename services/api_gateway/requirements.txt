@@ -7,3 +7,5 @@ uvicorn
 gunicorn
 celery
 redis
+pyyaml
+requests
