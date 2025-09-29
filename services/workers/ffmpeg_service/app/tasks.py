@@ -94,6 +94,88 @@ def extract_keyframes(self: Task, context: dict) -> dict:
     return workflow_context.model_dump()
 
 
+@celery_app.task(bind=True, name='ffmpeg.extract_audio')
+def extract_audio(self: Task, context: dict) -> dict:
+    """
+    [工作流任务] 从视频中提取音频文件。
+    """
+    start_time = time.time()
+    workflow_context = WorkflowContext(**context)
+    stage_name = self.name
+    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+    state_manager.update_workflow_state(workflow_context)
+
+    try:
+        video_path = workflow_context.input_params.get("video_path")
+        if not video_path or not os.path.exists(video_path):
+            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+
+        # 在共享存储中创建音频目录
+        audio_dir = os.path.join(workflow_context.shared_storage_path, "audio")
+        os.makedirs(audio_dir, exist_ok=True)
+
+        # 生成音频文件名
+        video_filename = os.path.basename(video_path)
+        audio_filename = os.path.splitext(video_filename)[0] + ".wav"
+        audio_path = os.path.join(audio_dir, audio_filename)
+
+        logger.info(f"[{stage_name}] 开始从 {video_path} 提取音频...")
+
+        # 使用 ffmpeg 提取音频
+        command = [
+            "ffmpeg",
+            "-i", video_path,  # 输入视频文件
+            "-vn",            # 不包含视频
+            "-acodec", "pcm_s16le",  # 16-bit PCM 编码
+            "-ar", "16000",   # 采样率 16kHz (WhisperX 推荐的采样率)
+            "-ac", "1",       # 单声道
+            "-y",             # 覆盖输出文件
+            audio_path
+        ]
+
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
+
+            if result.stderr:
+                logger.warning(f"[{stage_name}] ffmpeg 有 stderr 输出:\n{result.stderr.strip()}")
+
+            # 验证输出文件
+            if not os.path.exists(audio_path):
+                raise RuntimeError(f"音频提取失败：输出文件不存在 {audio_path}")
+
+            file_size = os.path.getsize(audio_path)
+            if file_size == 0:
+                raise RuntimeError(f"音频提取失败：输出文件为空 {audio_path}")
+
+            logger.info(f"[{stage_name}] 音频提取完成：{audio_path} (大小: {file_size} 字节)")
+
+            # 返回音频文件路径
+            output_data = {"audio_path": audio_path}
+            workflow_context.stages[stage_name].status = 'SUCCESS'
+            workflow_context.stages[stage_name].output = output_data
+
+        except subprocess.TimeoutExpired as e:
+            stderr_output = e.stderr.strip() if e.stderr else "(empty)"
+            logger.error(f"[{stage_name}] ffmpeg 音频提取超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
+            raise RuntimeError(f"音频提取超时: {e.timeout} 秒") from e
+        except subprocess.CalledProcessError as e:
+            stdout_output = e.stdout.strip() if e.stdout else "(empty)"
+            stderr_output = e.stderr.strip() if e.stderr else "(empty)"
+            logger.error(f"[{stage_name}] ffmpeg 音频提取失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
+            raise RuntimeError(f"音频提取失败: ffmpeg 返回码 {e.returncode}") from e
+
+    except Exception as e:
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        workflow_context.stages[stage_name].status = 'FAILED'
+        workflow_context.stages[stage_name].error = str(e)
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    finally:
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
+
+    return workflow_context.model_dump()
+
+
 @celery_app.task(bind=True, name='ffmpeg.crop_subtitle_images')
 @gpu_lock()  # 使用配置化的GPU锁，支持运行时参数调整
 def crop_subtitle_images(self: Task, context: dict) -> dict:
@@ -165,6 +247,88 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
         logger.info(f"[{stage_name}] 字幕条裁剪完成。")
+
+    except Exception as e:
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        workflow_context.stages[stage_name].status = 'FAILED'
+        workflow_context.stages[stage_name].error = str(e)
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    finally:
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
+
+    return workflow_context.model_dump()
+
+
+@celery_app.task(bind=True, name='ffmpeg.extract_audio')
+def extract_audio(self: Task, context: dict) -> dict:
+    """
+    [工作流任务] 从视频中提取音频文件。
+    """
+    start_time = time.time()
+    workflow_context = WorkflowContext(**context)
+    stage_name = self.name
+    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+    state_manager.update_workflow_state(workflow_context)
+
+    try:
+        video_path = workflow_context.input_params.get("video_path")
+        if not video_path or not os.path.exists(video_path):
+            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+
+        # 在共享存储中创建音频目录
+        audio_dir = os.path.join(workflow_context.shared_storage_path, "audio")
+        os.makedirs(audio_dir, exist_ok=True)
+
+        # 生成音频文件名
+        video_filename = os.path.basename(video_path)
+        audio_filename = os.path.splitext(video_filename)[0] + ".wav"
+        audio_path = os.path.join(audio_dir, audio_filename)
+
+        logger.info(f"[{stage_name}] 开始从 {video_path} 提取音频...")
+
+        # 使用 ffmpeg 提取音频
+        command = [
+            "ffmpeg",
+            "-i", video_path,  # 输入视频文件
+            "-vn",            # 不包含视频
+            "-acodec", "pcm_s16le",  # 16-bit PCM 编码
+            "-ar", "16000",   # 采样率 16kHz (WhisperX 推荐的采样率)
+            "-ac", "1",       # 单声道
+            "-y",             # 覆盖输出文件
+            audio_path
+        ]
+
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
+
+            if result.stderr:
+                logger.warning(f"[{stage_name}] ffmpeg 有 stderr 输出:\n{result.stderr.strip()}")
+
+            # 验证输出文件
+            if not os.path.exists(audio_path):
+                raise RuntimeError(f"音频提取失败：输出文件不存在 {audio_path}")
+
+            file_size = os.path.getsize(audio_path)
+            if file_size == 0:
+                raise RuntimeError(f"音频提取失败：输出文件为空 {audio_path}")
+
+            logger.info(f"[{stage_name}] 音频提取完成：{audio_path} (大小: {file_size} 字节)")
+
+            # 返回音频文件路径
+            output_data = {"audio_path": audio_path}
+            workflow_context.stages[stage_name].status = 'SUCCESS'
+            workflow_context.stages[stage_name].output = output_data
+
+        except subprocess.TimeoutExpired as e:
+            stderr_output = e.stderr.strip() if e.stderr else "(empty)"
+            logger.error(f"[{stage_name}] ffmpeg 音频提取超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
+            raise RuntimeError(f"音频提取超时: {e.timeout} 秒") from e
+        except subprocess.CalledProcessError as e:
+            stdout_output = e.stdout.strip() if e.stdout else "(empty)"
+            stderr_output = e.stderr.strip() if e.stderr else "(empty)"
+            logger.error(f"[{stage_name}] ffmpeg 音频提取失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
+            raise RuntimeError(f"音频提取失败: ffmpeg 返回码 {e.returncode}") from e
 
     except Exception as e:
         logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)

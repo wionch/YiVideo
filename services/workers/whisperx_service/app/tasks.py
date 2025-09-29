@@ -1,169 +1,123 @@
 # services/workers/whisperx_service/app/tasks.py
+# -*- coding: utf-8 -*-
+
+"""
+WhisperX Service 的 Celery 任务定义。
+"""
+
 import os
+import time
+import whisperx
 
 from services.common.logger import get_logger
+from services.common import state_manager
+from services.common.context import StageExecution, WorkflowContext
 
-logger = get_logger('tasks')
-import logging
-import subprocess
-
-import whisperx
-from celery import Celery
-from celery import Task
-
-from services import state_manager
+# 导入 Celery 应用配置
+from app.celery_app import celery_app
 
 # 导入新的通用配置加载器
 from services.common.config_loader import CONFIG
 
-# 导入标准上下文和锁
-from services.common.context import StageExecution
-from services.common.context import WorkflowContext
-from services.common.locks import gpu_lock
+logger = get_logger('tasks')
 
-# --- 日志配置 ---
-# 日志已统一管理，使用 services.common.logger
-
-# --- Celery App Configuration ---
-BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
-BACKEND_URL = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/1')
-
-celery_app = Celery(
-    'whisperx_tasks',
-    broker=BROKER_URL,
-    backend=BACKEND_URL,
-    include=['app.tasks']
-)
-
-celery_app.conf.update(
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-)
-
-# --- Celery Task Definition ---
-
-# Global variable to hold the loaded model, to avoid reloading on every task.
-ASR_MODEL = None
-ALIGN_MODEL = None
-ALIGN_METADATA = None
-
-def get_whisperx_models():
-    """Loads the WhisperX models if they are not already in memory."""
-    global ASR_MODEL, ALIGN_MODEL, ALIGN_METADATA
-    if ASR_MODEL is None:
-        # 从加载的配置中获取参数
-        cfg = CONFIG.get('whisperx_service', {})
-        model_name = cfg.get('model_name', 'large-v2')
-        language = cfg.get('language', 'zh')
-        device = cfg.get('device', 'cuda')
-        compute_type = cfg.get('compute_type', 'float16')
-
-        logger.info(f"Loading WhisperX ASR model '{model_name}'...")
-        ASR_MODEL = whisperx.load_model(
-            model_name, 
-            device, 
-            compute_type=compute_type, 
-            language=language
-        )
-        
-        # 仅当语言代码有效时才加载对齐模型
-        if language:
-            logger.info(f"Loading WhisperX Alignment model for language '{language}'...")
-            ALIGN_MODEL, ALIGN_METADATA = whisperx.load_align_model(
-                language_code=language, 
-                device=device
-            )
-        logger.info("WhisperX models loaded.")
-
-def segments_to_srt(segments: list) -> str:
-    """Converts whisperx segments to SRT format."""
-    srt_content = ""
-    for i, segment in enumerate(segments):
-        start_time = segment['start']
-        end_time = segment['end']
-        text = segment['text']
-        
-        start_srt = f"{int(start_time // 3600):02}:{int((start_time % 3600) // 60):02}:{int(start_time % 60):02},{int((start_time * 1000) % 1000):03}"
-        end_srt = f"{int(end_time // 3600):02}:{int((end_time % 3600) // 60):02}:{int(end_time % 60):02},{int((end_time * 1000) % 1000):03}"
-        
-        srt_content += f"{i + 1}\n"
-        srt_content += f"{start_srt} --> {end_srt}\n"
-        srt_content += f"{text.strip()}\n\n"
-    return srt_content
-
-@celery_app.task(bind=True, name='whisperx.generate_subtitles') # 任务名称简化
-@gpu_lock(lock_key="gpu_lock:0", timeout=600)
-def generate_subtitles(self: Task, context: dict) -> dict:
+@celery_app.task(bind=True, name='whisperx.generate_subtitles')
+def generate_subtitles(self, context: dict) -> dict:
     """
     使用WhisperX进行ASR，生成字幕文件。
+
+    注意：此任务应接收由 ffmpeg.extract_audio 任务处理好的音频文件路径，
+    而不是直接处理视频文件。这符合服务分离的设计原则。
     """
+    from celery import Task
+
+    start_time = time.time()
     workflow_context = WorkflowContext(**context)
     stage_name = self.name
     workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
     state_manager.update_workflow_state(workflow_context)
-    
-    temp_audio_path = None
+
     try:
-        get_whisperx_models()
+        # 从前一个任务的输出中获取音频文件路径
+        audio_path = None
 
-        video_path = workflow_context.input_params.get("video_path")
-        if not video_path or not os.path.exists(video_path):
-            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+        # 检查 ffmpeg.extract_audio 阶段的输出
+        ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
+        if ffmpeg_stage and ffmpeg_stage.status == 'SUCCESS':
+            if hasattr(ffmpeg_stage.output, 'audio_path'):
+                audio_path = ffmpeg_stage.output.audio_path
+            elif isinstance(ffmpeg_stage.output, dict) and 'audio_path' in ffmpeg_stage.output:
+                audio_path = ffmpeg_stage.output['audio_path']
 
-        logger.info(f"[{stage_name}] 开始处理: {video_path}")
+        if not audio_path:
+            raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 任务已成功完成")
 
-        temp_audio_path = os.path.join(workflow_context.shared_storage_path, f"{workflow_context.workflow_id}.wav")
-        logger.info(f"[{stage_name}] 提取音频到: {temp_audio_path}")
-        command = [
-            "ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
-            "-ar", "16000", "-ac", "1", "-y", temp_audio_path
-        ]
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        logger.info(f"[{stage_name}] 开始处理音频: {audio_path}")
 
-        cfg = CONFIG.get('whisperx_service', {})
-        batch_size = cfg.get('batch_size', 4)
-        device = cfg.get('device', 'cuda')
+        # 验证音频文件是否存在
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
-        logger.info(f"[{stage_name}] 开始转录音频...")
-        audio = whisperx.load_audio(temp_audio_path)
-        result = ASR_MODEL.transcribe(audio, batch_size=batch_size)
+        # 加载配置
+        whisperx_config = CONFIG.get('whisperx_service', {})
+        model_name = whisperx_config.get('model_name', 'base')
+        device = whisperx_config.get('device', 'cpu')
+        compute_type = whisperx_config.get('compute_type', 'float32')
+        batch_size = whisperx_config.get('batch_size', 16)
 
-        # 仅当对齐模型加载成功时才执行对齐
-        if ALIGN_MODEL is not None:
-            logger.info(f"[{stage_name}] 开始对齐结果...")
-            result = whisperx.align(result["segments"], ALIGN_MODEL, ALIGN_METADATA, audio, device, return_char_alignments=False)
-        else:
-            logger.warning(f"[{stage_name}] 未加载对齐模型，跳过对齐步骤。")
+        logger.info(f"[{stage_name}] 使用配置: {model_name} (batch_size={batch_size})")
+        logger.info(f"[{stage_name}] 设备: {device}, 计算类型: {compute_type}")
 
-        subtitle_filename = f"{os.path.splitext(os.path.basename(video_path))[0]}.srt"
-        subtitle_path = os.path.join(workflow_context.shared_storage_path, subtitle_filename)
-        srt_content = segments_to_srt(result["segments"])
-        with open(subtitle_path, 'w', encoding='utf-8') as f:
-            f.write(srt_content)
-        
-        logger.info(f"[{stage_name}] 处理完成，生成文件: {subtitle_path}")
+        # 加载音频
+        audio = whisperx.load_audio(audio_path)
+        audio_duration = audio.shape[0] / 16000  # 假设16kHz采样率
+        logger.info(f"[{stage_name}] 音频加载完成，时长: {audio_duration:.2f}s")
 
-        output_data = {"subtitle_file": subtitle_path}
+        # 加载模型并转录
+        logger.info(f"[{stage_name}] 加载模型: {model_name}")
+        model = whisperx.load_model(model_name, device, compute_type=compute_type)
+
+        logger.info(f"[{stage_name}] 开始转录...")
+        result = model.transcribe(audio, batch_size=batch_size)
+        logger.info(f"[{stage_name}] 转录完成")
+
+        # 生成字幕文件
+        subtitles_dir = os.path.join(workflow_context.shared_storage_path, "subtitles")
+        os.makedirs(subtitles_dir, exist_ok=True)
+
+        subtitle_filename = os.path.splitext(os.path.basename(audio_path))[0] + ".srt"
+        subtitle_path = os.path.join(subtitles_dir, subtitle_filename)
+
+        # 转换为SRT格式
+        segments = result["segments"]
+        with open(subtitle_path, "w", encoding="utf-8") as f:
+            for i, segment in enumerate(segments):
+                start_time = segment["start"]
+                end_time = segment["end"]
+                text = segment["text"].strip()
+
+                # 格式化为SRT时间格式
+                start_str = f"{int(start_time//3600):02d}:{int((start_time%3600)//60):02d}:{int(start_time%60):02d},{int((start_time%1)*1000):03d}"
+                end_str = f"{int(end_time//3600):02d}:{int((end_time%3600)//60):02d}:{int(end_time%60):02d},{int((end_time%1)*1000):03d}"
+
+                f.write(f"{i+1}\n")
+                f.write(f"{start_str} --> {end_str}\n")
+                f.write(f"{text}\n\n")
+
+        logger.info(f"[{stage_name}] 字幕生成完成: {subtitle_path} (共{len(segments)}条字幕)")
+
+        # 返回字幕文件路径
+        output_data = {"subtitle_path": subtitle_path}
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
-        
+
     except Exception as e:
         logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
-        if isinstance(e, subprocess.CalledProcessError):
-            error_message = e.stderr or str(e)
-            workflow_context.stages[stage_name].error = f"FFmpeg 错误: {error_message}"
-        else:
-            workflow_context.stages[stage_name].error = str(e)
         workflow_context.stages[stage_name].status = 'FAILED'
-        workflow_context.error = f"在阶段 {stage_name} 发生错误"
-
+        workflow_context.stages[stage_name].error = str(e)
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
     finally:
-        if temp_audio_path and os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
-            logger.info(f"[{stage_name}] 清理临时文件: {temp_audio_path}")
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
 
-    state_manager.update_workflow_state(workflow_context)
-    return workflow_context.dict()
+    return workflow_context.model_dump()

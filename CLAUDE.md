@@ -203,13 +203,23 @@ class PaddleOCRTask:
 
 ## 文档结构
 
-项目包含完整的技术文档：
-- `docs/PRD.md`: 产品需求文档
-- `docs/SYSTEM_ARCHITECTURE.md`: 系统架构设计
-- `docs/SDD.md`: 系统设计文档
-- `docs/TESTING_STRATEGY.md`: 测试策略
-- `docs/CODE_IMPLEMENTATION_ROADMAP.md`: 实现路线图
-- `docs/GPU_LOCK_COMPLETE_GUIDE.md`: GPU锁系统完整指南（合并版，包含所有GPU锁相关文档）
+项目包含完整的技术文档，按模块分类在 `docs/` 目录下：
+
+### 主要文档分类
+- **产品需求**: `docs/development/PRD.md`
+- **系统架构**: `docs/architecture/SYSTEM_ARCHITECTURE.md`
+- **技术设计**: `docs/architecture/SDD.md`
+- **测试策略**: `docs/development/TESTING_STRATEGY.md`
+- **部署指南**: `docs/deployment/DEPLOYMENT_GUIDE.md`
+- **运维手册**: `docs/operations/OPERATIONS_MANUAL.md`
+- **故障排除**: `docs/operations/TROUBLESHOOTING_GUIDE.md`
+
+### 专项文档
+- **WhisperX优化**: `docs/whisperx/WHISPERX_COMPLETE_GUIDE.md`
+- **GPU锁系统**: `docs/reference/GPU_LOCK_COMPLETE_GUIDE.md`
+- **模块依赖**: `docs/reference/module_dependencies.md`
+
+详细文档目录请参考：`docs/README.md`
 
 ## 常见问题
 
@@ -243,4 +253,4 @@ class PaddleOCRTask:
 3. **心跳状态异常**: 检查Redis连接和服务状态
 4. **性能问题**: 监控CPU使用率和Redis连接数
 
-**详细文档参考**: `docs/GPU_LOCK_COMPLETE_GUIDE.md` 包含完整的故障排除指南和最佳实践。
+**详细文档参考**: `docs/reference/GPU_LOCK_COMPLETE_GUIDE.md` 包含完整的故障排除指南和最佳实践。

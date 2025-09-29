@@ -1,0 +1,81 @@
+{
+  "timestamp": "2025-09-28T19:34:26.508358",
+  "overall_status": "unhealthy",
+  "checks": [
+    {
+      "component": "API Gateway",
+      "status": "healthy",
+      "response_time": 0,
+      "endpoints": {
+        "Swagger UI": {
+          "status_code": 200,
+          "response_time": 0.017012834548950195,
+          "healthy": true
+        },
+        "GPU Lock Health": {
+          "status_code": 200,
+          "response_time": 0.00701451301574707,
+          "healthy": true
+        },
+        "System Statistics": {
+          "status_code": 200,
+          "response_time": 0.005003452301025391,
+          "healthy": true
+        }
+      },
+      "issues": [],
+      "check_name": "API Health"
+    },
+    {
+      "component": "WhisperX Service",
+      "status": "healthy",
+      "container_status": "running",
+      "celery_status": {
+        "status": "healthy",
+        "message": "Celery worker 正常运行"
+      },
+      "issues": [],
+      "config_status": "healthy",
+      "check_name": "Service Health"
+    },
+    {
+      "component": "GPU",
+      "status": "healthy",
+      "memory_used": 1370,
+      "memory_total": 12288,
+      "memory_usage_percent": 11.149088541666668,
+      "utilization": 23,
+      "temperature": 41,
+      "issues": [],
+      "check_name": "GPU Health"
+    },
+    {
+      "component": "System Resources",
+      "status": "unhealthy",
+      "cpu_percent": 0,
+      "memory_percent": 0,
+      "disk_percent": 0,
+      "issues": [
+        "psutil 模块未安装"
+      ],
+      "check_name": "System Health"
+    },
+    {
+      "component": "Workflow Test",
+      "status": "unhealthy",
+      "workflow_id": null,
+      "execution_time": 0,
+      "stages_completed": 0,
+      "issues": [
+        "测试文件不存在: /app/videos/223.mp4"
+      ],
+      "check_name": "Workflow Test"
+    }
+  ],
+  "summary": {
+    "total_checks": 5,
+    "healthy_checks": 3,
+    "unhealthy_checks": 2,
+    "critical_issues": 0
+  }
+}

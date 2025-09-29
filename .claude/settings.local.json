@@ -33,7 +33,16 @@
       "Read(//c/Users/Administrator/.claude/**)",
       "Read(//c/Users/Administrator/**)",
       "mcp__zai-mcp-server__analyze_image",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "WebFetch(domain:paddleocr.baidu.com)",
+      "WebFetch(domain:hub.docker.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(docker-compose:*)",
+      "Bash(for:*)",
+      "Bash(do echo:*)",
+      "Bash(head:*)",
+      "Bash(apt-get:*)",
+      "Bash(/usr/bin/apt:*)"
     ],
     "deny": [],
     "ask": []
