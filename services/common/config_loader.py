@@ -4,8 +4,8 @@
 """
 通用的配置文件加载器。
 
-提供一个单例模式的函数，用于加载项目根目录下的 `config.yml` 文件，
-并缓存结果，以便所有服务都能高效、一致地访问配置。
+提供实时读取项目根目录下 `config.yml` 文件的功能，
+支持配置热重载，确保配置变更能立即生效。
 """
 
 import os
@@ -19,52 +19,40 @@ from typing import Dict
 
 import yaml
 
-# --- 全局缓存 ---
-_config_cache: Dict[str, Any] = None
-
-# --- 日志配置 ---
-# 日志已统一管理，使用 services.common.logger
-
 def get_config() -> Dict[str, Any]:
     """
-    加载并返回全局配置字典。
+    实时读取并返回全局配置字典。
 
-    第一次调用时，它会查找并解析 config.yml 文件，然后将结果缓存起来。
-    后续调用将直接返回缓存的配置，避免重复的文件I/O。
+    每次调用都会重新读取配置文件，确保配置变更能立即生效。
+    支持配置热重载功能。
 
     Returns:
         Dict[str, Any]: 包含所有配置的字典。
     """
-    global _config_cache
-    if _config_cache is not None:
-        return _config_cache
-
     config_path = ""
     try:
         # 配置文件位于项目根目录，此文件位于 services/common/ 下
         # 因此需要向上回溯两级目录
         current_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(current_dir, '..', '..', 'config.yml')
-        
+
         with open(config_path, 'r', encoding='utf-8') as f:
-            _config_cache = yaml.safe_load(f)
-        
-        if _config_cache:
-            logger.info(f"通用配置加载器: {config_path} 加载成功。")
-            return _config_cache
+            config = yaml.safe_load(f)
+
+        if config:
+            # 减少日志频率，避免大量日志输出
+            # logger.debug(f"配置文件 {config_path} 实时读取成功。")
+            return config
         else:
-            logger.error(f"通用配置加载器: {config_path} 文件为空或格式错误。")
-            _config_cache = {}
-            return _config_cache
+            logger.error(f"配置文件 {config_path} 为空或格式错误。")
+            return {}
 
     except FileNotFoundError:
-        logger.error(f"通用配置加载器: 无法在路径 '{config_path}' 找到 config.yml 文件。")
-        _config_cache = {}
-        return _config_cache
+        logger.error(f"无法在路径 '{config_path}' 找到 config.yml 文件。")
+        return {}
     except Exception as e:
-        logger.error(f"通用配置加载器: 加载 config.yml 时发生未知错误: {e}")
-        _config_cache = {}
-        return _config_cache
+        logger.error(f"加载 config.yml 时发生未知错误: {e}")
+        return {}
 
 def get_cleanup_temp_files_config() -> bool:
     """
@@ -360,5 +348,56 @@ def _validate_gpu_lock_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     return validated_config
 
-# 在模块加载时执行一次，以便尽早发现配置问题
-CONFIG = get_config()
+
+class CONFIG:
+    """
+    兼容性配置接口，提供与原有缓存机制相同的API。
+
+    现在每次访问都会实时读取配置文件，支持配置热重载。
+    """
+
+    @staticmethod
+    def get(key: str, default: Any = None) -> Any:
+        """
+        获取配置项，支持嵌套键访问。
+
+        Args:
+            key: 配置键，支持点分隔的嵌套键（如 'whisperx_service.device'）
+            default: 默认值
+
+        Returns:
+            配置值或默认值
+        """
+        config = get_config()
+
+        # 支持嵌套键访问
+        keys = key.split('.')
+        value = config
+
+        try:
+            for k in keys:
+                value = value[k]
+            return value
+        except (KeyError, TypeError):
+            return default
+
+    @staticmethod
+    def reload() -> Dict[str, Any]:
+        """
+        重新加载配置文件。
+
+        Returns:
+            最新的配置字典
+        """
+        return get_config()
+
+
+# 为了向后兼容，提供一个全局的get_config函数别名
+def get_config_realtime() -> Dict[str, Any]:
+    """
+    获取实时配置的别名函数。
+
+    Returns:
+        最新的配置字典
+    """
+    return get_config()

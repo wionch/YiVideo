@@ -58,15 +58,35 @@ def generate_subtitles(self, context: dict) -> dict:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
-        # 加载配置
+        # 加载配置（实时读取，支持热重载）
         whisperx_config = CONFIG.get('whisperx_service', {})
         model_name = whisperx_config.get('model_name', 'base')
         device = whisperx_config.get('device', 'cpu')
         compute_type = whisperx_config.get('compute_type', 'float32')
         batch_size = whisperx_config.get('batch_size', 16)
 
+        logger.info(f"[{stage_name}] 配置已实时读取，支持热重载")
+
+        # CUDA检测和设备自动切换
+        if device == 'cuda':
+            try:
+                import torch
+                if not torch.cuda.is_available():
+                    logger.warning(f"[{stage_name}] CUDA不可用，自动切换到CPU模式")
+                    device = 'cpu'
+                    # 如果是CUDA模式，通常用float16，切换CPU后改为float32更稳定
+                    if compute_type == 'float16':
+                        compute_type = 'float32'
+                        logger.info(f"[{stage_name}] CPU模式：自动调整计算类型为 float32")
+                else:
+                    logger.info(f"[{stage_name}] CUDA可用，使用GPU模式")
+            except ImportError:
+                logger.warning(f"[{stage_name}] PyTorch未安装，自动切换到CPU模式")
+                device = 'cpu'
+                compute_type = 'float32'
+
         logger.info(f"[{stage_name}] 使用配置: {model_name} (batch_size={batch_size})")
-        logger.info(f"[{stage_name}] 设备: {device}, 计算类型: {compute_type}")
+        logger.info(f"[{stage_name}] 最终设备: {device}, 计算类型: {compute_type}")
 
         # 加载音频
         audio = whisperx.load_audio(audio_path)
