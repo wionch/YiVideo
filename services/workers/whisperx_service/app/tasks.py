@@ -121,13 +121,13 @@ def generate_subtitles(self, context: dict) -> dict:
         segments = result["segments"]
         with open(subtitle_path, "w", encoding="utf-8") as f:
             for i, segment in enumerate(segments):
-                start_time = segment["start"]
-                end_time = segment["end"]
+                segment_start = segment["start"]
+                segment_end = segment["end"]
                 text = segment["text"].strip()
 
                 # 格式化为SRT时间格式
-                start_str = f"{int(start_time//3600):02d}:{int((start_time%3600)//60):02d}:{int(start_time%60):02d},{int((start_time%1)*1000):03d}"
-                end_str = f"{int(end_time//3600):02d}:{int((end_time%3600)//60):02d}:{int(end_time%60):02d},{int((end_time%1)*1000):03d}"
+                start_str = f"{int(segment_start//3600):02d}:{int((segment_start%3600)//60):02d}:{int(segment_start%60):02d},{int((segment_start%1)*1000):03d}"
+                end_str = f"{int(segment_end//3600):02d}:{int((segment_end%3600)//60):02d}:{int(segment_end%60):02d},{int((segment_end%1)*1000):03d}"
 
                 f.write(f"{i+1}\n")
                 f.write(f"{start_str} --> {end_str}\n")
