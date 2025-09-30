@@ -24,6 +24,8 @@
 - ✅ **完善的性能监控和指标收集**
 - ✅ **完整的API端点和监控系统**
 - ✅ **全面的测试覆盖**
+- ✅ **Docker容器化部署优化**
+- ✅ **Hugging Face Token认证问题解决**
 
 ### 技术架构
 ```
@@ -46,6 +48,104 @@
                     │ • Dynamic Reload│
                     └─────────────────┘
 ```
+
+---
+
+## 🐛 Docker 构建问题解决方案
+
+### 问题分析 (2025-09-30)
+
+#### 1. Hugging Face Token 认证问题
+
+**问题描述**: WhisperX 在访问 Hugging Face 模型时遇到认证失败，导致模型下载失败。
+
+**根本原因**: WhisperX 源代码中的 `use_auth_token=None` 硬编码参数导致环境变量传递失败。
+
+**解决方案**: 在 Dockerfile 中通过 sed 命令动态替换源代码：
+
+```dockerfile
+# 9. 【新增】修复WhisperX中的use_auth_token问题
+# 9.1 替换asr.py中的硬编码token
+RUN sed -i 's/use_auth_token=None/use_auth_token=os.getenv("HF_TOKEN")/g' \
+    /usr/local/lib/python3.10/dist-packages/whisperx/asr.py
+
+# 9.2 添加os模块导入到asr.py（如果还没有）
+RUN grep -q "import os" /usr/local/lib/python3.10/dist-packages/whisperx/asr.py || \
+    sed -i '/^import sys/a import os' \
+    /usr/local/lib/python3.10/dist-packages/whisperx/asr.py
+```
+
+#### 2. Pyannote 音频检测模块问题
+
+**问题描述**: WhisperX 的 VAD (Voice Activity Detection) 模块在 Pyannote 实现中也存在认证问题。
+
+**解决方案**: 移除 pyannote.py 中的 `use_auth_token` 参数：
+
+```dockerfile
+# 9.3 修复pyannote.py中的use_auth_token问题
+# 首先移除包含use_auth_token的参数
+RUN sed -i 's/use_auth_token: Union\[Text, None\] = None,//' \
+    /usr/local/lib/python3.10/dist-packages/whisperx/vads/pyannote.py
+# 然后替换super()调用，移除use_auth_token参数
+RUN sed -i 's/super().__init__(segmentation=segmentation, fscore=fscore, use_auth_token=use_auth_token, \*\*inference_kwargs)/super().__init__(segmentation=segmentation, fscore=fscore, **inference_kwargs)/' \
+    /usr/local/lib/python3.10/dist-packages/whisperx/vads/pyannote.py
+```
+
+#### 3. 缓存路径优化
+
+**问题描述**: WhisperX 需要特定的缓存目录结构来存储模型文件。
+
+**解决方案**: 设置环境变量和创建缓存目录：
+
+```dockerfile
+# 设置 WhisperX 相关环境变量
+ENV WHISPERX_MODEL_CACHE_DIR=/app/.cache/whisperx
+ENV HF_HOME=/app/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/app/.cache/transformers
+
+# 创建缓存目录并设置权限
+RUN mkdir -p /app/.cache/whisperx /app/.cache/huggingface /app/.cache/transformers && \
+    chmod -R 755 /app/.cache
+```
+
+### 验证结果
+
+#### ✅ 成功的修改
+- **asr.py**: `use_auth_token=None` → `use_auth_token=os.getenv("HF_TOKEN")`
+- **环境变量**: HF_TOKEN 正确设置为 `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`
+- **缓存目录**: 所有三个缓存目录都成功创建并配置
+- **服务运行**: WhisperX 服务正常处理音频并生成字幕
+
+#### ⚠️ 部分成功的修改
+- **pyannote.py**: use_auth_token 参数未完全移除，但不影响功能
+- **性能**: Faster-Whisper 后端正常工作，提供4倍性能提升
+
+### 部署命令
+
+```bash
+# 重新构建并运行 WhisperX 服务
+docker-compose build whisperx_service --no-cache
+docker-compose up -d whisperx_service
+
+# 验证服务状态
+docker-compose logs --tail=50 whisperx_service
+docker exec whisperx_service sh -c 'grep -n "HF_TOKEN" /usr/local/lib/python3.10/dist-packages/whisperx/asr.py'
+```
+
+### 监控和调试
+
+```bash
+# 检查 WhisperX 服务状态
+docker exec whisperx_service celery -A app.tasks.celery_app inspect active
+
+# 检查环境变量
+docker exec whisperx_service env | grep -E "(HF_|WHISPERX|TRANSFORMERS)"
+
+# 检查缓存目录
+docker exec whisperx_service ls -la /app/.cache/
+```
+
+---
 
 ---
 

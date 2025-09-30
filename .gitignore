@@ -229,6 +229,7 @@ PaddleOCR/
 videos/
 pipline/
 share/
+models/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/

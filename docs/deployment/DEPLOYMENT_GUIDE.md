@@ -190,6 +190,12 @@ REDIS_PORT=6379
 CUDA_VISIBLE_DEVICES=0
 NVIDIA_VISIBLE_DEVICES=0
 
+# WhisperX 配置 (新增)
+HF_TOKEN=hf_your_huggingface_token_here
+WHISPERX_MODEL_CACHE_DIR=/app/.cache/whisperx
+HF_HOME=/app/.cache/huggingface
+TRANSFORMERS_CACHE=/app/.cache/transformers
+
 # 监控配置
 PROMETHEUS_HOST=prometheus
 PROMETHEUS_PORT=9090

@@ -135,12 +135,18 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
+      - ./models/huggingface:/app/.cache/huggingface  # <--- ADDED: Hugging Face模型缓存
+      - ./models/transformers:/app/.cache/transformers  # <--- ADDED: Transformers缓存
+      - ./models/whisperx:/app/.cache/whisperx  # <--- ADDED: WhisperX缓存
     restart: on-failure
     user: "0:0"
     entrypoint: ""
     command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "whisperx_queue"]
     environment:
       - PYTHONPATH=/app
+      - HF_TOKEN=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
+      - HF_HOME=/app/.cache/huggingface  # <--- ADDED: 确保使用正确的缓存路径
+      - TRANSFORMERS_CACHE=/app/.cache/transformers  # <--- ADDED: Transformers缓存路径
     depends_on:
       - redis
 

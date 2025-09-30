@@ -75,6 +75,15 @@ def generate_subtitles(self, context: dict) -> dict:
 
         # 加载模型并转录
         logger.info(f"[{stage_name}] 加载模型: {model_name}")
+
+        # 检查Hugging Face Token是否已配置
+        hf_token = os.getenv('HF_TOKEN')
+        if hf_token:
+            logger.info(f"[{stage_name}] Hugging Face Token已配置，将使用环境变量中的token")
+        else:
+            logger.warning(f"[{stage_name}] 未找到Hugging Face Token，可能会遇到访问限制")
+
+        # 直接加载模型，token将通过环境变量自动获取
         model = whisperx.load_model(model_name, device, compute_type=compute_type)
 
         logger.info(f"[{stage_name}] 开始转录...")

@@ -126,6 +126,7 @@ curl http://localhost:8788/v1/workflows/recent
 - 服务器内部错误
 - 数据库连接失败
 - GPU 资源不足
+- WhisperX 构建问题
 
 **解决方案**:
 ```bash
@@ -138,6 +139,9 @@ docker-compose exec redis redis-cli ping
 
 # 检查 GPU 状态
 nvidia-smi
+
+# 检查 WhisperX 服务状态
+docker exec whisperx_service celery -A app.tasks.celery_app inspect active
 ```
 
 ### WhisperX 特定错误
@@ -161,6 +165,84 @@ rm -rf /app/.cache/whisperx/*
 
 # 重新下载模型
 docker-compose restart whisperx_service
+```
+
+#### Hugging Face 认证错误
+
+**错误信息**: "Failed to download model from Hugging Face Hub" 或 "Authorization required"
+
+**可能原因**:
+- HF_TOKEN 环境变量未设置或无效
+- use_auth_token 参数未正确配置
+- 网络连接问题
+
+**解决方案**:
+```bash
+# 1. 检查 HF_TOKEN 是否配置
+docker exec whisperx_service env | grep HF_TOKEN
+
+# 2. 验证 use_auth_token 修复
+docker exec whisperx_service sh -c 'grep -n "HF_TOKEN" /usr/local/lib/python3.10/dist-packages/whisperx/asr.py'
+
+# 3. 如果修复未生效，重新构建容器
+docker-compose build whisperx_service --no-cache
+docker-compose up -d whisperx_service
+
+# 4. 验证修复
+docker-compose logs --tail=20 whisperx_service | grep "Hugging Face Token"
+```
+
+#### Docker 构建错误
+
+**错误信息**: "sed command failed" 或 "file not found"
+
+**可能原因**:
+- WhisperX 版本更新导致文件路径变化
+- sed 命令模式不匹配
+- 构建权限问题
+
+**解决方案**:
+```bash
+# 1. 检查 WhisperX 安装位置
+docker exec whisperx_service python -c "import whisperx; print(whisperx.__file__)"
+
+# 2. 手动验证文件存在
+docker exec whisperx_service ls -la /usr/local/lib/python3.10/dist-packages/whisperx/
+
+# 3. 检查当前内容
+docker exec whisperx_service grep -n "use_auth_token" /usr/local/lib/python3.10/dist-packages/whisperx/asr.py
+
+# 4. 如需手动修复
+docker exec whisperx_service sh -c 'sed -i "s/use_auth_token=None/use_auth_token=os.getenv(\"HF_TOKEN\")/g" /usr/local/lib/python3.10/dist-packages/whisperx/asr.py'
+```
+
+#### Faster-Whisper 后端问题
+
+**错误信息**: "Faster-Whisper initialization failed" 或性能下降
+
+**可能原因**:
+- ctranslate2 版本不兼容
+- faster-whisper 配置错误
+- GPU 驱动问题
+
+**解决方案**:
+```bash
+# 1. 检查依赖版本
+docker exec whisperx_service pip list | grep -E "(faster-whisper|ctranslate2)"
+
+# 2. 验证配置
+grep -A 10 "faster_whisper" config.yml
+
+# 3. 测试原生后端降级
+# 编辑 config.yml 临时禁用 faster-whisper
+whisperx_service:
+  use_faster_whisper: false
+
+# 4. 重启服务
+docker-compose restart whisperx_service
+
+# 5. 性能对比测试
+time python scripts/test_whisperx_performance.py
 ```
 
 #### GPU 内存不足
@@ -654,8 +736,194 @@ A: 定期备份配置文件和 Redis 数据。
 
 ---
 
+## WhisperX Docker 构建最佳实践
+
+### 🔧 构建前检查
+
+#### 1. 环境验证
+```bash
+# 检查基础镜像
+docker pull ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.1.1-gpu-cuda11.8-cudnn8.9
+
+# 验证网络连接
+curl -I https://huggingface.co
+curl -I https://pypi.org/simple/whisperx
+
+# 检查磁盘空间
+df -h /var/lib/docker
+```
+
+#### 2. 依赖版本确认
+```bash
+# 检查 WhisperX 最新版本
+pip show whisperx
+
+# 确认兼容的依赖版本
+pip show faster-whisper ctranslate2
+```
+
+### 🏗️ 构建过程优化
+
+#### 1. 分层构建策略
+```dockerfile
+# 基础系统层
+FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.1.1-gpu-cuda11.8-cudnn8.9
+
+# 系统依赖层 (变化频率低)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libsox-dev libsndfile1-dev curl wget git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python 依赖层 (变化频率中等)
+COPY requirements.txt /tmp/
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# 应用代码层 (变化频率高)
+COPY . /app/
+```
+
+#### 2. 缓存优化
+```bash
+# 使用 --no-cache 重新构建
+docker-compose build whisperx_service --no-cache
+
+# 或者选择性清理缓存
+docker builder prune -f
+```
+
+### 🐛 常见构建问题解决
+
+#### 1. sed 命令失败
+```bash
+# 检查目标文件是否存在
+docker run --rm ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.1.1-gpu-cuda11.8-cudnn8.9 \
+  sh -c 'ls -la /usr/local/lib/python3.10/dist-packages/whisperx/'
+
+# 验证 sed 模式
+echo 'use_auth_token=None' | sed 's/use_auth_token=None/use_auth_token=os.getenv("HF_TOKEN")/g'
+```
+
+#### 2. 网络超时
+```dockerfile
+# 设置国内镜像源
+RUN pip install --no-cache-dir -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
+    whisperx
+
+# 增加超时时间
+RUN pip install --timeout 300 --retries 3 whisperx
+```
+
+#### 3. 权限问题
+```dockerfile
+# 确保正确的用户权限
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app && \
+    chmod -R 755 /app/.cache
+```
+
+### ✅ 构建验证清单
+
+#### 1. 功能验证
+```bash
+# 检查服务状态
+docker-compose ps whisperx_service
+
+# 验证 Celery Worker
+docker exec whisperx_service celery -A app.tasks.celery_app inspect active
+
+# 测试模型加载
+docker exec whisperx_service python -c "import whisperx; print('Import successful')"
+```
+
+#### 2. 配置验证
+```bash
+# 检查环境变量
+docker exec whisperx_service env | grep -E "(HF_|WHISPERX|TRANSFORMERS)"
+
+# 验证 use_auth_token 修复
+docker exec whisperx_service sh -c 'grep -n "HF_TOKEN" /usr/local/lib/python3.10/dist-packages/whisperx/asr.py'
+
+# 检查缓存目录
+docker exec whisperx_service ls -la /app/.cache/
+```
+
+#### 3. 性能验证
+```bash
+# 运行简单测试
+python scripts/test_whisperx_service.py
+
+# 检查日志
+docker-compose logs --tail=50 whisperx_service
+
+# 监控资源使用
+docker stats whisperx_service
+```
+
+### 🚀 生产部署建议
+
+#### 1. 镜像管理
+```bash
+# 标记生产镜像
+docker tag yivideo-whisperx_service:latest yivideo-whisperx_service:v2.0.1
+
+# 推送到私有仓库
+docker push registry.example.com/yivideo-whisperx_service:v2.0.1
+```
+
+#### 2. 健康检查
+```dockerfile
+# 在 Dockerfile 中添加健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD celery -A app.tasks.celery_app inspect active || exit 1
+```
+
+#### 3. 日志管理
+```yaml
+# 在 docker-compose.yml 中配置日志
+logging:
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "5"
+```
+
+### 📊 性能调优
+
+#### 1. 资源限制
+```yaml
+# docker-compose.yml 中的资源配置
+deploy:
+  resources:
+    limits:
+      memory: 8G
+      cpus: '4'
+    reservations:
+      memory: 4G
+      cpus: '2'
+```
+
+#### 2. 存储优化
+```yaml
+# 使用 tmpfs 提升临时文件性能
+tmpfs:
+  - /tmp
+```
+
+#### 3. 网络优化
+```yaml
+# 使用专用网络
+networks:
+  whisperx_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+```
+
+---
+
 ## 总结
 
-本故障排除指南提供了 WhisperX 系统常见问题的诊断和解决方案。请按照本指南的步骤进行故障排除，如仍无法解决问题，请联系技术支持。
+本故障排除指南提供了 WhisperX 系统常见问题的诊断和解决方案，以及Docker构建的最佳实践。请按照本指南的步骤进行故障排除，如仍无法解决问题，请联系技术支持。
 
 定期进行系统维护和性能监控，可以有效预防问题的发生。

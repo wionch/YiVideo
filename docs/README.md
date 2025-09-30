@@ -9,6 +9,7 @@
 ### 🎯 WhisperX 优化系统 (`docs/whisperx/`)
 - **[WHISPERX_COMPLETE_GUIDE.md](whisperx/WHISPERX_COMPLETE_GUIDE.md)** - WhisperX 优化系统完整指南
 - **[WHISPERX_TECHNICAL_SPEC.md](whisperx/WHISPERX_TECHNICAL_SPEC.md)** - WhisperX 技术规格文档
+- **[WHISPERX_CONFIG_OPTIMIZATION.md](whisperx/WHISPERX_CONFIG_OPTIMIZATION.md)** - WhisperX 配置优化和部署指南
 
 ### 🚀 部署指南 (`docs/deployment/`)
 - **[DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)** - 生产环境部署指南
@@ -50,6 +51,7 @@
 ### WhisperX 优化专题
 1. **完整指南** → [WHISPERX_COMPLETE_GUIDE.md](whisperx/WHISPERX_COMPLETE_GUIDE.md)
 2. **技术规格** → [WHISPERX_TECHNICAL_SPEC.md](whisperx/WHISPERX_TECHNICAL_SPEC.md)
+3. **配置优化** → [WHISPERX_CONFIG_OPTIMIZATION.md](whisperx/WHISPERX_CONFIG_OPTIMIZATION.md)
 
 ---
 
@@ -79,4 +81,4 @@
 
 ---
 
-*最后更新: 2025-09-29 | 文档版本: 2.0*
+*最后更新: 2025-09-30 | 文档版本: 2.1*
