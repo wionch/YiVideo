@@ -287,3 +287,59 @@ def segments_to_srt(segments: list) -> str:
         srt_content += f"{start_srt} --> {end_srt}\n"
         srt_content += f"{text.strip()}\n\n"
     return srt_content
+
+
+def segments_to_word_timestamp_json(segments: list, include_segment_info: bool = True) -> str:
+    """
+    将WhisperX的segments转换为包含词级时间戳的JSON格式
+
+    Args:
+        segments: WhisperX转录结果的segments列表
+        include_segment_info: 是否包含句子级别信息
+
+    Returns:
+        JSON格式的字符串，包含详细的词级时间戳信息
+    """
+    import json
+
+    result = {
+        "format": "word_timestamps",
+        "total_segments": len(segments),
+        "segments": []
+    }
+
+    for i, segment in enumerate(segments):
+        segment_data = {
+            "id": i + 1,
+            "start": segment["start"],
+            "end": segment["end"],
+            "text": segment["text"].strip()
+        }
+
+        # 如果包含句子级别信息，添加SRT格式时间
+        if include_segment_info:
+            segment_data["srt_time"] = f"{int(segment['start'] // 3600):02}:{int((segment['start'] % 3600) // 60):02}:{int(segment['start'] % 60):02},{int((segment['start'] * 1000) % 1000):03} --> {int(segment['end'] // 3600):02}:{int((segment['end'] % 3600) // 60):02}:{int(segment['end'] % 60):02},{int((segment['end'] * 1000) % 1000):03}"
+
+        # 检查是否有词级时间戳数据
+        if "words" in segment and segment["words"]:
+            segment_data["words"] = []
+            for word_info in segment["words"]:
+                word_data = {
+                    "word": word_info["word"],
+                    "start": word_info["start"],
+                    "end": word_info["end"],
+                    "confidence": word_info.get("confidence", 0.0)
+                }
+                segment_data["words"].append(word_data)
+        else:
+            # 如果没有词级时间戳，将整个segment作为一个词处理
+            segment_data["words"] = [{
+                "word": segment["text"].strip(),
+                "start": segment["start"],
+                "end": segment["end"],
+                "confidence": 1.0
+            }]
+
+        result["segments"].append(segment_data)
+
+    return json.dumps(result, indent=2, ensure_ascii=False)

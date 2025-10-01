@@ -64,6 +64,7 @@ def generate_subtitles(self, context: dict) -> dict:
         device = whisperx_config.get('device', 'cpu')
         compute_type = whisperx_config.get('compute_type', 'float32')
         batch_size = whisperx_config.get('batch_size', 16)
+        enable_word_timestamps = whisperx_config.get('enable_word_timestamps', True)
 
         logger.info(f"[{stage_name}] 配置已实时读取，支持热重载")
 
@@ -107,13 +108,58 @@ def generate_subtitles(self, context: dict) -> dict:
         model = whisperx.load_model(model_name, device, compute_type=compute_type)
 
         logger.info(f"[{stage_name}] 开始转录...")
-        result = model.transcribe(audio, batch_size=batch_size)
+        logger.info(f"[{stage_name}] 词级时间戳启用: {enable_word_timestamps}")
+
+        # 第一步：执行转录
+        transcribe_options = {
+            "batch_size": batch_size
+        }
+
+        result = model.transcribe(audio, **transcribe_options)
         logger.info(f"[{stage_name}] 转录完成")
+
+        # 第二步：如果启用词级时间戳，执行alignment
+        if enable_word_timestamps:
+            logger.info(f"[{stage_name}] 开始词级时间戳对齐...")
+
+            try:
+                # 检测转录结果的语言，用于alignment
+                detected_language = result.get("language", whisperx_config.get('language', 'zh'))
+                logger.info(f"[{stage_name}] 检测到语言: {detected_language}，开始加载alignment模型")
+
+                # 加载alignment模型
+                model_a, metadata = whisperx.load_align_model(
+                    language_code=detected_language,
+                    device=device
+                )
+                logger.info(f"[{stage_name}] Alignment模型加载完成")
+
+                # 执行alignment以获取词级时间戳（使用官方推荐的参数）
+                alignment_start_time = time.time()
+                result = whisperx.align(
+                    transcript=result["segments"],          # 转录结果
+                    model=model_a,                          # alignment模型
+                    align_model_metadata=metadata,          # 模型元数据
+                    audio=audio,                            # 音频数据
+                    device=device,                          # 设备
+                    return_char_alignments=False,           # 关键：返回词级对齐，不是字符级
+                    interpolate_method="nearest",           # 插值方法
+                    print_progress=True                     # 显示进度
+                )
+
+                alignment_duration = time.time() - alignment_start_time
+                logger.info(f"[{stage_name}] 词级时间戳对齐完成，耗时: {alignment_duration:.2f}秒")
+
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 词级时间戳对齐失败: {e}")
+                logger.info(f"[{stage_name}] 将使用基础转录结果继续处理")
+                # 对齐失败时，继续使用原始结果
 
         # 生成字幕文件
         subtitles_dir = os.path.join(workflow_context.shared_storage_path, "subtitles")
         os.makedirs(subtitles_dir, exist_ok=True)
 
+        # 生成SRT字幕文件
         subtitle_filename = os.path.splitext(os.path.basename(audio_path))[0] + ".srt"
         subtitle_path = os.path.join(subtitles_dir, subtitle_filename)
 
@@ -133,10 +179,111 @@ def generate_subtitles(self, context: dict) -> dict:
                 f.write(f"{start_str} --> {end_str}\n")
                 f.write(f"{text}\n\n")
 
-        logger.info(f"[{stage_name}] 字幕生成完成: {subtitle_path} (共{len(segments)}条字幕)")
+        logger.info(f"[{stage_name}] SRT字幕生成完成: {subtitle_path} (共{len(segments)}条字幕)")
 
-        # 返回字幕文件路径
+        # 如果启用词级时间戳，生成JSON文件
+        json_subtitle_path = None
+        if enable_word_timestamps:
+            # 导入JSON生成函数
+            from app.model_manager import segments_to_word_timestamp_json
+
+            # 生成JSON字幕文件
+            json_subtitle_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_word_timestamps.json"
+            json_subtitle_path = os.path.join(subtitles_dir, json_subtitle_filename)
+
+            # 检查词级时间戳质量
+            word_count = 0
+            char_count = 0
+            for segment in segments:
+                if "words" in segment and segment["words"]:
+                    word_count += len(segment["words"])
+                    for word_info in segment["words"]:
+                        char_count += len(word_info["word"])
+
+            # 计算平均词长，判断是否为字符级对齐
+            avg_word_length = char_count / word_count if word_count > 0 else 0
+
+            logger.info(f"[{stage_name}] 词级时间戳质量检查:")
+            logger.info(f"   - 总词数: {word_count}")
+            logger.info(f"   - 平均词长: {avg_word_length:.2f}")
+
+            if avg_word_length <= 1.5:
+                logger.warning(f"   ⚠️  检测到可能的字符级对齐（平均词长: {avg_word_length:.2f}）")
+                logger.warning(f"   ⚠️  如果需要词级对齐，请检查alignment参数设置")
+            else:
+                logger.info(f"   ✅ 检测到词级对齐（平均词长: {avg_word_length:.2f}）")
+
+            # 生成词级时间戳JSON内容
+            json_content = segments_to_word_timestamp_json(segments, include_segment_info=True)
+
+            # 写入JSON文件
+            with open(json_subtitle_path, "w", encoding="utf-8") as f:
+                f.write(json_content)
+
+            logger.info(f"[{stage_name}] 词级时间戳JSON文件生成完成: {json_subtitle_path}")
+
+        # 如果启用了字幕断句优化，生成优化后的字幕
+        optimized_subtitle_path = None
+        if enable_word_timestamps and json_subtitle_path:
+            try:
+                # 导入字幕断句优化器
+                from app.subtitle_segmenter import SubtitleSegmenter, SubtitleConfig
+
+                logger.info(f"[{stage_name}] 开始字幕断句优化...")
+
+                # 加载词级时间戳数据
+                import json
+                with open(json_subtitle_path, "r", encoding="utf-8") as f:
+                    word_timestamps_data = json.load(f)
+
+                # 创建断句优化器（使用您指定的配置参数）
+                subtitle_config = SubtitleConfig(
+                    max_subtitle_duration=5.0,  # 5秒最大时长（按您的要求）
+                    min_subtitle_duration=1.2,  # 1.2秒最小时长（按您的要求）
+                    max_chars_per_line=40,      # 40字符/行（按您的要求）
+                    max_words_per_subtitle=16,  # 16个词最大限制
+                    word_gap_threshold=1.2,     # 1.2秒词间间隔（按您的要求）
+                    semantic_min_words=6,       # 6个词最小语义单元
+                    prefer_complete_phrases=True # 优先保持短语完整性
+                )
+
+                segmenter = SubtitleSegmenter(subtitle_config)
+
+                # 执行断句优化
+                optimized_segments = segmenter.segment_by_word_timestamps(word_timestamps_data)
+
+                # 保存优化后的SRT字幕文件
+                optimized_subtitle_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_optimized.srt"
+                optimized_subtitle_path = os.path.join(subtitles_dir, optimized_subtitle_filename)
+
+                # 生成优化后的SRT内容
+                optimized_srt_content = segmenter.generate_optimized_srt(optimized_segments)
+
+                with open(optimized_subtitle_path, "w", encoding="utf-8") as f:
+                    f.write(optimized_srt_content)
+
+                logger.info(f"[{stage_name}] 优化SRT字幕生成完成: {optimized_subtitle_path} (共{len(optimized_segments)}条字幕)")
+
+                # 保存优化后的JSON文件
+                optimized_json_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_optimized_segments.json"
+                optimized_json_path = os.path.join(subtitles_dir, optimized_json_filename)
+
+                segmenter.save_optimized_subtitles(optimized_segments,
+                                                 os.path.join(subtitles_dir, os.path.splitext(os.path.basename(audio_path))[0]),
+                                                 "json")
+
+                logger.info(f"[{stage_name}] 字幕断句优化完成")
+
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 字幕断句优化失败: {e}")
+                logger.info(f"[{stage_name}] 将使用原始字幕文件继续处理")
+
+        # 构建返回数据
         output_data = {"subtitle_path": subtitle_path}
+        if json_subtitle_path:
+            output_data["word_timestamps_json_path"] = json_subtitle_path
+        if optimized_subtitle_path:
+            output_data["optimized_subtitle_path"] = optimized_subtitle_path
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
