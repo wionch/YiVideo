@@ -59,9 +59,35 @@
 
 **问题描述**: WhisperX 在访问 Hugging Face 模型时遇到认证失败，导致模型下载失败。
 
-**根本原因**: WhisperX 源代码中的 `use_auth_token=None` 硬编码参数导致环境变量传递失败。
+**根本原因**:
+1. WhisperX 源代码中的 `use_auth_token=None` 硬编码参数导致环境变量传递失败
+2. Pyannote 模型需要用户主动接受使用条款才能下载
 
-**解决方案**: 在 Dockerfile 中通过 sed 命令动态替换源代码：
+**解决方案**:
+
+##### 步骤1：接受Hugging Face模型使用条款
+
+在使用 WhisperX 之前，必须先在 Hugging Face 上接受相关模型的使用条款：
+
+1. **访问 pyannote/segmentation 模型页面**:
+   - 打开浏览器访问: https://huggingface.co/pyannote/segmentation
+   - 登录您的 Hugging Face 账户
+   - 点击页面上的 "Agree and access repository" 或类似按钮接受使用条款
+
+2. **访问 pyannote/speaker-diarization 模型页面**:
+   - 打开浏览器访问: https://huggingface.co/pyannote/speaker-diarization
+   - 确保您已登录 Hugging Face 账户
+   - 点击页面上的 "Agree and access repository" 按钮接受使用条款
+
+##### 步骤2：创建Hugging Face Access Token
+
+1. **创建访问令牌**:
+   - 访问: https://huggingface.co/settings/tokens
+   - 点击 "New token" 创建新的访问令牌
+   - 选择适当的权限（建议选择 "read" 权限即可）
+   - 复制生成的令牌
+
+##### 步骤3：在Dockerfile中修复WhisperX源代码
 
 ```dockerfile
 # 9. 【新增】修复WhisperX中的use_auth_token问题
@@ -74,6 +100,22 @@ RUN grep -q "import os" /usr/local/lib/python3.10/dist-packages/whisperx/asr.py 
     sed -i '/^import sys/a import os' \
     /usr/local/lib/python3.10/dist-packages/whisperx/asr.py
 ```
+
+##### 步骤4：配置环境变量
+
+在 `docker-compose.yml` 或环境配置中设置：
+
+```yaml
+services:
+  whisperx_service:
+    environment:
+      - HF_TOKEN=hf_your_actual_token_here
+```
+
+**重要提醒**:
+- 必须先完成步骤1的使用条款接受，否则即使设置了正确的 HF_TOKEN 也会认证失败
+- HF_TOKEN 是敏感信息，请妥善保管，不要提交到版本控制系统
+- 如果更换了 Hugging Face 账户，需要重新接受所有相关模型的使用条款
 
 #### 2. Pyannote 音频检测模块问题
 
@@ -308,6 +350,13 @@ cd YiVideo
 # 检查环境
 python check_env.py
 
+# 【重要】配置Hugging Face认证
+# 1. 访问并接受模型使用条款：
+#    - https://huggingface.co/pyannote/segmentation
+#    - https://huggingface.co/pyannote/speaker-diarization
+# 2. 创建访问令牌：https://huggingface.co/settings/tokens
+# 3. 在docker-compose.yml中配置HF_TOKEN环境变量
+
 # 启动服务
 docker-compose up -d
 ```
@@ -539,6 +588,23 @@ curl -X POST http://localhost:8788/api/v1/model/unload
 
 # 重启服务
 docker-compose restart whisperx_service
+```
+
+**4. Hugging Face 认证失败**
+```bash
+# 检查HF Token是否设置
+docker exec whisperx_service env | grep HF_TOKEN
+
+# 验证Token有效性
+curl -H "Authorization: Bearer $HF_TOKEN" https://huggingface.co/api/whoami
+
+# 检查模型使用条款接受状态
+# 访问 https://huggingface.co/pyannote/segmentation 确认已接受条款
+# 访问 https://huggingface.co/pyannote/speaker-diarization 确认已接受条款
+
+# 重新构建服务（更新Token后）
+docker-compose build whisperx_service --no-cache
+docker-compose up -d whisperx_service
 ```
 
 #### 性能调优
