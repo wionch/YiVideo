@@ -147,6 +147,7 @@ services:
       - HF_TOKEN=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
       - HF_HOME=/app/.cache/huggingface  # <--- ADDED: 确保使用正确的缓存路径
       - TRANSFORMERS_CACHE=/app/.cache/transformers  # <--- ADDED: Transformers缓存路径
+      - PYANNOTEAI_API_KEY=sk_39f32b6ba1584278a0c1c3582ae8db4f  # <--- ADDED: PyannoteAI API Key
     depends_on:
       - redis
 

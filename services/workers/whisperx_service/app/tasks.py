@@ -66,6 +66,10 @@ def generate_subtitles(self, context: dict) -> dict:
         batch_size = whisperx_config.get('batch_size', 16)
         enable_word_timestamps = whisperx_config.get('enable_word_timestamps', True)
 
+        # 说话人分离配置
+        enable_diarization = whisperx_config.get('enable_diarization', False)
+        show_speaker_labels = whisperx_config.get('show_speaker_labels', True)
+
         logger.info(f"[{stage_name}] 配置已实时读取，支持热重载")
 
         # CUDA检测和设备自动切换
@@ -155,6 +159,103 @@ def generate_subtitles(self, context: dict) -> dict:
                 logger.info(f"[{stage_name}] 将使用基础转录结果继续处理")
                 # 对齐失败时，继续使用原始结果
 
+        # 提取转录片段（修复变量作用域问题）
+        segments = result["segments"]
+
+        # 第三步：如果启用说话人分离，执行diarization
+        diarization_segments = None
+        speaker_enhanced_segments = None
+
+        if enable_diarization:
+            logger.info(f"[{stage_name}] 开始说话人分离...")
+            diarization_start_time = time.time()
+
+            try:
+                # 导入说话人分离模块
+                from app.speaker_diarization import create_speaker_diarizer_v2
+
+                # 创建说话人分离器
+                diarizer = create_speaker_diarizer_v2(whisperx_config)
+
+                # 执行说话人分离
+                diarization_annotation = diarizer.diarize(audio_path)
+
+                # 使用新的转换函数处理pyannote Annotation
+                from app.speaker_word_matcher import convert_annotation_to_segments
+                diarization_segments = convert_annotation_to_segments(diarization_annotation)
+
+                # 使用词级时间戳进行精确匹配
+                if enable_word_timestamps and segments:
+                    try:
+                        # 导入词级匹配器
+                        from app.speaker_word_matcher import create_speaker_word_matcher
+
+                        logger.info(f"[{stage_name}] 使用词级时间戳进行精确说话人匹配")
+                        word_matcher = create_speaker_word_matcher(diarization_segments, whisperx_config)
+
+                        # 生成增强的字幕片段
+                        speaker_enhanced_segments = word_matcher.generate_enhanced_subtitles(segments)
+
+                        logger.info(f"[{stage_name}] 词级匹配完成，生成 {len(speaker_enhanced_segments)} 个精确片段")
+
+                    except Exception as e:
+                        logger.warning(f"[{stage_name}] 词级匹配失败: {e}，回退到传统匹配方式")
+                        # 回退到传统合并方式
+                        speaker_enhanced_segments = diarizer.merge_transcript_with_diarization(
+                            transcript_segments=segments,
+                            diarization_segments=diarization_segments
+                        )
+                else:
+                    # 没有词级时间戳，使用传统方式
+                    logger.info(f"[{stage_name}] 未启用词级时间戳，使用传统匹配方式")
+                    speaker_enhanced_segments = diarizer.merge_transcript_with_diarization(
+                        transcript_segments=segments,
+                        diarization_segments=diarization_segments
+                    )
+
+                # 清理资源
+                diarizer.cleanup()
+
+                # 立即进行额外的显存清理
+                try:
+                    import torch
+                    import gc
+                    if torch.cuda.is_available():
+                        # 记录清理前的显存
+                        before_allocated = torch.cuda.memory_allocated() / 1024**3
+                        logger.debug(f"[{stage_name}] 说话人分离后额外清理前显存: {before_allocated:.2f}GB")
+                        
+                        # 强制垃圾回收
+                        for _ in range(3):
+                            gc.collect()
+                        
+                        # 清理CUDA缓存
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        
+                        # 记录清理后的显存
+                        after_allocated = torch.cuda.memory_allocated() / 1024**3
+                        freed = before_allocated - after_allocated
+                        logger.info(f"[{stage_name}] 说话人分离后额外清理: {before_allocated:.2f}GB -> {after_allocated:.2f}GB (释放 {freed:.2f}GB)")
+                except Exception as e:
+                    logger.warning(f"[{stage_name}] 说话人分离后额外清理失败: {e}")
+
+                diarization_duration = time.time() - diarization_start_time
+                logger.info(f"[{stage_name}] 说话人分离完成，耗时: {diarization_duration:.2f}秒")
+
+                # 统计说话人信息
+                speakers = set()
+                for segment in speaker_enhanced_segments:
+                    if 'speaker' in segment:
+                        speakers.add(segment['speaker'])
+
+                logger.info(f"[{stage_name}] 检测到 {len(speakers)} 个说话人: {sorted(speakers)}")
+
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 说话人分离失败: {e}")
+                logger.info(f"[{stage_name}] 将使用基础转录结果继续处理")
+                # 分离失败时，继续使用原始结果
+
         # 生成字幕文件
         subtitles_dir = os.path.join(workflow_context.shared_storage_path, "subtitles")
         os.makedirs(subtitles_dir, exist_ok=True)
@@ -164,7 +265,6 @@ def generate_subtitles(self, context: dict) -> dict:
         subtitle_path = os.path.join(subtitles_dir, subtitle_filename)
 
         # 转换为SRT格式
-        segments = result["segments"]
         with open(subtitle_path, "w", encoding="utf-8") as f:
             for i, segment in enumerate(segments):
                 segment_start = segment["start"]
@@ -180,6 +280,97 @@ def generate_subtitles(self, context: dict) -> dict:
                 f.write(f"{text}\n\n")
 
         logger.info(f"[{stage_name}] SRT字幕生成完成: {subtitle_path} (共{len(segments)}条字幕)")
+
+        # 如果启用说话人分离且成功，生成带说话人信息的字幕文件
+        speaker_srt_path = None
+        speaker_json_path = None
+
+        if enable_diarization and speaker_enhanced_segments and show_speaker_labels:
+            try:
+                # 生成带说话人信息的SRT字幕文件
+                speaker_srt_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_with_speakers.srt"
+                speaker_srt_path = os.path.join(subtitles_dir, speaker_srt_filename)
+
+                with open(speaker_srt_path, "w", encoding="utf-8") as f:
+                    for i, segment in enumerate(speaker_enhanced_segments):
+                        segment_start = segment["start"]
+                        segment_end = segment["end"]
+                        text = segment["text"].strip()
+                        speaker = segment.get("speaker", "UNKNOWN")
+                        confidence = segment.get("speaker_confidence", 0.0)
+
+                        # 格式化为SRT时间格式
+                        start_str = f"{int(segment_start//3600):02d}:{int((segment_start%3600)//60):02d}:{int(segment_start%60):02d},{int((segment_start%1)*1000):03d}"
+                        end_str = f"{int(segment_end//3600):02d}:{int((segment_end%3600)//60):02d}:{int(segment_end%60):02d},{int((segment_end%1)*1000):03d}"
+
+                        f.write(f"{i+1}\n")
+                        f.write(f"{start_str} --> {end_str}\n")
+                        f.write(f"[{speaker}] {text}\n\n")
+
+                logger.info(f"[{stage_name}] 带说话人信息的SRT字幕生成完成: {speaker_srt_path} (共{len(speaker_enhanced_segments)}条字幕)")
+
+                # 生成带说话人信息的JSON文件
+                speaker_json_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_with_speakers.json"
+                speaker_json_path = os.path.join(subtitles_dir, speaker_json_filename)
+
+                # 构建带说话人信息的JSON数据
+                import json
+                speaker_json_data = {
+                    "metadata": {
+                        "audio_file": os.path.basename(audio_path),
+                        "total_duration": audio_duration,
+                        "language": result.get("language", "unknown"),
+                        "word_timestamps_enabled": enable_word_timestamps,
+                        "diarization_enabled": enable_diarization,
+                        "speakers": sorted(set(seg.get("speaker", "UNKNOWN") for seg in speaker_enhanced_segments)),
+                        "total_segments": len(speaker_enhanced_segments)
+                    },
+                    "segments": []
+                }
+
+                for i, segment in enumerate(speaker_enhanced_segments):
+                    segment_data = {
+                        "id": i + 1,
+                        "start": segment["start"],
+                        "end": segment["end"],
+                        "duration": segment["end"] - segment["start"],
+                        "text": segment["text"].strip(),
+                        "speaker": segment.get("speaker", "UNKNOWN"),
+                        "speaker_confidence": segment.get("speaker_confidence", 0.0)
+                    }
+
+                    # 如果有词级时间戳，添加到JSON中
+                    if "words" in segment and segment["words"]:
+                        segment_data["words"] = segment["words"]
+
+                    speaker_json_data["segments"].append(segment_data)
+
+                # 写入JSON文件
+                with open(speaker_json_path, "w", encoding="utf-8") as f:
+                    json.dump(speaker_json_data, f, ensure_ascii=False, indent=2)
+
+                logger.info(f"[{stage_name}] 带说话人信息的JSON文件生成完成: {speaker_json_path}")
+
+                # 生成说话人统计信息
+                speaker_stats = {}
+                for segment in speaker_enhanced_segments:
+                    speaker = segment.get("speaker", "UNKNOWN")
+                    duration = segment["end"] - segment["start"]
+                    if speaker not in speaker_stats:
+                        speaker_stats[speaker] = {"duration": 0.0, "segments": 0, "words": 0}
+                    speaker_stats[speaker]["duration"] += duration
+                    speaker_stats[speaker]["segments"] += 1
+                    if "words" in segment:
+                        speaker_stats[speaker]["words"] += len(segment["words"])
+
+                logger.info(f"[{stage_name}] 说话人统计信息:")
+                for speaker in sorted(speaker_stats.keys()):
+                    stats = speaker_stats[speaker]
+                    duration_percentage = (stats["duration"] / audio_duration) * 100 if audio_duration > 0 else 0
+                    logger.info(f"  {speaker}: {stats['segments']}段, {stats['duration']:.2f}秒 ({duration_percentage:.1f}%), {stats['words']}词")
+
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 生成带说话人信息的字幕文件失败: {e}")
 
         # 如果启用词级时间戳，生成JSON文件
         json_subtitle_path = None
@@ -284,6 +475,10 @@ def generate_subtitles(self, context: dict) -> dict:
             output_data["word_timestamps_json_path"] = json_subtitle_path
         if optimized_subtitle_path:
             output_data["optimized_subtitle_path"] = optimized_subtitle_path
+        if speaker_srt_path:
+            output_data["speaker_srt_path"] = speaker_srt_path
+        if speaker_json_path:
+            output_data["speaker_json_path"] = speaker_json_path
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
@@ -295,5 +490,107 @@ def generate_subtitles(self, context: dict) -> dict:
     finally:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
+
+        # 执行增强的GPU显存清理
+        try:
+            import gc
+            import torch
+            
+            # 第一阶段：强制垃圾回收
+            logger.info(f"[{stage_name}] 开始GPU显存清理...")
+            
+            # 多轮垃圾回收，确保所有对象都被回收
+            for round_num in range(5):
+                collected = gc.collect()
+                if collected > 0:
+                    logger.debug(f"[{stage_name}] 垃圾回收第{round_num+1}轮: 清理了 {collected} 个对象")
+                else:
+                    break
+            
+            # 第二阶段：PyTorch模型和缓存清理
+            if torch.cuda.is_available():
+                # 记录清理前的显存使用情况
+                before_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+                before_cached = torch.cuda.memory_reserved() / 1024**3  # GB
+                before_max_allocated = torch.cuda.max_memory_allocated() / 1024**3  # GB
+                
+                logger.debug(f"[{stage_name}] 清理前显存状态:")
+                logger.debug(f"  已分配: {before_allocated:.2f}GB")
+                logger.debug(f"  缓存: {before_cached:.2f}GB")
+                logger.debug(f"  峰值分配: {before_max_allocated:.2f}GB")
+
+                # 获取当前设备
+                current_device = torch.cuda.current_device()
+                
+                # 第三阶段：强制释放所有模型
+                try:
+                    # 尝试释放WhisperX模型
+                    if 'model' in locals():
+                        del model
+                        logger.debug(f"[{stage_name}] 已释放WhisperX模型")
+                    
+                    # 尝试释放alignment模型
+                    if 'model_a' in locals():
+                        del model_a
+                        logger.debug(f"[{stage_name}] 已释放alignment模型")
+                        
+                except Exception as e:
+                    logger.debug(f"[{stage_name}] 释放模型时出错: {e}")
+
+                # 第四阶段：激进的CUDA缓存清理
+                # 清理所有设备的缓存
+                for device_id in range(torch.cuda.device_count()):
+                    try:
+                        with torch.cuda.device(device_id):
+                            torch.cuda.empty_cache()
+                            torch.cuda.ipc_collect()
+                    except:
+                        pass
+                
+                # 在当前设备上同步
+                torch.cuda.synchronize()
+                
+                # 第五阶段：重置内存统计
+                try:
+                    torch.cuda.reset_peak_memory_stats(current_device)
+                    torch.cuda.reset_accumulated_memory_stats(current_device)
+                except:
+                    pass
+                
+                # 第六阶段：再次垃圾回收和缓存清理
+                for _ in range(3):
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                
+                # 最终同步
+                torch.cuda.synchronize()
+                
+                # 记录清理后的显存使用情况
+                after_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+                after_cached = torch.cuda.memory_reserved() / 1024**3  # GB
+                
+                freed_allocated = before_allocated - after_allocated
+                freed_cached = before_cached - after_cached
+                
+                logger.info(f"[{stage_name}] GPU显存清理完成:")
+                logger.info(f"  已分配显存: {before_allocated:.2f}GB -> {after_allocated:.2f}GB (释放 {freed_allocated:.2f}GB)")
+                logger.info(f"  缓存显存: {before_cached:.2f}GB -> {after_cached:.2f}GB (释放 {freed_cached:.2f}GB)")
+                
+                # 显存释放效果评估
+                if after_allocated <= 1.0:
+                    logger.info(f"[{stage_name}] ✅ 显存释放效果良好")
+                elif after_allocated <= 2.0:
+                    logger.info(f"[{stage_name}] ⚠️  显存释放一般，当前已分配: {after_allocated:.2f}GB")
+                else:
+                    logger.warning(f"[{stage_name}] ❌ 显存释放不彻底，当前已分配: {after_allocated:.2f}GB")
+                    logger.warning(f"[{stage_name}] 建议检查是否有模型未正确释放或考虑重启服务")
+                    
+            else:
+                logger.debug(f"[{stage_name}] CUDA不可用，跳过GPU显存清理")
+                
+        except ImportError as e:
+            logger.debug(f"[{stage_name}] PyTorch未安装，跳过CUDA缓存清理: {e}")
+        except Exception as e:
+            logger.warning(f"[{stage_name}] GPU显存清理时出错: {e}", exc_info=True)
 
     return workflow_context.model_dump()
