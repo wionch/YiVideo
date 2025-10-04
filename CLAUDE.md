@@ -254,3 +254,167 @@ class PaddleOCRTask:
 4. **性能问题**: 监控CPU使用率和Redis连接数
 
 **详细文档参考**: `docs/reference/GPU_LOCK_COMPLETE_GUIDE.md` 包含完整的故障排除指南和最佳实践。
+
+## MCP服务使用指南
+
+### Serena语义代码工具 (推荐优先使用)
+**核心功能**：
+- `find_symbol` - 查找代码符号（类、方法、函数）
+- `get_symbols_overview` - 获取文件符号概览
+- `search_for_pattern` - 智能模式搜索
+- `read_file` - 读取文件内容
+- `replace_regex` / `replace_symbol_body` - 精确代码修改
+- `find_referencing_symbols` - 查找符号引用关系
+
+**使用优先级**：Serena工具 > 普通工具
+
+**内存管理**：
+- `write_memory` - 保存重要项目信息到内存
+- `read_memory` - 读取项目内存信息
+- `list_memories` - 查看所有可用内存
+
+### 网络检索工具
+- **Context7** (`mcp__context7_*`): 获取最新的库文档和API参考
+- **Web搜索** (`mcp__web-search-prime_*`): 查找技术解决方案和最佳实践
+- **AI视觉分析** (`mcp__zai-mcp-server_*`): 分析图片和视频内容
+
+### 工作流程指导
+
+#### 1. 代码理解阶段
+```python
+# 优先使用Serena语义工具
+mcp__serena__get_symbols_overview("services/api_gateway/app/main.py")  # 快速了解文件结构
+mcp__serena__find_symbol("WorkflowFactory", "services/api_gateway")   # 查找特定类
+mcp__serena__search_for_pattern("class.*Task")                        # 搜索所有Task类
+```
+
+#### 2. 信息查询阶段
+```python
+# 查找库文档
+mcp__context7__resolve-library-id("fastapi")                          # 解析库ID
+mcp__context7__get-library-docs("/vercel/next.js", "routing")         # 获取特定主题文档
+
+# 搜索解决方案
+mcp__web-search-prime__webSearchPro("Docker GPU memory optimization") # 网络搜索
+```
+
+#### 3. 问题解决阶段
+```python
+# 使用视觉分析工具（如需要）
+mcp__zai-mcp-server__analyze_image("/path/to/screenshot.png", "Describe the UI layout")
+```
+
+#### 4. 代码修改阶段
+```python
+# 精确代码修改
+mcp__serena__replace_symbol_body("method_name", "file.py", new_body)  # 替换整个方法
+mcp__serena__replace_regex("file.py", "old_pattern", "new_pattern")  # 正则替换
+mcp__serena__insert_after_symbol("class_name", "file.py", new_code)   # 在类后插入代码
+```
+
+## 开发约束和最佳实践
+
+### 1. 文件操作约束
+```bash
+# ✅ 推荐：使用Serena工具
+mcp__serena__read_file("services/common/config.py")
+mcp__serena__search_for_pattern("GPU_LOCK_CONFIG")
+
+# ❌ 避免：使用普通工具（除非特殊需要）
+# Read("path/to/file")
+# Grep("pattern", "path/")
+```
+
+### 2. 符号查找约束
+```bash
+# ✅ 推荐：使用语义查找
+mcp__serena__find_symbol("PaddleOCRTask", "services/workers/paddleocr_service")
+mcp__serena__get_symbols_overview("services/api_gateway/app/workflow_factory.py")
+
+# ❌ 避免：简单的文本搜索
+# Grep("class PaddleOCRTask", "services/")
+```
+
+### 3. 网络检索约束
+```bash
+# ✅ 推荐：使用专门的检索工具
+mcp__context7__resolve-library-id("pytorch")                    # 查找PyTorch文档
+mcp__web-search-prime__webSearchPro("Docker compose GPU setup") # 搜索技术方案
+
+# ❌ 避免：让Claude猜测或使用过时的知识
+```
+
+### 4. 内存管理约束
+```bash
+# ✅ 重要信息保存到内存
+mcp__serena__write_memory("architecture_update", "系统架构变更内容...")
+mcp__serena__read_memory("project_overview")                    # 读取项目概览
+
+# ✅ 重大变更后更新内存
+# "项目架构已更新，请更新相关内存信息"
+```
+
+### 5. GPU任务开发约束
+```python
+# ✅ 所有GPU任务必须使用锁装饰器
+from services.common.locks import gpu_lock
+
+@gpu_lock()
+def process_with_gpu(self, input_data):
+    # GPU处理逻辑
+    return result
+```
+
+## Serena初始化和配置
+
+### 项目激活
+```bash
+# 激活YiVideo项目
+mcp__serena__activate_project("/workspaces/YiVideo")
+
+# 检查初始化状态
+mcp__serena__check_onboarding_performed()
+```
+
+### 内存文件维护
+- **project_overview**: 项目基本信息和定位
+- **tech_stack**: 技术栈和框架详情
+- **code_conventions**: 代码规范和约定
+- **suggested_commands**: 开发命令指南
+- **project_structure**: 项目结构和架构
+- **development_workflow**: 开发工作流程
+- **gpu_lock_system**: GPU锁系统详解
+
+### 配置热重载
+当项目发生重大变更时，需要手动更新Serena内存：
+```bash
+# 告诉Claude更新内存
+"项目架构有变更，请更新project_structure内存"
+"新增了AI服务，请更新tech_stack内存"
+```
+
+## 故障排除和调试
+
+### MCP服务调试
+```bash
+# 检查Serena配置
+mcp__serena__get_current_config()
+
+# 查看可用工具
+# (当前工具列表会自动显示在配置中)
+
+# 检查内存状态
+mcp__serena__list_memories()
+```
+
+### 工具使用建议
+1. **语义工具优先**: 对于代码相关操作，优先使用Serena语义工具
+2. **网络检索辅助**: 遇到不确定的技术问题时，主动使用网络检索
+3. **内存同步**: 重大变更后及时更新项目内存
+4. **工具组合**: 结合使用多种MCP工具以获得最佳效果
+
+### 常见问题处理
+1. **Serena工具无响应**: 检查项目激活状态和容器连接
+2. **网络检索失败**: 确认网络连接和API配置
+3. **内存信息过时**: 重大变更后主动更新相关内存
+4. **工具选择混乱**: 参考上述工作流程指导，按阶段选择合适工具

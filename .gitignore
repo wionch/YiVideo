@@ -230,6 +230,7 @@ videos/
 pipline/
 share/
 models/
+.serena/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/

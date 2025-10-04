@@ -135,9 +135,8 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-      - ./models/huggingface:/app/.cache/huggingface  # <--- ADDED: Hugging Face模型缓存
-      - ./models/transformers:/app/.cache/transformers  # <--- ADDED: Transformers缓存
-      - ./models/whisperx:/app/.cache/whisperx  # <--- ADDED: WhisperX缓存
+      - ./models/app/cache:/app/.cache  # <--- ADDED: Hugging Face模型缓存
+      - ./models/root/cache:/root/.cache  # <--- ADDED: Transformers缓存
     restart: on-failure
     user: "0:0"
     entrypoint: ""
@@ -146,6 +145,8 @@ services:
       - PYTHONPATH=/app
       - HF_TOKEN=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
       - HF_HOME=/app/.cache/huggingface  # <--- ADDED: 确保使用正确的缓存路径
+      - HF_ENDPOINT=https://hf-mirror.com #https://aifasthub.com # <--- ADDED: 使用镜像地址
+      - HF_HUB_ENABLE_HF_TRANSFER=0  # <--- ADDED: 启用HF Transfer
       - TRANSFORMERS_CACHE=/app/.cache/transformers  # <--- ADDED: Transformers缓存路径
       - PYANNOTEAI_API_KEY=sk_39f32b6ba1584278a0c1c3582ae8db4f  # <--- ADDED: PyannoteAI API Key
     depends_on:
@@ -219,3 +220,64 @@ services:
       - PYTHONPATH=/app
     depends_on:
       - redis
+  # --- MCP Services ---
+  
+  # Redis MCP Server - Redis数据库操作和状态查询
+  redis_mcp_server:
+    container_name: redis_mcp_server
+    image: node:18-alpine
+    command: >
+      sh -c "
+      npm install -g @modelcontextprotocol/server-redis &&
+      npx @modelcontextprotocol/server-redis
+      "
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - NODE_ENV=production
+    ports:
+      - "9122:9122"     # Redis MCP Server端口
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - npm_cache:/root/.npm
+
+  # Git MCP Server - Git仓库操作和代码审查
+  git_mcp_server:
+    container_name: git_mcp_server
+    image: node:18-alpine
+    command: >
+      sh -c "
+      npm install -g @modelcontextprotocol/server-git &&
+      npx @modelcontextprotocol/server-git /workspaces/YiVideo
+      "
+    environment:
+      - NODE_ENV=production
+      - GIT_REPO_PATH=/workspaces/YiVideo
+    ports:
+      - "9123:9123"     # Git MCP Server端口
+    volumes:
+      - ./:/workspaces/YiVideo:ro  # 只读挂载项目目录
+      - npm_cache:/root/.npm
+      - ~/.ssh:/root/.ssh:ro       # SSH密钥访问（只读）
+    restart: unless-stopped
+
+  serena:
+    image: ghcr.io/oraios/serena:latest
+    container_name: serena
+    command: >
+      serena start-mcp-server
+      --transport streamable-http
+      --port 9121
+    volumes:
+      - ./:/workspaces/YiVideo
+    ports:
+      - "9121:9121"     # MCP HTTP 服务端点: http://localhost:9121/mcp
+      - "24282:24282"   # 可选：Dashboard（若端口被占用会自增）
+    restart: unless-stopped
+
+# 添加npm缓存卷
+volumes:
+  npm_cache:  
+  
