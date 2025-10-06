@@ -231,6 +231,7 @@ pipline/
 share/
 models/
 .serena/
+packages/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/

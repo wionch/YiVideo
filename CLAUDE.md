@@ -263,10 +263,12 @@ class PaddleOCRTask:
 - `get_symbols_overview` - 获取文件符号概览
 - `search_for_pattern` - 智能模式搜索
 - `read_file` - 读取文件内容
-- `replace_regex` / `replace_symbol_body` - 精确代码修改
 - `find_referencing_symbols` - 查找符号引用关系
+- `get_file_content` -  读文件
 
 **使用优先级**：Serena工具 > 普通工具
+
+**禁止使用**: Serena所有文件编辑工具.serena禁止修改文件
 
 **内存管理**：
 - `write_memory` - 保存重要项目信息到内存

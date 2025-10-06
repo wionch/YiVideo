@@ -151,6 +151,7 @@ class SpeakerWordMatcher:
     def _find_speaker_at_time(self, timestamp: float) -> str:
         """
         查找指定时间点的说话人
+        优化版本：改进距离计算逻辑，避免偏向长时间跨度的说话人
 
         Args:
             timestamp: 时间戳（秒）
@@ -158,29 +159,57 @@ class SpeakerWordMatcher:
         Returns:
             str: 说话人标签
         """
+        # 首先检查是否在某个说话人时间段内
         for time_seg in self.speaker_timeline:
             if time_seg['start'] <= timestamp <= time_seg['end']:
                 return time_seg['speaker']
 
-        # 如果没有找到精确匹配，寻找最近的说话人
+        # 如果没有找到精确匹配，使用改进的匹配逻辑
         closest_speaker = None
         min_distance = float('inf')
 
+        # 找到时间戳前后的说话人时间段，优先考虑时间接近度而不是跨度大小
         for time_seg in self.speaker_timeline:
             # 计算到时间段的距离
             if timestamp < time_seg['start']:
+                # 时间戳在时间段之前，计算到开始时间的距离
                 distance = time_seg['start'] - timestamp
             elif timestamp > time_seg['end']:
+                # 时间戳在时间段之后，计算到结束时间的距离
                 distance = timestamp - time_seg['end']
             else:
-                # 在时间段内，距离为0
+                # 在时间段内，距离为0（这种情况前面已经处理了）
                 distance = 0
 
+            # 只有当距离更小时才更新
             if distance < min_distance:
                 min_distance = distance
                 closest_speaker = time_seg['speaker']
+            # 如果距离相等，优先选择时间上更接近的说话人
+            elif distance == min_distance and distance > 0:
+                # 计算时间戳到时间段中心的距离作为额外的判断依据
+                current_center = (time_seg['start'] + time_seg['end']) / 2
+                center_distance = abs(timestamp - current_center)
 
-        return closest_speaker or 'SPEAKER_00'
+                # 找到当前closest_speaker的时间段中心距离
+                for prev_seg in self.speaker_timeline:
+                    if prev_seg['speaker'] == closest_speaker:
+                        prev_center = (prev_seg['start'] + prev_seg['end']) / 2
+                        prev_center_distance = abs(timestamp - prev_center)
+                        break
+                else:
+                    prev_center_distance = float('inf')
+
+                # 如果当前时间段的中心更接近，则更新
+                if center_distance < prev_center_distance:
+                    closest_speaker = time_seg['speaker']
+
+        # 如果仍然没有找到，返回默认说话人
+        if closest_speaker is None:
+            logger.warning(f"无法找到时间戳 {timestamp:.2f}s 对应的说话人，使用默认说话人 SPEAKER_00")
+            return 'SPEAKER_00'
+
+        return closest_speaker
 
     def group_words_by_speaker(self, matched_words: List[Dict]) -> List[Dict]:
         """
@@ -331,8 +360,16 @@ class SpeakerWordMatcher:
             List[Dict]: 增强的字幕片段
         """
         enhanced_segments = []
+        speaker_stats = set()  # 用于统计实际使用的说话人
 
-        for trans_seg in transcript_segments:
+        logger.debug(f"开始生成增强字幕，输入片段数: {len(transcript_segments)}")
+        logger.debug(f"可用说话人时间段: {len(self.speaker_timeline)}")
+
+        # 显示说话人时间段详情（前5个）
+        for i, seg in enumerate(self.speaker_timeline[:5]):
+            logger.debug(f"  说话人时间段 {i+1}: {seg['start']:.2f}s-{seg['end']:.2f}s, 说话人: {seg['speaker']}")
+
+        for i, trans_seg in enumerate(transcript_segments):
             if 'words' not in trans_seg or not trans_seg['words']:
                 # 没有词级信息，使用原有逻辑
                 enhanced_seg = trans_seg.copy()
@@ -342,6 +379,11 @@ class SpeakerWordMatcher:
                 enhanced_seg['speaker'] = speaker
                 enhanced_seg['speaker_confidence'] = 0.7
                 enhanced_segments.append(enhanced_seg)
+                speaker_stats.add(speaker)
+
+                # 调试信息（前3个片段）
+                if i < 3:
+                    logger.debug(f"片段 {i+1} (无词级信息): {trans_seg['start']:.2f}s-{trans_seg['end']:.2f}s -> 匹配到说话人: {speaker}")
             else:
                 # 有词级信息，使用精确匹配
                 matched_words = self.match_words_to_speakers(trans_seg['words'])
@@ -356,6 +398,27 @@ class SpeakerWordMatcher:
                         )
                         enhanced_seg['speaker_confidence'] = 1.0  # 词级匹配，高置信度
                         enhanced_segments.append(enhanced_seg)
+                        speaker_stats.add(group_words[0]['speaker'])
+
+                # 调试信息（前3个有词级信息的片段）
+                if i < 3:
+                    word_speakers = set(word['speaker'] for word in matched_words)
+                    logger.debug(f"片段 {i+1} (有词级信息): {trans_seg['start']:.2f}s-{trans_seg['end']:.2f}s -> 匹配到说话人: {sorted(word_speakers)}")
+
+        # 统计最终使用的说话人
+        logger.info(f"增强字幕生成完成: {len(enhanced_segments)} 个片段, 使用的说话人: {sorted(speaker_stats)}")
+
+        # 检查是否有说话人丢失
+        original_speakers = set(seg['speaker'] for seg in self.speaker_timeline)
+        missing_speakers = original_speakers - speaker_stats
+        if missing_speakers:
+            logger.warning(f"⚠️  检测到说话人丢失: {sorted(missing_speakers)} (原始: {sorted(original_speakers)}, 使用: {sorted(speaker_stats)})")
+            # 输出丢失说话人的时间段信息
+            for speaker in missing_speakers:
+                lost_segments = [seg for seg in self.speaker_timeline if seg['speaker'] == speaker]
+                logger.warning(f"  丢失说话人 {speaker} 的时间段: {[(seg['start'], seg['end']) for seg in lost_segments]}")
+        else:
+            logger.info(f"✅ 所有说话人都被正确匹配")
 
         return enhanced_segments
 

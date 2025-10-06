@@ -11,3 +11,5 @@ ffmpeg-python>=0.2.0
 # WhisperX 核心依赖
 whisperx
 omegaconf
+librosa
+pyannote.audio>=4.0.0

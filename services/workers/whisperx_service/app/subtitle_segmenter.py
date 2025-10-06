@@ -116,7 +116,8 @@ class SubtitleSegmenter:
                 current_segment_duration,
                 word_gap,
                 len(current_segment_words),
-                i < len(words) - 1  # 是否还有更多词
+                i < len(words) - 1,  # 是否还有更多词
+                current_segment_words  # 传递当前累积的词列表
             )
 
             # 如果应该在最后一个词处断句，完成当前segment并开始新segment
@@ -148,7 +149,8 @@ class SubtitleSegmenter:
         return segments
 
     def _should_break_at_word(self, word_text: str, duration: float,
-                           word_gap: float, word_count: int, has_more_words: bool) -> bool:
+                           word_gap: float, word_count: int, has_more_words: bool, 
+                           current_words: List[Dict] = None) -> bool:
         """判断是否应该在当前词处断句 - 修正版本，基于当前词的标点符号"""
 
         logger.debug(f"断句分析: 词数={word_count}, 时长={duration:.2f}s, 当前词={word_text}, 间隔={word_gap:.2f}s")
@@ -185,13 +187,13 @@ class SubtitleSegmenter:
             return False
 
         # 优先级4: 最大时长限制 (5秒，按您的要求)
-        max_duration = 5.0  # 使用您指定的5秒
+        max_duration = self.config.max_subtitle_duration  # 使用配置值
         if duration > max_duration:
             logger.debug(f"断句(优先级4): 超过最大时长限制 ({duration:.2f}s > {max_duration}s)")
             return True
 
         # 优先级5: 最小时长检查 (1.2秒，按您的要求)
-        min_duration = 1.2  # 使用您指定的1.2秒
+        min_duration = self.config.min_subtitle_duration  # 使用配置值
         if has_more_words and duration < min_duration:
             logger.debug(f"不断句(优先级5): 时长过短 ({duration:.2f}s < {min_duration}s)")
             return False
@@ -199,8 +201,8 @@ class SubtitleSegmenter:
         # 优先级6: 字符数限制 (40字符/行，按您的要求) - 最低优先级
         # 需要计算当前segment的字符数
         segment_chars = len(word_text) + (word_count - 1) * 1  # 粗略估算
-        max_chars = 40  # 使用您指定的40字符/行
-        if segment_chars > max_chars * self.config.max_lines_per_subtitle:
+        max_chars = self.config.max_chars_per_line * self.config.max_lines_per_subtitle  # 使用配置值
+        if segment_chars > max_chars:
             logger.debug(f"断句(优先级6): 字符数过多 ({segment_chars} > {max_chars * self.config.max_lines_per_subtitle})")
             return True
 

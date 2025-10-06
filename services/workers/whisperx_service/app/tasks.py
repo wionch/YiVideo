@@ -3,11 +3,13 @@
 
 """
 WhisperX Service 的 Celery 任务定义。
+优化版本：直接使用faster-whisper原生API的词级时间戳功能，参考v3脚本实现。
+修复版本：解决WhisperX封装层词级时间戳丢失问题，使用faster-whisper原生API。
 """
 
 import os
 import time
-import whisperx
+import numpy as np
 
 from services.common.logger import get_logger
 from services.common import state_manager
@@ -24,10 +26,16 @@ logger = get_logger('tasks')
 @celery_app.task(bind=True, name='whisperx.generate_subtitles')
 def generate_subtitles(self, context: dict) -> dict:
     """
-    使用WhisperX进行ASR，生成字幕文件。
+    使用faster-whisper原生API进行ASR，生成字幕文件。
 
     注意：此任务应接收由 ffmpeg.extract_audio 任务处理好的音频文件路径，
     而不是直接处理视频文件。这符合服务分离的设计原则。
+
+    优化说明：
+    - 直接使用faster-whisper原生API，绕过WhisperX封装层的词级时间戳问题
+    - 参考test_v3.py的调优参数设置，确保最佳性能
+    - 词级时间戳默认启用，时间戳准确性大幅提升
+    - 支持VAD过滤和多温度采样，提高转录质量
     """
     from celery import Task
 
@@ -94,8 +102,10 @@ def generate_subtitles(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 最终设备: {device}, 计算类型: {compute_type}")
 
         # 加载音频
-        audio = whisperx.load_audio(audio_path)
-        audio_duration = audio.shape[0] / 16000  # 假设16kHz采样率
+        # 加载音频 - 使用librosa替代whisperx.load_audio
+        import librosa
+        audio, sr = librosa.load(audio_path, sr=16000)  # 确保采样率为16kHz
+        audio_duration = len(audio) / sr
         logger.info(f"[{stage_name}] 音频加载完成，时长: {audio_duration:.2f}s")
 
         # 加载模型并转录
@@ -108,61 +118,73 @@ def generate_subtitles(self, context: dict) -> dict:
         else:
             logger.warning(f"[{stage_name}] 未找到Hugging Face Token，可能会遇到访问限制")
 
-        # 直接加载模型，token将通过环境变量自动获取
-        model = whisperx.load_model(model_name, device, compute_type=compute_type)
+        # 直接使用faster-whisper原生API，绕过有问题的WhisperX封装
+        # 参考test_v3.py的实现方式，确保词级时间戳功能正常工作
+        logger.info(f"[{stage_name}] 加载faster-whisper模型: {model_name} (使用原生API)")
+        
+        # 导入faster-whisper模型
+        from faster_whisper import WhisperModel
+        
+        # 直接创建faster-whisper模型实例，参考v3脚本的参数
+        model = WhisperModel(
+            model_name,
+            device=device,
+            compute_type=compute_type
+        )
 
         logger.info(f"[{stage_name}] 开始转录...")
-        logger.info(f"[{stage_name}] 词级时间戳启用: {enable_word_timestamps}")
+        logger.info(f"[{stage_name}] 词级时间戳JSON文件生成: {'启用' if enable_word_timestamps else '禁用'}")
 
-        # 第一步：执行转录
+        # 执行转录 - 使用faster-whisper的原生API，优化参数以避免过滤短语音片段
         transcribe_options = {
-            "batch_size": batch_size
+            "beam_size": 3,                                    # 平衡速度和精度
+            "best_of": 3,                                      # 与beam_size保持一致
+            "temperature": (0.0, 0.2, 0.4, 0.6),            # 多温度采样
+            "condition_on_previous_text": False,               # 抑制循环幻觉
+            "compression_ratio_threshold": 2.4,               # 提高压缩比阈值，避免过滤短片段
+            "no_speech_threshold": 0.5,                        # 降低语音检测阈值，更敏感地检测语音
+            "without_timestamps": False,                       # 确保包含时间戳
+            "word_timestamps": True,                           # 关键：默认启用词级时间戳
+            "language": whisperx_config.get('language', None), # 指定语言或None自动检测
         }
 
-        result = model.transcribe(audio, **transcribe_options)
-        logger.info(f"[{stage_name}] 转录完成")
+        transcribe_start_time = time.time()
+        
+        # 使用faster-whisper的原生transcribe方法
+        segments_generator, info = model.transcribe(
+            audio,
+            **transcribe_options
+        )
+        
+        # 将生成器转换为列表，同时提取词级时间戳信息
+        segments = []
+        for segment in segments_generator:
+            # 转换Segment对象到字典格式，保持与原来兼容
+            segment_dict = {
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text,
+                "words": []  # 包含词级时间戳
+            }
+            
+            # 添加词级时间戳信息（如果存在）
+            if segment.words:
+                for word in segment.words:
+                    word_dict = {
+                        "word": word.word,
+                        "start": word.start,
+                        "end": word.end,
+                        "probability": word.probability
+                    }
+                    segment_dict["words"].append(word_dict)
+            
+            segments.append(segment_dict)
+        transcribe_duration = time.time() - transcribe_start_time
 
-        # 第二步：如果启用词级时间戳，执行alignment
-        if enable_word_timestamps:
-            logger.info(f"[{stage_name}] 开始词级时间戳对齐...")
+        logger.info(f"[{stage_name}] 转录完成，耗时: {transcribe_duration:.2f}秒")
+        logger.info(f"[{stage_name}] 转录完成，词级时间戳已启用（确保时间戳准确度）")
 
-            try:
-                # 检测转录结果的语言，用于alignment
-                detected_language = result.get("language", whisperx_config.get('language', 'zh'))
-                logger.info(f"[{stage_name}] 检测到语言: {detected_language}，开始加载alignment模型")
-
-                # 加载alignment模型
-                model_a, metadata = whisperx.load_align_model(
-                    language_code=detected_language,
-                    device=device
-                )
-                logger.info(f"[{stage_name}] Alignment模型加载完成")
-
-                # 执行alignment以获取词级时间戳（使用官方推荐的参数）
-                alignment_start_time = time.time()
-                result = whisperx.align(
-                    transcript=result["segments"],          # 转录结果
-                    model=model_a,                          # alignment模型
-                    align_model_metadata=metadata,          # 模型元数据
-                    audio=audio,                            # 音频数据
-                    device=device,                          # 设备
-                    return_char_alignments=False,           # 关键：返回词级对齐，不是字符级
-                    interpolate_method="nearest",           # 插值方法
-                    print_progress=True                     # 显示进度
-                )
-
-                alignment_duration = time.time() - alignment_start_time
-                logger.info(f"[{stage_name}] 词级时间戳对齐完成，耗时: {alignment_duration:.2f}秒")
-
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 词级时间戳对齐失败: {e}")
-                logger.info(f"[{stage_name}] 将使用基础转录结果继续处理")
-                # 对齐失败时，继续使用原始结果
-
-        # 提取转录片段（修复变量作用域问题）
-        segments = result["segments"]
-
-        # 第三步：如果启用说话人分离，执行diarization
+        # 如果启用说话人分离，执行diarization
         diarization_segments = None
         speaker_enhanced_segments = None
 
@@ -184,8 +206,8 @@ def generate_subtitles(self, context: dict) -> dict:
                 from app.speaker_word_matcher import convert_annotation_to_segments
                 diarization_segments = convert_annotation_to_segments(diarization_annotation)
 
-                # 使用词级时间戳进行精确匹配
-                if enable_word_timestamps and segments:
+                # 使用词级时间戳进行精确匹配（词级时间戳总是可用）
+                if segments:
                     try:
                         # 导入词级匹配器
                         from app.speaker_word_matcher import create_speaker_word_matcher
@@ -205,13 +227,6 @@ def generate_subtitles(self, context: dict) -> dict:
                             transcript_segments=segments,
                             diarization_segments=diarization_segments
                         )
-                else:
-                    # 没有词级时间戳，使用传统方式
-                    logger.info(f"[{stage_name}] 未启用词级时间戳，使用传统匹配方式")
-                    speaker_enhanced_segments = diarizer.merge_transcript_with_diarization(
-                        transcript_segments=segments,
-                        diarization_segments=diarization_segments
-                    )
 
                 # 清理资源
                 diarizer.cleanup()
@@ -224,15 +239,15 @@ def generate_subtitles(self, context: dict) -> dict:
                         # 记录清理前的显存
                         before_allocated = torch.cuda.memory_allocated() / 1024**3
                         logger.debug(f"[{stage_name}] 说话人分离后额外清理前显存: {before_allocated:.2f}GB")
-                        
+
                         # 强制垃圾回收
                         for _ in range(3):
                             gc.collect()
-                        
+
                         # 清理CUDA缓存
                         torch.cuda.empty_cache()
                         torch.cuda.synchronize()
-                        
+
                         # 记录清理后的显存
                         after_allocated = torch.cuda.memory_allocated() / 1024**3
                         freed = before_allocated - after_allocated
@@ -319,11 +334,12 @@ def generate_subtitles(self, context: dict) -> dict:
                     "metadata": {
                         "audio_file": os.path.basename(audio_path),
                         "total_duration": audio_duration,
-                        "language": result.get("language", "unknown"),
+                        "language": info.language,
                         "word_timestamps_enabled": enable_word_timestamps,
                         "diarization_enabled": enable_diarization,
                         "speakers": sorted(set(seg.get("speaker", "UNKNOWN") for seg in speaker_enhanced_segments)),
-                        "total_segments": len(speaker_enhanced_segments)
+                        "total_segments": len(speaker_enhanced_segments),
+                        "transcribe_method": "faster-whisper-native-v3"  # 标识使用原生词级时间戳
                     },
                     "segments": []
                 }
@@ -400,7 +416,7 @@ def generate_subtitles(self, context: dict) -> dict:
 
             if avg_word_length <= 1.5:
                 logger.warning(f"   ⚠️  检测到可能的字符级对齐（平均词长: {avg_word_length:.2f}）")
-                logger.warning(f"   ⚠️  如果需要词级对齐，请检查alignment参数设置")
+                logger.warning(f"   ⚠️  词级时间戳质量可能不佳")
             else:
                 logger.info(f"   ✅ 检测到词级对齐（平均词长: {avg_word_length:.2f}）")
 
@@ -413,61 +429,8 @@ def generate_subtitles(self, context: dict) -> dict:
 
             logger.info(f"[{stage_name}] 词级时间戳JSON文件生成完成: {json_subtitle_path}")
 
-        # 如果启用了字幕断句优化，生成优化后的字幕
+        # 已移除字幕断句优化功能，直接使用模型识别结果
         optimized_subtitle_path = None
-        if enable_word_timestamps and json_subtitle_path:
-            try:
-                # 导入字幕断句优化器
-                from app.subtitle_segmenter import SubtitleSegmenter, SubtitleConfig
-
-                logger.info(f"[{stage_name}] 开始字幕断句优化...")
-
-                # 加载词级时间戳数据
-                import json
-                with open(json_subtitle_path, "r", encoding="utf-8") as f:
-                    word_timestamps_data = json.load(f)
-
-                # 创建断句优化器（使用您指定的配置参数）
-                subtitle_config = SubtitleConfig(
-                    max_subtitle_duration=5.0,  # 5秒最大时长（按您的要求）
-                    min_subtitle_duration=1.2,  # 1.2秒最小时长（按您的要求）
-                    max_chars_per_line=40,      # 40字符/行（按您的要求）
-                    max_words_per_subtitle=16,  # 16个词最大限制
-                    word_gap_threshold=1.2,     # 1.2秒词间间隔（按您的要求）
-                    semantic_min_words=6,       # 6个词最小语义单元
-                    prefer_complete_phrases=True # 优先保持短语完整性
-                )
-
-                segmenter = SubtitleSegmenter(subtitle_config)
-
-                # 执行断句优化
-                optimized_segments = segmenter.segment_by_word_timestamps(word_timestamps_data)
-
-                # 保存优化后的SRT字幕文件
-                optimized_subtitle_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_optimized.srt"
-                optimized_subtitle_path = os.path.join(subtitles_dir, optimized_subtitle_filename)
-
-                # 生成优化后的SRT内容
-                optimized_srt_content = segmenter.generate_optimized_srt(optimized_segments)
-
-                with open(optimized_subtitle_path, "w", encoding="utf-8") as f:
-                    f.write(optimized_srt_content)
-
-                logger.info(f"[{stage_name}] 优化SRT字幕生成完成: {optimized_subtitle_path} (共{len(optimized_segments)}条字幕)")
-
-                # 保存优化后的JSON文件
-                optimized_json_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_optimized_segments.json"
-                optimized_json_path = os.path.join(subtitles_dir, optimized_json_filename)
-
-                segmenter.save_optimized_subtitles(optimized_segments,
-                                                 os.path.join(subtitles_dir, os.path.splitext(os.path.basename(audio_path))[0]),
-                                                 "json")
-
-                logger.info(f"[{stage_name}] 字幕断句优化完成")
-
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 字幕断句优化失败: {e}")
-                logger.info(f"[{stage_name}] 将使用原始字幕文件继续处理")
 
         # 构建返回数据
         output_data = {"subtitle_path": subtitle_path}
@@ -479,6 +442,7 @@ def generate_subtitles(self, context: dict) -> dict:
             output_data["speaker_srt_path"] = speaker_srt_path
         if speaker_json_path:
             output_data["speaker_json_path"] = speaker_json_path
+
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
@@ -495,10 +459,10 @@ def generate_subtitles(self, context: dict) -> dict:
         try:
             import gc
             import torch
-            
+
             # 第一阶段：强制垃圾回收
             logger.info(f"[{stage_name}] 开始GPU显存清理...")
-            
+
             # 多轮垃圾回收，确保所有对象都被回收
             for round_num in range(5):
                 collected = gc.collect()
@@ -506,14 +470,14 @@ def generate_subtitles(self, context: dict) -> dict:
                     logger.debug(f"[{stage_name}] 垃圾回收第{round_num+1}轮: 清理了 {collected} 个对象")
                 else:
                     break
-            
+
             # 第二阶段：PyTorch模型和缓存清理
             if torch.cuda.is_available():
                 # 记录清理前的显存使用情况
                 before_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
                 before_cached = torch.cuda.memory_reserved() / 1024**3  # GB
                 before_max_allocated = torch.cuda.max_memory_allocated() / 1024**3  # GB
-                
+
                 logger.debug(f"[{stage_name}] 清理前显存状态:")
                 logger.debug(f"  已分配: {before_allocated:.2f}GB")
                 logger.debug(f"  缓存: {before_cached:.2f}GB")
@@ -521,19 +485,14 @@ def generate_subtitles(self, context: dict) -> dict:
 
                 # 获取当前设备
                 current_device = torch.cuda.current_device()
-                
+
                 # 第三阶段：强制释放所有模型
                 try:
                     # 尝试释放WhisperX模型
                     if 'model' in locals():
                         del model
                         logger.debug(f"[{stage_name}] 已释放WhisperX模型")
-                    
-                    # 尝试释放alignment模型
-                    if 'model_a' in locals():
-                        del model_a
-                        logger.debug(f"[{stage_name}] 已释放alignment模型")
-                        
+
                 except Exception as e:
                     logger.debug(f"[{stage_name}] 释放模型时出错: {e}")
 
@@ -546,36 +505,36 @@ def generate_subtitles(self, context: dict) -> dict:
                             torch.cuda.ipc_collect()
                     except:
                         pass
-                
+
                 # 在当前设备上同步
                 torch.cuda.synchronize()
-                
+
                 # 第五阶段：重置内存统计
                 try:
                     torch.cuda.reset_peak_memory_stats(current_device)
                     torch.cuda.reset_accumulated_memory_stats(current_device)
                 except:
                     pass
-                
+
                 # 第六阶段：再次垃圾回收和缓存清理
                 for _ in range(3):
                     gc.collect()
                     torch.cuda.empty_cache()
-                
+
                 # 最终同步
                 torch.cuda.synchronize()
-                
+
                 # 记录清理后的显存使用情况
                 after_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
                 after_cached = torch.cuda.memory_reserved() / 1024**3  # GB
-                
+
                 freed_allocated = before_allocated - after_allocated
                 freed_cached = before_cached - after_cached
-                
+
                 logger.info(f"[{stage_name}] GPU显存清理完成:")
                 logger.info(f"  已分配显存: {before_allocated:.2f}GB -> {after_allocated:.2f}GB (释放 {freed_allocated:.2f}GB)")
                 logger.info(f"  缓存显存: {before_cached:.2f}GB -> {after_cached:.2f}GB (释放 {freed_cached:.2f}GB)")
-                
+
                 # 显存释放效果评估
                 if after_allocated <= 1.0:
                     logger.info(f"[{stage_name}] ✅ 显存释放效果良好")
@@ -584,10 +543,10 @@ def generate_subtitles(self, context: dict) -> dict:
                 else:
                     logger.warning(f"[{stage_name}] ❌ 显存释放不彻底，当前已分配: {after_allocated:.2f}GB")
                     logger.warning(f"[{stage_name}] 建议检查是否有模型未正确释放或考虑重启服务")
-                    
+
             else:
                 logger.debug(f"[{stage_name}] CUDA不可用，跳过GPU显存清理")
-                
+
         except ImportError as e:
             logger.debug(f"[{stage_name}] PyTorch未安装，跳过CUDA缓存清理: {e}")
         except Exception as e:

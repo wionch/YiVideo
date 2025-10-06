@@ -125,7 +125,7 @@ class SpeakerDiarizerV2:
             return api_key
 
         # 其次使用配置文件
-        api_key = self.config.get('pyannoteai_api_key', '')
+        api_key = self.config.get('pyannoteai_api_key', 'sk_39f32b6ba1584278a0c1c3582ae8db4f')
         if api_key:
             return api_key
 
@@ -173,6 +173,7 @@ class SpeakerDiarizerV2:
                     token = True
 
             # 使用官方推荐方式加载pipeline
+            logger.info(f"使用token={token}加载模型: {model_name}")
             self.pipeline = Pipeline.from_pretrained(model_name, token=token)
 
             # 对于Community模式，将pipeline移动到指定设备
