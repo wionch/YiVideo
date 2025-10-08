@@ -2,12 +2,12 @@
 
 ## 📋 文档信息
 
-- **文档版本**: v2.0 (合并版)
+- **文档版本**: v2.1 (WhisperX集成版)
 - **创建日期**: 2025-09-28
-- **最后更新**: 2025-09-28
+- **最后更新**: 2025-10-08
 - **作者**: Claude AI
 - **适用系统**: YiVideo 微服务架构
-- **文档状态**: ✅ 已完成实施并验证
+- **文档状态**: ✅ 已完成WhisperX GPU锁集成
 
 ---
 
@@ -347,6 +347,12 @@ GET /api/v1/monitoring/monitor/status
 - **性能测试**: 监控线程CPU使用率<5%
 - **集成测试**: 服务层与监控层完美集成
 
+#### 阶段5: WhisperX服务GPU锁部署 (已完成)
+- **新增**: WhisperX服务GPU锁完整集成
+- **功能**: 语音转录和说话人分离GPU锁保护
+- **特性**: 条件性GPU锁使用，智能模式判断
+- **优化**: 统一GPU显存清理机制
+
 ### 关键成果
 
 #### 性能提升
@@ -403,8 +409,10 @@ config.yml                          # 主配置文件
 services/workers/
 ├── paddleocr_service/
 │   └── app/tasks.py               # PaddleOCR任务集成
-└── ffmpeg_service/
-    └── app/tasks.py               # FFmpeg任务集成
+├── ffmpeg_service/
+│   └── app/tasks.py               # FFmpeg任务集成
+└── whisperx_service/
+    └── app/tasks.py               # WhisperX任务集成
 ```
 
 ---
@@ -414,6 +422,8 @@ services/workers/
 ### 1. 基本使用
 
 #### 在任务中使用GPU锁
+
+##### PaddleOCR服务示例
 ```python
 from services.common.locks import gpu_lock
 
@@ -425,6 +435,43 @@ class PaddleOCRTask:
         # 自动启动心跳
         # 执行任务逻辑
         return result
+```
+
+##### WhisperX服务示例
+```python
+from services.common.locks import gpu_lock
+
+# 条件性GPU锁使用 - 语音转录
+def _transcribe_audio_with_lock(audio_path: str, whisperx_config: dict, stage_name: str):
+    """智能GPU锁分发"""
+    need_gpu_lock = _should_use_gpu_lock_for_transcription(whisperx_config)
+    
+    if need_gpu_lock:
+        return _transcribe_audio_with_gpu_lock(audio_path, whisperx_config, stage_name)
+    else:
+        return _transcribe_audio_without_lock(audio_path, whisperx_config, stage_name)
+
+@gpu_lock()  # 仅在CUDA模式下获取GPU锁
+def _transcribe_audio_with_gpu_lock(audio_path: str, whisperx_config: dict, stage_name: str):
+    """带GPU锁的语音转录功能（CUDA模式）"""
+    logger.info(f"[{stage_name}] 语音转录使用GPU锁模式（CUDA）")
+    return _execute_transcription(audio_path, whisperx_config, stage_name)
+
+# 条件性GPU锁使用 - 说话人分离
+def _diarize_speakers_with_lock(audio_path: str, transcribe_result: dict, whisperx_config: dict, stage_name: str):
+    """智能GPU锁分发"""
+    need_gpu_lock = _should_use_gpu_lock_for_diarization(whisperx_config)
+    
+    if need_gpu_lock:
+        return _diarize_speakers_with_gpu_lock(audio_path, transcribe_result, whisperx_config, stage_name)
+    else:
+        return _diarize_speakers_without_lock(audio_path, transcribe_result, whisperx_config, stage_name)
+
+@gpu_lock()  # 仅在本地CUDA模式下获取GPU锁
+def _diarize_speakers_with_gpu_lock(audio_path: str, transcribe_result: dict, whisperx_config: dict, stage_name: str):
+    """带GPU锁的说话人分离功能（本地CUDA模式）"""
+    logger.info(f"[{stage_name}] 说话人分离使用GPU锁模式（本地CUDA）")
+    return _execute_speaker_diarization(audio_path, transcribe_result, whisperx_config, stage_name)
 ```
 
 #### 手动管理GPU锁

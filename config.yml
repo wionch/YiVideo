@@ -204,7 +204,7 @@ whisperx_service:
   # === 说话人分离配置 ===
   # 说话人分离模型选择
   # 可选: "pyannote/speaker-diarization-community-1", "pyannote/speaker-diarization-precision-2"
-  diarization_model: "pyannote/speaker-diarization-precision-2"
+  diarization_model: "pyannote/speaker-diarization-community-1"
   # 最小/最大说话人数量（帮助模型确定说话人范围）
   min_speakers: 1
   max_speakers: 8
