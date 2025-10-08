@@ -226,8 +226,34 @@ def _execute_transcription(audio_path: str, whisperx_config: dict, stage_name: s
         "enable_word_timestamps": enable_word_timestamps
     }
 
+    # 显式释放faster-whisper模型
+    logger.info(f"[{stage_name}] 开始释放faster-whisper模型...")
+    try:
+        # 如果是CUDA模式，将模型移至CPU
+        if device == 'cuda':
+            import torch
+            if hasattr(model, 'model'):
+                # faster-whisper内部模型对象
+                if hasattr(model.model, 'cpu'):
+                    model.model.cpu()
+            # 尝试移动整个模型对象
+            if hasattr(model, 'cpu'):
+                model.cpu()
+
+        # 删除模型引用
+        del model
+        logger.info(f"[{stage_name}] faster-whisper模型已删除")
+
+        # 强制垃圾回收
+        import gc
+        collected = gc.collect()
+        logger.info(f"[{stage_name}] 垃圾回收: 清理了 {collected} 个对象")
+
+    except Exception as e:
+        logger.warning(f"[{stage_name}] 释放模型时出错: {e}")
+
     # 执行GPU显存清理
-    _cleanup_gpu_memory(stage_name, locals_to_delete=['model'])
+    _cleanup_gpu_memory(stage_name)
 
     return result
 
@@ -416,18 +442,17 @@ def _execute_speaker_diarization(audio_path: str, transcribe_result: dict, whisp
         }
 
     # 执行统一的GPU显存清理
-    _cleanup_gpu_memory(stage_name, locals_to_delete=['diarizer'])
+    _cleanup_gpu_memory(stage_name)
 
     return result
 
 
-def _cleanup_gpu_memory(stage_name: str, locals_to_delete: list = None) -> None:
+def _cleanup_gpu_memory(stage_name: str) -> None:
     """
     通用的GPU显存清理函数
-    
+
     Args:
         stage_name: 阶段名称（用于日志）
-        locals_to_delete: 需要删除的本地变量名列表
     """
     try:
         import gc
@@ -452,17 +477,15 @@ def _cleanup_gpu_memory(stage_name: str, locals_to_delete: list = None) -> None:
             logger.debug(f"  已分配: {before_allocated:.2f}GB")
             logger.debug(f"  缓存: {before_cached:.2f}GB")
 
-            # 注意：由于Python的限制，无法从外部函数内部删除调用者的本地变量
-            # 这个参数保留用于文档目的，实际清理需要在使用_前手动删除变量
-            if locals_to_delete:
-                logger.debug(f"[{stage_name}] 注意：无法自动删除变量 {locals_to_delete}，请在调用前手动删除")
-
-            # 激进的CUDA缓存清理
+            # 激进的CUDA缓存清理 - 增强版
             for device_id in range(torch.cuda.device_count()):
                 try:
                     with torch.cuda.device(device_id):
-                        torch.cuda.empty_cache()
-                        torch.cuda.ipc_collect()
+                        # 多轮清理以确保彻底释放
+                        for _ in range(3):
+                            torch.cuda.empty_cache()
+                            torch.cuda.ipc_collect()
+                            gc.collect()
                 except:
                     pass
 
@@ -476,8 +499,8 @@ def _cleanup_gpu_memory(stage_name: str, locals_to_delete: list = None) -> None:
             except:
                 pass
 
-            # 再次垃圾回收和缓存清理
-            for _ in range(3):
+            # 再次垃圾回收和缓存清理 - 增强到5轮
+            for _ in range(5):
                 gc.collect()
                 torch.cuda.empty_cache()
 
