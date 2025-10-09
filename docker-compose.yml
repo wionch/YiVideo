@@ -220,6 +220,45 @@ services:
       - PYTHONPATH=/app
     depends_on:
       - redis
+
+  # --- Audio Separator Service (新增) ---
+  audio_separator_service:
+    container_name: audio_separator_service
+    runtime: nvidia
+    build:
+      context: .
+      dockerfile: ./services/workers/audio_separator_service/Dockerfile
+    volumes:
+      - ./services:/app/services
+      - ./videos:/app/videos
+      - ./locks:/app/locks
+      - ./tmp:/app/tmp
+      - ./share:/share
+      - ./models:/models  # 模型目录映射
+      - ./config.yml:/app/config.yml
+      - ~/.ssh:/root/.ssh
+      - ~/.gemini:/root/.gemini
+      - ./models/app/cache:/app/.cache  # <--- ADDED: Hugging Face模型缓存
+      - ./models/root/cache:/root/.cache  # <--- ADDED: Transformers缓存
+    restart: on-failure
+    user: "0:0"
+    entrypoint: ""
+    command: ["celery", "-A", "services.workers.audio_separator_service.app.celery_app", "worker", "-l", "info", "-Q", "audio_separator_queue"]
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis
   # --- MCP Services ---
 
   serena:

@@ -1,6 +1,4 @@
-# Video2Subtitle 优化配置文件
-# -----------------------------------
-# 已移除无效参数，修正配置问题，保留所有实际使用的参数
+
 
 # 0. 系统核心配置 (新增)
 core:
@@ -285,3 +283,92 @@ gpu_lock_monitor:
     max_timeout_rate: 0.2     # 最大超时率
     max_lock_age: 3600        # 最大锁持有时间
     recent_window_size: 20    # 最近统计窗口大小
+
+# 12. Audio Separator Service 配置 (新增)
+# 基于 UVR-MDX 和 Demucs 模型的人声/背景音分离服务
+audio_separator_service:
+  # === 模型类型选择 ===
+  # 支持的模型类型: "mdx" 或 "demucs"
+  model_type: "demucs"  # 默认使用MDX模型
+  
+  # === MDX 模型配置 ===
+  # 默认使用的 UVR-MDX 模型（平衡质量和速度）
+  default_model: "UVR-MDX-NET-Inst_HQ_5.onnx"
+  # 高质量模型（人声专用优化）
+  high_quality_model: "UVR-MDX-NET-Voc_FT.onnx"
+  # 快速模型（质量稍低，速度更快）
+  fast_model: "UVR-MDX-NET-Inst_3.onnx"
+  # 人声专用优化模型（推荐用于人声分离）
+  vocal_optimization_model: "UVR-MDX-NET-Voc_FT.onnx"
+  # 模型文件存储目录 - 映射到宿主机避免重复下载
+  models_dir: "/models/uvr_mdx"
+  
+  # === Demucs 模型配置 ===
+  # Demucs v4 模型（最新版本，质量最高）
+  # 注意：audio-separator库需要模型文件名带.yaml扩展名
+  demucs_default_model: "htdemucs.yaml"
+  # Demucs v4 fast模型（速度更快）
+  demucs_fast_model: "htdemucs_ft.yaml"
+  # Demucs v4 模型（平衡质量和速度）
+  demucs_balanced_model: "htdemucs.yaml"
+  # Demucs v4 6-stem高质量模型
+  demucs_high_quality_model: "htdemucs_6s.yaml"
+  # Demucs模型文件存储目录
+  demucs_models_dir: "/models/demucs"
+
+  # === GPU 配置 ===
+  # 是否使用 GPU 加速
+  use_gpu: true
+  # GPU 设备 ID
+  gpu_id: 0
+  # 是否启用 GPU 锁机制（推荐启用，与其他服务共享 GPU）
+  enable_gpu_lock: true
+
+  # === 输出配置 ===
+  # 输出音频格式: flac(无损推荐), wav(无损), mp3(压缩)
+  output_format: "flac"
+  # 分离后音频文件存储目录（工作流中间数据）
+  output_dir: "/share/workflows/audio_separated"
+  # 音频归一化阈值（0.0-1.0）
+  normalization_threshold: 0.9
+
+  # === 性能配置 ===
+  # MDX 模型分段大小（影响显存占用和速度）
+  mdx_segment_size: 256  # 使用较小的值避免显存问题
+  # MDX 模型批处理大小
+  mdx_batch_size: 1      # 确保批处理大小为1，避免并发问题
+  # 是否启用 Test-Time Augmentation（提高质量但降低速度约 2-3 倍）
+  enable_tta: false
+  
+  # === Demucs 模型参数 ===
+  # Demucs模型分段大小（影响显存占用和速度）
+  # 可选值: "default" (使用库默认值), 数值 (如10.0表示10秒分段)
+  # 注意: 字符串"default"会在代码中转换为None，让audio-separator库使用默认值
+  demucs_segment: "default"
+  
+  # Demucs模型 shifts参数（提高质量但降低速度）
+  # 范围: 0-10，值越大质量越高但速度越慢
+  demucs_shifts: 2
+  
+  # Demucs模型是否启用多进程
+  # 值: 0表示使用所有可用CPU核心，正数表示指定进程数
+  # 注意: 此参数在audio-separator库中可能不被使用
+  demucs_workers: 1
+  
+  # Demucs模型设备ID
+  # 值: 0表示第一个GPU，依此类推
+  demucs_gpu_id: 0
+
+  # === 文件管理配置 ===
+  # 是否自动清理临时文件
+  cleanup_temp_files: true
+  # 是否保留背景音文件（用于后续视频合成）
+  preserve_background: true
+  # 分离文件保留天数（超过后自动清理）
+  file_retention_days: 7
+
+  # === 监控配置 ===
+  # 是否启用性能监控
+  enable_monitoring: true
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"

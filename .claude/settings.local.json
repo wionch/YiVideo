@@ -38,7 +38,9 @@
       "mcp__serena__think_about_whether_you_are_done",
       "mcp__web-search-prime__webSearchStd",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(mkdir:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -80,7 +80,10 @@ def create_workflow(request: WorkflowRequest) -> Dict[str, str]:
         initial_context = WorkflowContext(
             workflow_id=workflow_id,
             create_at=datetime.now().isoformat(),
-            input_params={"video_path": request.video_path, **request.workflow_config},
+            input_params={
+                "video_path": request.video_path,
+                "workflow_chain": request.workflow_config.get("workflow_chain", [])
+            },
             shared_storage_path=shared_storage_path,
             stages={},
             error=None
