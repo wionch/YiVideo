@@ -303,23 +303,70 @@ class ModelManager:
             # 如果是相对路径，转换为绝对路径
             if not Path(file_path).is_absolute() and output_dir:
                 file_path = str(Path(output_dir) / file_path)
-
             file_name = Path(file_path).name.lower()
 
             if 'vocal' in file_name or 'voice' in file_name:
+                logger.info(f"✅ 匹配人声文件: '{file_name}' -> {file_path}")
                 result['vocals'] = file_path
             elif 'instrumental' in file_name or 'inst' in file_name or 'no_vocal' in file_name:
+                logger.info(f"✅ 匹配伴奏文件: '{file_name}' -> {file_path}")
                 result['instrumental'] = file_path
+            else:
+                logger.info(f"❌ 未匹配文件: '{file_name}' (vocal: {'vocal' in file_name}, voice: {'voice' in file_name})")
 
         # 验证结果
         if result['vocals'] is None or result['instrumental'] is None:
             logger.warning(f"无法识别输出文件类型: {output_files}")
-            # 备用逻辑：假设第一个文件是人声，第二个是伴奏
+            # 改进的备用逻辑：智能选择人声文件
             if len(output_files) >= 2:
-                file1 = output_files[0] if Path(output_files[0]).is_absolute() else str(Path(output_dir) / output_files[0])
-                file2 = output_files[1] if Path(output_files[1]).is_absolute() else str(Path(output_dir) / output_files[1])
-                result['vocals'] = file1
-                result['instrumental'] = file2
+                # 智能查找包含'vocal'的文件
+                vocals_files = []
+                instrumental_files = []
+                other_files = []
+
+                for f in output_files:
+                    f_lower = f.lower()
+                    abs_f = f if Path(f).is_absolute() else str(Path(output_dir) / f)
+
+                    if 'vocal' in f_lower:
+                        vocals_files.append(abs_f)
+                        logger.info(f"备用逻辑找到人声文件: {f}")
+                    elif 'instrumental' in f_lower or 'inst' in f_lower or 'no_vocal' in f_lower:
+                        instrumental_files.append(abs_f)
+                        logger.info(f"备用逻辑找到伴奏文件: {f}")
+                    else:
+                        other_files.append(abs_f)
+                        logger.info(f"备用逻辑其他文件: {f}")
+
+                # 设置人声文件（优先查找结果，否则使用第一个其他文件）
+                if vocals_files:
+                    result['vocals'] = vocals_files[0]
+                    logger.info(f"备用逻辑选择人声文件: {Path(vocals_files[0]).name}")
+                elif other_files:
+                    result['vocals'] = other_files[0]
+                    logger.warning(f"备用逻辑使用第一个其他文件当人声: {Path(other_files[0]).name}")
+
+                # 设置伴奏文件（优先查找结果，否则使用第一个非人声文件）
+                if instrumental_files:
+                    result['instrumental'] = instrumental_files[0]
+                    logger.info(f"备用逻辑选择伴奏文件: {Path(instrumental_files[0]).name}")
+                else:
+                    # 选择非人声的第一个文件作为伴奏
+                    for f in [f for f in output_files if 'vocal' not in f.lower()]:
+                        abs_f = f if Path(f).is_absolute() else str(Path(output_dir) / f)
+                        result['instrumental'] = abs_f
+                        logger.info(f"备用逻辑选择第一个非人声文件当伴奏: {Path(abs_f).name}")
+                        break
+
+                # 最后的备用方案
+                if not result['vocals'] or not result['instrumental']:
+                    logger.warning(f"智能备用逻辑失败，使用原始备用逻辑")
+                    file1 = output_files[0] if Path(output_files[0]).is_absolute() else str(Path(output_dir) / output_files[0])
+                    file2 = output_files[1] if Path(output_files[1]).is_absolute() else str(Path(output_dir) / output_files[1])
+                    if not result['vocals']:
+                        result['vocals'] = file1
+                    if not result['instrumental']:
+                        result['instrumental'] = file2
 
         return result
 
@@ -741,22 +788,14 @@ class ModelManager:
             logger.info(f"开始执行Demucs音频分离...")
             output_files = separator.separate(audio_path)
             logger.info(f"Demucs音频分离完成，输出文件: {output_files}")
-            
             # 检查输出结果
             if not output_files or len(output_files) == 0:
                 raise RuntimeError(
                     f"音频分离失败：未生成任何输出文件。"
                     f"请检查日志以获取详细错误信息。"
                 )
-            
-            # 解析输出文件（使用现有的_parse_output_files方法）
-            result = self._parse_output_files(output_files, output_dir)
-            
-            # 验证结果包含必需的文件
-            if not result['vocals'] or not result['instrumental']:
-                logger.warning(f"标准解析结果不完整，尝试Demucs特殊解析")
-                # 对于Demucs模型，尝试特殊解析
-                result = self._parse_demucs_output_files(output_files, output_dir)
+            # 对于Demucs模型，直接使用专用解析方法
+            result = self._parse_demucs_output_files(output_files, output_dir)
             
             # 验证结果
             if not result['vocals'] or not result['instrumental']:
@@ -774,93 +813,139 @@ class ModelManager:
     def _parse_demucs_output_files(self, output_files: list, output_dir: str = None) -> Dict[str, str]:
         """
         解析Demucs模型的输出文件列表，处理多轨道输出
-        
+
         Args:
             output_files: Separator 返回的输出文件列表（可能是相对路径）
             output_dir: 输出目录（用于构建绝对路径）
-            
+
         Returns:
             Dict[str, str]: 包含 vocals 和 instrumental 的绝对路径字典
         """
         result = {
             'vocals': None,
-            'instrumental': None
+            'instrumental': None,
+            'all_tracks': {}  # 新增：存储所有轨道信息
         }
-        
-        # 首先尝试标准解析
+
+        # 转换所有文件路径为绝对路径
+        absolute_files = []
         for file_path in output_files:
-            # 如果是相对路径，转换为绝对路径
             if not Path(file_path).is_absolute() and output_dir:
-                file_path = str(Path(output_dir) / file_path)
-            
+                absolute_file = str(Path(output_dir) / file_path)
+            else:
+                absolute_file = file_path
+            absolute_files.append(absolute_file)
+
+        logger.info(f"Demucs输出文件解析，输入文件: {absolute_files}")
+
+        # 首先尝试标准解析
+        for file_path in absolute_files:
             file_name = Path(file_path).name.lower()
-            
-            if 'vocal' in file_name or 'voice' in file_name:
+
+            if 'vocals' in file_name:  # 修复：检查'vocals'而不是'vocal'
                 result['vocals'] = file_path
             elif 'instrumental' in file_name or 'inst' in file_name or 'no_vocal' in file_name:
                 result['instrumental'] = file_path
-        
-        # 如果标准解析失败，尝试Demucs特殊解析
+
+        # 如果标准解析失败或需要更完整的解析，尝试Demucs特殊解析
         if not result['vocals'] or not result['instrumental']:
-            logger.info(f"尝试Demucs特殊解析，输出文件: {output_files}")
-            
+            logger.info(f"执行Demucs特殊解析，输出文件: {absolute_files}")
+
             # 收集所有轨道
             tracks = {}
-            for file_path in output_files:
-                # 如果是相对路径，转换为绝对路径
-                if not Path(file_path).is_absolute() and output_dir:
-                    file_path = str(Path(output_dir) / file_path)
-                
+            for file_path in absolute_files:
                 file_name = Path(file_path).name.lower()
-                
-                # 识别不同轨道
-                if 'drums' in file_name:
+
+                # 识别不同轨道（优先级从高到低）
+                if 'vocals' in file_name:
+                    tracks['vocals'] = file_path
+                elif 'drums' in file_name:
                     tracks['drums'] = file_path
                 elif 'bass' in file_name:
                     tracks['bass'] = file_path
                 elif 'other' in file_name:
                     tracks['other'] = file_path
-                elif 'vocals' in file_name or 'vocal' in file_name:
-                    tracks['vocals'] = file_path
                 elif 'piano' in file_name:
                     tracks['piano'] = file_path
                 elif 'guitar' in file_name:
                     tracks['guitar'] = file_path
-            
-            # 设置人声轨道
+                else:
+                    # 未识别的轨道，使用文件名作为键
+                    track_name = Path(file_path).stem
+                    tracks[track_name] = file_path
+
+            # 设置人声轨道（最高优先级）
             if 'vocals' in tracks:
                 result['vocals'] = tracks['vocals']
-            
-            # 设置伴奏轨道
+                logger.info(f"识别人声轨道: {tracks['vocals']}")
+
+            # 设置伴奏轨道选择策略
             if 'instrumental' in tracks:
                 result['instrumental'] = tracks['instrumental']
             else:
-                # 如果没有明确的伴奏轨道，标记需要合并其他轨道
-                instrumental_tracks = []
-                for track_name in ['drums', 'bass', 'other', 'piano', 'guitar']:
+                # 选择最合适的伴奏轨道（优先级：other > drums > bass > 其他）
+                preferred_instrumental_tracks = ['other', 'drums', 'bass']
+                selected_instrumental = None
+
+                for track_name in preferred_instrumental_tracks:
                     if track_name in tracks:
-                        instrumental_tracks.append(tracks[track_name])
-                
-                if instrumental_tracks:
-                    # 如果有多个伴奏音轨，标记需要合并
-                    result['instrumental_tracks'] = instrumental_tracks
-                    result['instrumental'] = f"[需要合并] {', '.join([Path(t).name for t in instrumental_tracks])}"
-                elif len(output_files) >= 2:
-                    # 备用逻辑：假设第二个文件是伴奏
-                    file2 = output_files[1] if Path(output_files[1]).is_absolute() else str(Path(output_dir) / output_files[1])
-                    result['instrumental'] = file2
-        
-        # 验证结果
+                        selected_instrumental = tracks[track_name]
+                        logger.info(f"选择伴奏轨道 ({track_name}): {selected_instrumental}")
+                        break
+
+                if selected_instrumental:
+                    result['instrumental'] = selected_instrumental
+                elif len(tracks) >= 2:
+                    # 备用逻辑：选择非人声的第一个轨道
+                    for track_name, file_path in tracks.items():
+                        if track_name != 'vocals':
+                            result['instrumental'] = file_path
+                            logger.info(f"备用选择伴奏轨道 ({track_name}): {file_path}")
+                            break
+
+            # 存储所有轨道信息供后续使用
+            result['all_tracks'] = tracks
+
+        # 验证结果并提供详细信息
+        if result['vocals']:
+            logger.info(f"✅ 人声文件识别成功: {Path(result['vocals']).name}")
+        else:
+            logger.warning(f"❌ 人声文件识别失败")
+
+        if result['instrumental']:
+            logger.info(f"✅ 伴奏文件识别成功: {Path(result['instrumental']).name}")
+        else:
+            logger.warning(f"❌ 伴奏文件识别失败")
+
+        # 如果仍然缺少关键文件，使用最后的备用逻辑
         if result['vocals'] is None or result['instrumental'] is None:
-            logger.warning(f"无法识别输出文件类型: {output_files}")
-            # 备用逻辑：假设第一个文件是人声，第二个是伴奏
-            if len(output_files) >= 2:
-                file1 = output_files[0] if Path(output_files[0]).is_absolute() else str(Path(output_dir) / output_files[0])
-                file2 = output_files[1] if Path(output_files[1]).is_absolute() else str(Path(output_dir) / output_files[1])
-                result['vocals'] = file1
-                result['instrumental'] = file2
-        
-        return result
+            logger.warning(f"Demucs解析不完全，使用备用逻辑")
+            if len(absolute_files) >= 2:
+                # 根据文件名进行最后尝试
+                vocals_files = [f for f in absolute_files if 'vocals' in Path(f).name.lower()]
+                if vocals_files:
+                    result['vocals'] = vocals_files[0]
+                    logger.info(f"备用识别人声: {Path(vocals_files[0]).name}")
+
+                # 选择第一个非人声文件作为伴奏
+                for file_path in absolute_files:
+                    if file_path != result['vocals']:
+                        result['instrumental'] = file_path
+                        logger.info(f"备用识别伴奏: {Path(file_path).name}")
+                        break
+
+        # 移除临时字段，只返回标准格式
+        final_result = {
+            'vocals': result['vocals'],
+            'instrumental': result['instrumental']
+        }
+
+        # 如果有额外的轨道信息，也包含在结果中
+        if result['all_tracks'] and len(result['all_tracks']) > 2:
+            final_result['all_tracks'] = result['all_tracks']
+            logger.info(f"检测到 {len(result['all_tracks'])} 个音频轨道: {list(result['all_tracks'].keys())}")
+
+        return final_result
 
 
 # ========================================

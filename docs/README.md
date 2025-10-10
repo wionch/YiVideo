@@ -21,6 +21,7 @@
 ### 💻 开发文档 (`docs/development/`)
 - **[PRD.md](development/PRD.md)** - 产品需求文档 (PRD)
 - **[TESTING_STRATEGY.md](development/TESTING_STRATEGY.md)** - 测试策略文档
+- **[WORKFLOW_EXAMPLES.md](development/WORKFLOW_EXAMPLES.md)** - 工作流示例文档
 
 ### 📖 参考文档 (`docs/reference/`)
 - **[GPU_LOCK_COMPLETE_GUIDE.md](reference/GPU_LOCK_COMPLETE_GUIDE.md)** - GPU锁系统完整文档
@@ -41,7 +42,8 @@
 1. **系统架构** → [SYSTEM_ARCHITECTURE.md](architecture/SYSTEM_ARCHITECTURE.md)
 2. **技术设计** → [SDD.md](architecture/SDD.md)
 3. **测试策略** → [TESTING_STRATEGY.md](development/TESTING_STRATEGY.md)
-4. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)
+4. **工作流示例** → [WORKFLOW_EXAMPLES.md](development/WORKFLOW_EXAMPLES.md)
+5. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)
 
 ### 运维人员推荐阅读顺序
 1. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)

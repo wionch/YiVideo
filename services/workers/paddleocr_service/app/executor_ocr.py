@@ -105,8 +105,7 @@ def main():
             manifest_data = json.load(f)
         
         if not manifest_data:
-            # logging.warning("Manifest file is empty. No images to process.")
-            print(json.dumps({}))
+            logging.warning("Manifest file is empty. No images to process.")
             return
 
         # 2. 准备OCR任务列表
@@ -121,7 +120,6 @@ def main():
 
         if not ocr_tasks:
             logging.error("No valid image files found based on the manifest.")
-            print(json.dumps({}))
             return
 
         # 3. 执行批量OCR
@@ -143,7 +141,9 @@ def main():
 
         # 5. 输出最终结果
         string_key_results = {str(k): v for k, v in final_ocr_results.items()}
-        print(json.dumps(string_key_results, cls=NumpyEncoder))
+        logging.info(f"OCR processing completed, generated results for {len(string_key_results)} items")
+        # 如果需要输出到stdout，可以保留以下一行
+        # print(json.dumps(string_key_results, cls=NumpyEncoder))
 
     except Exception as e:
         logging.error(f"An error occurred during OCR execution: {e}", exc_info=True)

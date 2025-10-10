@@ -97,29 +97,6 @@ services:
     depends_on:
       - redis
 
-  inpainting_service:
-    container_name: inpainting_service
-    runtime: nvidia
-    build:
-      context: .
-      dockerfile: ./services/workers/inpainting_service/Dockerfile
-    volumes:
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
-      - ./config.yml:/app/config.yml
-      - ~/.ssh:/root/.ssh
-      - ~/.gemini:/root/.gemini
-    restart: on-failure
-    user: "0:0"
-    entrypoint: ""
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "inpainting_queue"]
-    environment:
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-
   whisperx_service:
     container_name: whisperx_service
     runtime: nvidia
@@ -151,76 +128,6 @@ services:
       - PYANNOTEAI_API_KEY=sk_39f32b6ba1584278a0c1c3582ae8db4f  # <--- ADDED: PyannoteAI API Key
     depends_on:
       - redis
-
-  llm_service:
-    container_name: llm_service
-    build:
-      context: .
-      dockerfile: ./services/workers/llm_service/Dockerfile
-    volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
-      - ./config.yml:/app/config.yml
-      - ~/.ssh:/root/.ssh
-      - ~/.gemini:/root/.gemini
-    restart: always
-    user: "0:0"
-    entrypoint: ""
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "llm_queue"]
-    environment:
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-
-  indextts_service:
-    container_name: indextts_service
-    runtime: nvidia
-    build:
-      context: .
-      dockerfile: ./services/workers/indextts_service/Dockerfile
-    volumes:
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
-      - ./config.yml:/app/config.yml
-      - ~/.ssh:/root/.ssh
-      - ~/.gemini:/root/.gemini
-    restart: on-failure
-    user: "0:0"
-    entrypoint: ""
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "indextts_queue"]
-    environment:
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-
-  gptsovits_service:
-    container_name: gptsovits_service
-    runtime: nvidia
-    build:
-      context: .
-      dockerfile: ./services/workers/gptsovits_service/Dockerfile
-    volumes:
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
-      - ./config.yml:/app/config.yml
-      - ~/.ssh:/root/.ssh
-      - ~/.gemini:/root/.gemini
-    restart: on-failure
-    user: "0:0"
-    entrypoint: ""
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "gptsovits_queue"]
-    environment:
-      - PYTHONPATH=/app
-    depends_on:
-      - redis
-
   # --- Audio Separator Service (新增) ---
   audio_separator_service:
     container_name: audio_separator_service
@@ -269,7 +176,7 @@ services:
       --transport streamable-http
       --port 9121
     volumes:
-      - ./:/workspaces/YiVideo:ro
+      - ./:/workspaces/YiVideo
     ports:
       - "9121:9121"     # MCP HTTP 服务端点: http://localhost:9121/mcp
       - "24282:24282"   # 可选：Dashboard（若端口被占用会自增）

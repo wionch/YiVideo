@@ -18,7 +18,8 @@ from services.common.context import WorkflowContext, StageExecution
 from services.common import state_manager
 from .celery_app import celery_app
 from .model_manager import get_model_manager
-from .config import get_config
+# 导入新的通用配置加载器
+from services.common.config_loader import CONFIG
 
 # 配置日志
 logger = get_logger('audio_separator.tasks')
@@ -29,8 +30,23 @@ class AudioSeparatorTask(Task):
 
     def __init__(self):
         super().__init__()
-        self.config = get_config()
         self.model_manager = get_model_manager()
+        self._config_cache = None
+        self._config_timestamp = 0
+
+    def get_config(self):
+        """获取实时配置，支持热重载和简单缓存"""
+        import time
+        current_time = time.time()
+
+        # 缓存5秒，避免频繁读取文件，但保持实时性
+        if (self._config_cache is None or
+            current_time - self._config_timestamp > 5):
+            self._config_cache = CONFIG.get('audio_separator_service', {})
+            self._config_timestamp = current_time
+            logger.debug("配置缓存已更新")
+
+        return self._config_cache
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """任务失败时的回调"""
@@ -84,8 +100,9 @@ def separate_vocals(self, context: dict) -> dict:
         # 2. 从配置文件读取默认参数
         quality_mode = "default"  # 默认质量模式
         use_vocal_optimization = False  # 默认不使用人声优化
-        vocal_optimization_level = self.config.vocal_optimization_level
-        model_type = self.config.model_type  # 新增模型类型
+        config = self.get_config()  # 实时获取配置
+        vocal_optimization_level = config.get('vocal_optimization_level')
+        model_type = config.get('model_type')  # 新增模型类型
         
         # 从input_params中获取覆盖参数（如果有的话）
         audio_separator_config = workflow_context.input_params.get('audio_separator_config', {})
@@ -109,28 +126,28 @@ def separate_vocals(self, context: dict) -> dict:
         # 4. 确定使用的模型
         if model_type.lower() == "demucs":
             # Demucs 模型选择逻辑
-            model_name = self.config.demucs_default_model  # 默认使用Demucs模型
+            model_name = config.get('demucs_default_model')  # 默认使用Demucs模型
             
             # 根据质量模式选择模型（如果没有明确指定模型名称）
             if audio_separator_config and 'model_name' in audio_separator_config:
                 model_name = audio_separator_config['model_name']
             elif quality_mode == 'high_quality':
-                model_name = getattr(self.config, 'demucs_high_quality_model', 'htdemucs_6s')
+                model_name = config.get('demucs_high_quality_model', 'htdemucs_6s')
             elif quality_mode == 'fast':
-                model_name = self.config.demucs_fast_model
+                model_name = config.get('demucs_fast_model')
             else:  # default or balanced
-                model_name = self.config.demucs_balanced_model
+                model_name = config.get('demucs_balanced_model')
         else:
             # MDX 模型选择逻辑（原有逻辑）
-            model_name = self.config.default_model  # 默认使用配置文件中的模型
+            model_name = config.get('default_model')  # 默认使用配置文件中的模型
             
             # 根据质量模式选择模型（如果没有明确指定模型名称）
             if audio_separator_config and 'model_name' in audio_separator_config:
                 model_name = audio_separator_config['model_name']
             elif quality_mode == 'high_quality':
-                model_name = self.config.high_quality_model
+                model_name = config.get('high_quality_model')
             elif quality_mode == 'fast':
-                model_name = self.config.fast_model
+                model_name = config.get('fast_model')
 
         logger.info(f"[{stage_name}] 使用模型: {model_name}")
 
@@ -167,24 +184,66 @@ def separate_vocals(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 人声文件: {result['vocals']}")
         logger.info(f"[{stage_name}] 背景音文件: {result['instrumental']}")
 
-        # 8. 更新 WorkflowContext
+        # 8. 准备输出数据结构
+        # 构建完整的音频文件列表
+        audio_list = []
+
+        # 首先添加主要的人声和伴奏文件
+        if result['vocals']:
+            audio_list.append(result['vocals'])
+        if result['instrumental']:
+            audio_list.append(result['instrumental'])
+
+        # 如果有额外的轨道（Demucs多轨道输出），也添加到列表中
+        if 'all_tracks' in result:
+            for track_name, track_path in result['all_tracks'].items():
+                if track_path not in audio_list:  # 避免重复添加
+                    audio_list.append(track_path)
+                    logger.info(f"[{stage_name}] 添加额外轨道到音频列表: {track_name} -> {Path(track_path).name}")
+
+        logger.info(f"[{stage_name}] 完整音频文件列表 ({len(audio_list)}个文件): {[Path(f).name for f in audio_list]}")
+
+        # 识别人声音频文件（文件名带 "Vocals" 的为人声音频）
+        vocal_audio = None
+        if result['vocals'] and 'vocals' in Path(result['vocals']).name.lower():
+            vocal_audio = result['vocals']
+            logger.info(f"[{stage_name}] 通过文件名识别人声: {Path(result['vocals']).name}")
+        elif result['instrumental'] and 'vocals' in Path(result['instrumental']).name.lower():
+            vocal_audio = result['instrumental']
+            logger.info(f"[{stage_name}] 通过伴奏文件识别人声: {Path(result['instrumental']).name}")
+        else:
+            # 备用逻辑：在所有音频文件中查找包含'vocals'的文件
+            for audio_file in audio_list:
+                if 'vocals' in Path(audio_file).name.lower():
+                    vocal_audio = audio_file
+                    logger.info(f"[{stage_name}] 在完整列表中识别人声: {Path(audio_file).name}")
+                    break
+
+            # 如果还是没找到，使用第一个文件作为人声（最后的备用）
+            if not vocal_audio and audio_list:
+                vocal_audio = audio_list[0]
+                logger.warning(f"[{stage_name}] 无法通过文件名识别人声，使用第一个文件: {Path(vocal_audio).name}")
+
+        if not vocal_audio:
+            logger.error(f"[{stage_name}] 未能确定人声音频文件")
+            raise ValueError("无法确定人声音频文件")
+
+        # 9. 更新 WorkflowContext
         workflow_context.stages[stage_name] = StageExecution(
             status="COMPLETED",
-            output_data={
-                'vocals_path': result['vocals'],
-                'instrumental_path': result['instrumental'],
+            output={
+                'audio_list': audio_list,
+                'vocal_audio': vocal_audio,
                 'model_used': model_name,
                 'quality_mode': quality_mode,
                 'processing_time': round(processing_time, 2)
             }
         )
 
-        # 9. 将分离结果添加到 context 中，供后续任务使用
+        # 10. 将分离结果添加到 context 中，供后续任务使用
         updated_context = workflow_context.model_dump()
-        updated_context['vocals_path'] = result['vocals']
-        updated_context['instrumental_path'] = result['instrumental']
 
-        # 10. 更新状态
+        # 11. 更新状态
         state_manager.update_workflow_state(workflow_context)
 
         logger.info(f"[{stage_name}] 任务完成，状态已更新")
@@ -193,10 +252,16 @@ def separate_vocals(self, context: dict) -> dict:
     except Exception as e:
         logger.error(f"[{stage_name}] 音频分离失败: {str(e)}", exc_info=True)
 
+        # 计算处理时间（即使失败也要记录）
+        processing_time = time.time() - start_time
+
         # 更新失败状态
         workflow_context.stages[stage_name] = StageExecution(
             status="FAILED",
-            output_data={'error': str(e)}
+            output={
+                'error': str(e),
+                'processing_time': round(processing_time, 2)
+            }
         )
         state_manager.update_workflow_state(workflow_context)
 
@@ -207,6 +272,11 @@ def separate_vocals(self, context: dict) -> dict:
 
         # 返回失败的 context
         return workflow_context.model_dump()
+
+    finally:
+        # 确保总是设置 duration 字段
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
 
 
 @celery_app.task(
@@ -247,9 +317,10 @@ def separate_vocals_optimized(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 输入文件: {audio_path}")
 
         # 2. 从 workflow_context.input_params 中获取配置参数
+        config = self.get_config()  # 实时获取配置
         audio_separator_config = workflow_context.input_params.get('audio_separator_config', {})
         optimization_level = audio_separator_config.get('vocal_optimization_level', 'balanced')
-        model_name = audio_separator_config.get('model_name', self.config.vocal_optimization_model)
+        model_name = audio_separator_config.get('model_name', config.get('vocal_optimization_model'))
         output_dir = audio_separator_config.get('output_dir')
 
         logger.info(f"[{stage_name}] 优化级别: {optimization_level}")
@@ -282,12 +353,56 @@ def separate_vocals_optimized(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 人声文件: {result['vocals']}")
         logger.info(f"[{stage_name}] 背景音文件: {result['instrumental']}")
 
-        # 7. 更新 WorkflowContext
+        # 7. 准备输出数据结构
+        # 构建完整的音频文件列表
+        audio_list = []
+
+        # 首先添加主要的人声和伴奏文件
+        if result['vocals']:
+            audio_list.append(result['vocals'])
+        if result['instrumental']:
+            audio_list.append(result['instrumental'])
+
+        # 如果有额外的轨道（Demucs多轨道输出），也添加到列表中
+        if 'all_tracks' in result:
+            for track_name, track_path in result['all_tracks'].items():
+                if track_path not in audio_list:  # 避免重复添加
+                    audio_list.append(track_path)
+                    logger.info(f"[{stage_name}] 添加额外轨道到音频列表: {track_name} -> {Path(track_path).name}")
+
+        logger.info(f"[{stage_name}] 完整音频文件列表 ({len(audio_list)}个文件): {[Path(f).name for f in audio_list]}")
+
+        # 识别人声音频文件（文件名带 "Vocals" 的为人声音频）
+        vocal_audio = None
+        if result['vocals'] and 'vocals' in Path(result['vocals']).name.lower():
+            vocal_audio = result['vocals']
+            logger.info(f"[{stage_name}] 通过文件名识别人声: {Path(result['vocals']).name}")
+        elif result['instrumental'] and 'vocals' in Path(result['instrumental']).name.lower():
+            vocal_audio = result['instrumental']
+            logger.info(f"[{stage_name}] 通过伴奏文件识别人声: {Path(result['instrumental']).name}")
+        else:
+            # 备用逻辑：在所有音频文件中查找包含'vocals'的文件
+            for audio_file in audio_list:
+                if 'vocals' in Path(audio_file).name.lower():
+                    vocal_audio = audio_file
+                    logger.info(f"[{stage_name}] 在完整列表中识别人声: {Path(audio_file).name}")
+                    break
+
+            # 如果还是没找到，使用第一个文件作为人声（最后的备用）
+            if not vocal_audio and audio_list:
+                vocal_audio = audio_list[0]
+                logger.warning(f"[{stage_name}] 无法通过文件名识别人声，使用第一个文件: {Path(vocal_audio).name}")
+
+        if not vocal_audio:
+            logger.error(f"[{stage_name}] 未能确定人声音频文件")
+            raise ValueError("无法确定人声音频文件")
+
+        # 8. 更新 WorkflowContext
         workflow_context.stages[stage_name] = StageExecution(
             status="COMPLETED",
-            output_data={
-                'vocals_path': result['vocals'],
-                'instrumental_path': result['instrumental'],
+            output={
+                'audio_list': audio_list,
+                'vocal_audio': vocal_audio,
                 'model_used': model_name,
                 'optimization_level': optimization_level,
                 'processing_time': round(processing_time, 2),
@@ -295,12 +410,10 @@ def separate_vocals_optimized(self, context: dict) -> dict:
             }
         )
 
-        # 8. 将分离结果添加到 context 中，供后续任务使用
+        # 9. 将分离结果添加到 context 中，供后续任务使用
         updated_context = workflow_context.model_dump()
-        updated_context['vocals_path'] = result['vocals']
-        updated_context['instrumental_path'] = result['instrumental']
 
-        # 9. 更新状态
+        # 10. 更新状态
         state_manager.update_workflow_state(workflow_context)
 
         logger.info(f"[{stage_name}] 优化任务完成，状态已更新")
@@ -309,10 +422,16 @@ def separate_vocals_optimized(self, context: dict) -> dict:
     except Exception as e:
         logger.error(f"[{stage_name}] 优化人声分离失败: {str(e)}", exc_info=True)
 
+        # 计算处理时间（即使失败也要记录）
+        processing_time = time.time() - start_time
+
         # 更新失败状态
         workflow_context.stages[stage_name] = StageExecution(
             status="FAILED",
-            output_data={'error': str(e)}
+            output={
+                'error': str(e),
+                'processing_time': round(processing_time, 2)
+            }
         )
         state_manager.update_workflow_state(workflow_context)
 
@@ -323,6 +442,11 @@ def separate_vocals_optimized(self, context: dict) -> dict:
 
         # 返回失败的 context
         return workflow_context.model_dump()
+
+    finally:
+        # 确保总是设置 duration 字段
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
 
 
 @celery_app.task(
