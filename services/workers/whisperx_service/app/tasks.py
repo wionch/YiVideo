@@ -141,7 +141,29 @@ def get_speaker_data(stage_output: dict) -> dict:
             'speaker_statistics': stage_output.get('speaker_statistics', {})
         }
 
-    # 尝试从文件加载（新格式优化）
+    # 尝试从精简格式中获取统计信息（新优化格式）
+    if 'statistics' in stage_output and isinstance(stage_output['statistics'], dict):
+        statistics = stage_output['statistics']
+        # 从statistics对象中提取说话人信息
+        speaker_data = {
+            'detected_speakers': statistics.get('detected_speakers', []),
+            'speaker_statistics': statistics.get('speaker_statistics', {}),
+            'diarization_duration': statistics.get('diarization_duration', 0)
+        }
+
+        # 检查是否有文件路径，尝试加载详细数据
+        diarization_file = stage_output.get('diarization_file')
+        if diarization_file:
+            detailed_data = load_speaker_data_from_file(diarization_file)
+            # 合并详细数据和统计摘要
+            speaker_data.update({
+                'speaker_enhanced_segments': detailed_data.get('speaker_enhanced_segments'),
+                'diarization_segments': detailed_data.get('diarization_segments')
+            })
+
+        return speaker_data
+
+    # 尝试从文件加载（旧新格式兼容）
     diarization_file = stage_output.get('diarization_file')
     if diarization_file:
         return load_speaker_data_from_file(diarization_file)
@@ -1472,7 +1494,7 @@ def diarize_speakers(self, context: dict) -> dict:
 
         logger.info(f"[{stage_name}] 说话人分离数据文件生成完成: {diarization_data_file}")
 
-        # 构建输出数据 - Redis优化版本：精简segments数据，仅存储文件路径
+        # 构建输出数据 - Redis优化版本：精简segments数据，仅存储文件路径，消除重复字段
         output_data = {
             # 优化：将3组segments数据替换为文件路径，大幅减少Redis内存占用
             "segments_file": transcribe_data_file,           # 替代 "original_segments": transcribe_result['segments']
@@ -1481,10 +1503,7 @@ def diarize_speakers(self, context: dict) -> dict:
             "audio_duration": transcribe_result.get('audio_duration', 0),
             "language": transcribe_result.get('language', 'unknown'),
             "diarization_enabled": diarization_enabled,
-            "diarization_duration": diarization_data_content["statistics"]["diarization_duration"],
-            "detected_speakers": diarization_data_content["statistics"]["detected_speakers"],
-            "speaker_statistics": diarization_data_content["statistics"]["speaker_statistics"],
-            "diarization_data_file": diarization_data_file,
+            # 精简：统一统计信息到statistics对象中，消除重复字段
             "statistics": diarization_data_content["statistics"],
 
             # 兼容性：保留segments计数用于快速统计

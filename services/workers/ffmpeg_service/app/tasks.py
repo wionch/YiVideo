@@ -403,11 +403,21 @@ def split_audio_segments(self: Task, context: dict) -> dict:
             'min_segment_duration': split_config.get('min_segment_duration', 1.0),
             'max_segment_duration': split_config.get('max_segment_duration', 30.0),
             'group_by_speaker': split_config.get('group_by_speaker', True),
-            'include_silence': split_config.get('include_silence', False)
+            'include_silence': split_config.get('include_silence', False),
+            # 并发分割配置
+            'enable_concurrent': split_config.get('enable_concurrent', True),
+            'max_workers': split_config.get('max_workers', 8),
+            'concurrent_timeout': split_config.get('concurrent_timeout', 600)
         }
 
         logger.info(f"[{stage_name}] 开始执行音频分割...")
         logger.info(f"[{stage_name}] 分割参数: {split_params}")
+
+        # 记录并发配置
+        if split_params.get('enable_concurrent'):
+            logger.info(f"[{stage_name}] 并发分割已启用，最大工作线程数: {split_params.get('max_workers')}")
+        else:
+            logger.info(f"[{stage_name}] 使用串行分割模式")
 
         # 步骤5: 执行音频分割
         result = split_audio_by_segments(
@@ -428,11 +438,11 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         logger.info(f"[{stage_name}] 总时长: {result.total_duration:.2f}s")
         logger.info(f"[{stage_name}] 处理时间: {result.processing_time:.2f}s")
 
-        # 步骤7: 构建输出数据
+        # 步骤7: 构建输出数据（精简Redis存储）
         output_data = {
             "audio_segments_dir": audio_segments_dir,
-            "audio_source": audio_source,
-            "subtitle_source": subtitle_source,
+            "audio_source": audio_path,  # 修复：存储实际文件路径而非描述
+            "subtitle_source": subtitle_path,  # 修复：存储实际文件路径而非描述
             "total_segments": result.total_segments,
             "successful_segments": result.successful_segments,
             "failed_segments": result.failed_segments,
@@ -442,18 +452,20 @@ def split_audio_segments(self: Task, context: dict) -> dict:
             "sample_rate": result.sample_rate,
             "channels": result.channels,
             "split_info_file": result.split_info_file,
-            "segments_count": len(result.segments),
-            "speaker_groups": {}
+            "segments_count": len(result.segments)
+            # 移除：speaker_groups 详细数据，改为通过 split_info_file 引用
         }
 
-        # 添加说话人分组信息
+        # 添加说话人统计摘要（不存储详细文件列表）
         if result.speaker_groups:
+            speaker_summary = {}
             for speaker, segments in result.speaker_groups.items():
-                output_data["speaker_groups"][speaker] = {
+                speaker_summary[speaker] = {
                     "count": len(segments),
-                    "duration": sum(seg.duration for seg in segments),
-                    "files": [seg.file_path for seg in segments if seg.file_path]
+                    "duration": sum(seg.duration for seg in segments)
+                    # 移除：files 列表，减少Redis内存占用
                 }
+            output_data["speaker_summary"] = speaker_summary
 
         # 标记任务成功
         workflow_context.stages[stage_name].status = 'SUCCESS'

@@ -403,6 +403,16 @@ ffmpeg_service:
     # FFmpeg 音频分割命令超时时间（秒）
     split_timeout: 300
 
+    # === 并发分割配置 (新增) ===
+    # 是否启用并发分割（推荐启用，可显著提升分割速度）
+    enable_concurrent: true
+    # 最大并发线程数（建议根据CPU核心数调整，4-12为佳）
+    max_workers: 8
+    # 并发操作总超时时间（秒）
+    concurrent_timeout: 600
+    # 批处理大小（用于控制内存使用）
+    batch_size: 20
+
   # === 字幕文件配置 ===
   subtitle:
     # 字幕文件优先级顺序

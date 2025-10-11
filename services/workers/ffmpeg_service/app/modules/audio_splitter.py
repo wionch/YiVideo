@@ -12,10 +12,13 @@ import os
 import subprocess
 import json
 import logging
+import re
 from typing import List, Dict, Optional, Union
 from pathlib import Path
 from dataclasses import dataclass, asdict
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .subtitle_parser import SubtitleSegment, parse_subtitle_segments
 
@@ -64,7 +67,10 @@ class AudioSplitter:
         channels: int = 1,
         min_segment_duration: float = 0.5,
         max_segment_duration: float = 30.0,
-        ffmpeg_timeout: int = 300
+        ffmpeg_timeout: int = 300,
+        enable_concurrent: bool = True,
+        max_workers: int = 8,
+        concurrent_timeout: int = 600
     ):
         """
         初始化音频分割器
@@ -76,6 +82,9 @@ class AudioSplitter:
             min_segment_duration: 最小片段时长（秒）
             max_segment_duration: 最大片段时长（秒）
             ffmpeg_timeout: ffmpeg命令超时时间（秒）
+            enable_concurrent: 是否启用并发分割
+            max_workers: 最大并发线程数
+            concurrent_timeout: 并发操作总超时时间（秒）
         """
         self.output_format = output_format.lower()
         self.sample_rate = sample_rate
@@ -83,6 +92,9 @@ class AudioSplitter:
         self.min_segment_duration = min_segment_duration
         self.max_segment_duration = max_segment_duration
         self.ffmpeg_timeout = ffmpeg_timeout
+        self.enable_concurrent = enable_concurrent
+        self.max_workers = max_workers
+        self.concurrent_timeout = concurrent_timeout
 
         # 验证音频格式
         supported_formats = ["wav", "flac", "mp3", "aac", "m4a"]
@@ -135,6 +147,31 @@ class AudioSplitter:
 
         filename = f"{prefix}_{segment.id:03d}{speaker_suffix}.{self.output_format}"
         return os.path.join(output_dir, filename)
+
+    def _generate_filename_safe(
+        self,
+        segment: SubtitleSegment,
+        output_dir: str,
+        prefix: str = "segment",
+        lock: Optional[threading.Lock] = None
+    ) -> str:
+        """
+        线程安全的音频文件名生成方法
+
+        Args:
+            segment: 字幕片段
+            output_dir: 输出目录
+            prefix: 文件名前缀
+            lock: 线程锁（可选）
+
+        Returns:
+            str: 生成的文件路径
+        """
+        if lock:
+            with lock:
+                return self._generate_filename(segment, output_dir, prefix)
+        else:
+            return self._generate_filename(segment, output_dir, prefix)
 
     def _extract_segment(
         self,
@@ -231,6 +268,118 @@ class AudioSplitter:
         }
         return codec_map.get(self.output_format, "pcm_s16le")
 
+    def _extract_segment_worker(
+        self,
+        args: tuple
+    ) -> tuple:
+        """
+        并发工作线程：处理单个音频片段的提取
+
+        Args:
+            args: 包含 (input_audio, segment, output_file) 的元组
+
+        Returns:
+            tuple: (segment_id, extract_result or None)
+        """
+        input_audio, segment, output_file = args
+        try:
+            extract_result = self._extract_segment(input_audio, segment, output_file)
+            return (segment.id, extract_result, None)
+        except Exception as e:
+            logger.error(f"工作线程处理片段 {segment.id} 时发生异常: {e}")
+            return (segment.id, None, str(e))
+
+    def _split_audio_segments_concurrent(
+        self,
+        input_audio: str,
+        segments: List[SubtitleSegment],
+        output_dir: str,
+        group_by_speaker: bool = False,
+        progress_callback: Optional[callable] = None
+    ) -> tuple:
+        """
+        并发分割音频片段
+
+        Args:
+            input_audio: 输入音频文件路径
+            segments: 字幕片段列表
+            output_dir: 输出目录
+            group_by_speaker: 是否按说话人分组
+            progress_callback: 进度回调函数
+
+        Returns:
+            tuple: (successful_segments, failed_segments)
+        """
+        logger.info(f"开始并发音频分割: {len(segments)} 个片段，最大并发数: {self.max_workers}")
+
+        # 准备工作参数
+        work_items = []
+        for segment in segments:
+            # 确定输出文件路径
+            if group_by_speaker and segment.speaker:
+                segment_dir = os.path.join(output_dir, "by_speaker", segment.speaker)
+            else:
+                segment_dir = os.path.join(output_dir, "segments")
+
+            os.makedirs(segment_dir, exist_ok=True)
+            output_file = self._generate_filename(segment, segment_dir)
+            work_items.append((input_audio, segment, output_file))
+
+        # 使用线程池并发处理
+        successful_segments = []
+        failed_segments = []
+        completed_count = 0
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # 提交所有任务
+            future_to_segment = {
+                executor.submit(self._extract_segment_worker, item): item[1]
+                for item in work_items
+            }
+
+            # 处理完成的任务
+            for future in as_completed(future_to_segment, timeout=self.concurrent_timeout):
+                segment = future_to_segment[future]
+                completed_count += 1
+
+                try:
+                    segment_id, extract_result, error = future.result()
+
+                    if extract_result:
+                        # 创建音频片段信息
+                        original_segment = next(s for s in segments if s.id == segment_id)
+                        audio_info = AudioSegmentInfo(
+                            id=original_segment.id,
+                            start_time=original_segment.start_time,
+                            end_time=original_segment.end_time,
+                            duration=original_segment.duration,
+                            text=original_segment.text,
+                            speaker=original_segment.speaker,
+                            file_path=extract_result["file_path"],
+                            file_size=extract_result["file_size"],
+                            confidence=original_segment.confidence,
+                            words=original_segment.words
+                        )
+                        successful_segments.append(audio_info)
+                    else:
+                        failed_segments.append(segment_id)
+                        if error:
+                            logger.error(f"片段 {segment_id} 分割失败: {error}")
+
+                except Exception as e:
+                    logger.error(f"处理片段 {segment.id} 的future时发生异常: {e}")
+                    failed_segments.append(segment.id)
+
+                # 调用进度回调
+                if progress_callback:
+                    try:
+                        progress_callback(completed_count, len(segments), segment.id, extract_result is not None)
+                    except Exception as e:
+                        logger.warning(f"进度回调函数执行失败: {e}")
+
+        logger.info(f"并发分割完成: 成功 {len(successful_segments)}, 失败 {len(failed_segments)}")
+        return successful_segments, failed_segments
+
     def split_audio_by_segments(
         self,
         input_audio: str,
@@ -298,49 +447,66 @@ class AudioSplitter:
                 speaker_dir = os.path.join(output_dir, "by_speaker", speaker)
                 os.makedirs(speaker_dir, exist_ok=True)
 
-        # 分割音频片段
+        # 分割音频片段 - 根据配置选择串行或并发处理
         successful_segments = []
         failed_segments = []
 
-        for i, segment in enumerate(filtered_segments):
-            try:
-                # 确定输出文件路径
-                if group_by_speaker and segment.speaker:
-                    segment_dir = os.path.join(output_dir, "by_speaker", segment.speaker)
-                else:
-                    segment_dir = os.path.join(output_dir, "segments")
+        if self.enable_concurrent and len(filtered_segments) > 1:
+            # 并发处理
+            logger.info(f"使用并发模式处理 {len(filtered_segments)} 个音频片段")
+            successful_segments, failed_segments = self._split_audio_segments_concurrent(
+                input_audio=input_audio,
+                segments=filtered_segments,
+                output_dir=output_dir,
+                group_by_speaker=group_by_speaker,
+                progress_callback=progress_callback
+            )
+        else:
+            # 串行处理（原始逻辑）
+            if self.enable_concurrent and len(filtered_segments) <= 1:
+                logger.info("片段数量 <= 1，使用串行模式")
+            else:
+                logger.info(f"使用串行模式处理 {len(filtered_segments)} 个音频片段")
 
-                os.makedirs(segment_dir, exist_ok=True)
-                output_file = self._generate_filename(segment, segment_dir)
+            for i, segment in enumerate(filtered_segments):
+                try:
+                    # 确定输出文件路径
+                    if group_by_speaker and segment.speaker:
+                        segment_dir = os.path.join(output_dir, "by_speaker", segment.speaker)
+                    else:
+                        segment_dir = os.path.join(output_dir, "segments")
 
-                # 提取音频片段
-                extract_result = self._extract_segment(input_audio, segment, output_file)
+                    os.makedirs(segment_dir, exist_ok=True)
+                    output_file = self._generate_filename(segment, segment_dir)
 
-                if extract_result:
-                    # 创建音频片段信息
-                    audio_info = AudioSegmentInfo(
-                        id=segment.id,
-                        start_time=segment.start_time,
-                        end_time=segment.end_time,
-                        duration=segment.duration,
-                        text=segment.text,
-                        speaker=segment.speaker,
-                        file_path=extract_result["file_path"],
-                        file_size=extract_result["file_size"],
-                        confidence=segment.confidence,
-                        words=segment.words
-                    )
-                    successful_segments.append(audio_info)
-                else:
+                    # 提取音频片段
+                    extract_result = self._extract_segment(input_audio, segment, output_file)
+
+                    if extract_result:
+                        # 创建音频片段信息
+                        audio_info = AudioSegmentInfo(
+                            id=segment.id,
+                            start_time=segment.start_time,
+                            end_time=segment.end_time,
+                            duration=segment.duration,
+                            text=segment.text,
+                            speaker=segment.speaker,
+                            file_path=extract_result["file_path"],
+                            file_size=extract_result["file_size"],
+                            confidence=segment.confidence,
+                            words=segment.words
+                        )
+                        successful_segments.append(audio_info)
+                    else:
+                        failed_segments.append(segment.id)
+
+                    # 调用进度回调
+                    if progress_callback:
+                        progress_callback(i + 1, len(filtered_segments), segment.id, extract_result is not None)
+
+                except Exception as e:
+                    logger.error(f"处理片段 {segment.id} 时发生异常: {e}")
                     failed_segments.append(segment.id)
-
-                # 调用进度回调
-                if progress_callback:
-                    progress_callback(i + 1, len(filtered_segments), segment.id, extract_result is not None)
-
-            except Exception as e:
-                logger.error(f"处理片段 {segment.id} 时发生异常: {e}")
-                failed_segments.append(segment.id)
 
         # 计算总时长
         total_duration = sum(seg.duration for seg in filtered_segments)
@@ -498,7 +664,3 @@ def split_audio_segments(
         group_by_speaker=kwargs.get('group_by_speaker', False),
         include_silence=kwargs.get('include_silence', False)
     )
-
-
-# 导入正则表达式模块
-import re
