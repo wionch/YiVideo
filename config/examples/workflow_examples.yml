@@ -1,0 +1,262 @@
+# YiVideo 工作流配置示例
+# WhisperX功能拆分后的新工作流配置
+
+# =============================================================================
+# 基础字幕工作流（仅转录）
+# 适用于：只需要转录，不需要说话人分离的场景
+# 优势：处理速度快，成本低
+# =============================================================================
+basic_subtitle_workflow:
+  description: "基础字幕工作流 - 仅语音转录，生成基础SRT字幕"
+  workflow_chain:
+    - "ffmpeg.extract_audio"
+    - "whisperx.transcribe_audio"
+    - "whisperx.generate_subtitle_files"
+
+  # 工作流参数配置
+  params:
+    # 输入参数
+    video_path: ""  # 输入视频文件路径
+
+    # WhisperX配置（可选，覆盖全局配置）
+    whisperx_config:
+      enable_diarization: false  # 禁用说话人分离
+      enable_word_timestamps: true  # 启用词级时间戳
+      language: null  # 自动检测语言
+      model_name: "Systran/faster-whisper-large-v3"
+      device: "cuda"
+
+  # 输出说明
+  outputs:
+    - "基础SRT字幕文件"
+    - "词级时间戳JSON文件（如果启用）"
+    - "转录数据JSON文件"
+
+# =============================================================================
+# 完整字幕工作流（转录 + 说话人分离）
+# 适用于：需要识别说话人的场景，如多人对话、会议记录等
+# =============================================================================
+full_subtitle_workflow:
+  description: "完整字幕工作流 - 转录 + 说话人分离，生成带说话人信息的字幕"
+  workflow_chain:
+    - "ffmpeg.extract_audio"
+    - "audio_separator.separate_vocals"  # 可选：分离人声
+    - "whisperx.transcribe_audio"
+    - "whisperx.diarize_speakers"
+    - "whisperx.generate_subtitle_files"
+
+  params:
+    video_path: ""
+
+    # WhisperX配置
+    whisperx_config:
+      enable_diarization: true  # 启用说话人分离
+      enable_word_timestamps: true
+      show_speaker_labels: true  # 显示说话人标签
+      language: null
+      model_name: "Systran/faster-whisper-large-v3"
+      device: "cuda"
+
+    # Audio Separator配置（可选）
+    audio_separator_config:
+      model: "UVR-MDX-NET-Inst_HQ_4"  # 人声分离模型
+      output_format: "wav"
+
+  outputs:
+    - "基础SRT字幕文件"
+    - "带说话人信息的SRT字幕文件"
+    - "带说话人信息的JSON文件"
+    - "词级时间戳JSON文件"
+    - "转录数据JSON文件"
+    - "说话人分离数据JSON文件"
+
+# =============================================================================
+# 人声优化工作流
+# 适用于：背景噪音较大的视频，先分离人声再转录
+# =============================================================================
+vocal_optimized_workflow:
+  description: "人声优化工作流 - 先分离人声再转录，提高识别准确率"
+  workflow_chain:
+    - "ffmpeg.extract_audio"
+    - "audio_separator.separate_vocals"
+    - "whisperx.transcribe_audio"
+    - "whisperx.generate_subtitle_files"
+
+  params:
+    video_path: ""
+
+    whisperx_config:
+      enable_diarization: false  # 可选启用说话人分离
+      enable_word_timestamps: true
+
+    audio_separator_config:
+      model: "UVR-MDX-NET-Inst_HQ_4"
+      output_format: "wav"
+
+  outputs:
+    - "基础SRT字幕文件（基于人声）"
+    - "分离的人声音频文件"
+    - "转录数据JSON文件"
+
+# =============================================================================
+# 仅转录工作流（快速版本）
+# 适用于：快速获取文本内容的场景
+# =============================================================================
+transcribe_only_workflow:
+  description: "仅转录工作流 - 快速获取转录文本，不生成字幕文件"
+  workflow_chain:
+    - "ffmpeg.extract_audio"
+    - "whisperx.transcribe_audio"
+
+  params:
+    video_path: ""
+
+    whisperx_config:
+      enable_diarization: false
+      enable_word_timestamps: false  # 禁用词级时间戳以提高速度
+      language: null
+      model_name: "Systran/faster-whisper-large-v3"
+      device: "cuda"
+
+  outputs:
+    - "转录文本数据"
+    - "转录统计信息"
+
+# =============================================================================
+# 多说话人会议工作流
+# 适用于：会议记录、访谈等多说话人场景
+# =============================================================================
+multi_speaker_meeting_workflow:
+  description: "多说话人会议工作流 - 专门优化的多人对话处理"
+  workflow_chain:
+    - "ffmpeg.extract_audio"
+    - "audio_separator.separate_vocals"
+    - "whisperx.transcribe_audio"
+    - "whisperx.diarize_speakers"
+    - "whisperx.generate_subtitle_files"
+
+  params:
+    video_path: ""
+
+    whisperx_config:
+      enable_diarization: true
+      enable_word_timestamps: true
+      show_speaker_labels: true
+      # 可以为会议场景调整的参数
+      language: null  # 自动检测
+      model_name: "Systran/faster-whisper-large-v3"
+      device: "cuda"
+
+    audio_separator_config:
+      model: "UVR-MDX-NET-Inst_HQ_4"
+      output_format: "wav"
+
+  outputs:
+    - "完整的会议字幕文件"
+    - "按说话人分类的统计信息"
+    - "词级精确时间戳"
+
+# =============================================================================
+# 向后兼容工作流（使用原有的单一任务）
+# 说明：保持与原有API完全兼容，无需修改现有代码
+# =============================================================================
+legacy_subtitle_workflow:
+  description: "向后兼容工作流 - 使用原有的whisperx.generate_subtitles任务"
+  workflow_chain:
+    - "ffmpeg.extract_audio"
+    - "whisperx.generate_subtitles"  # 原有单一任务
+
+  params:
+    video_path: ""
+
+    # 原有的配置方式保持不变
+    whisperx_config:
+      enable_diarization: true
+      enable_word_timestamps: true
+      show_speaker_labels: true
+      language: null
+      model_name: "Systran/faster-whisper-large-v3"
+      device: "cuda"
+
+  outputs:
+    - "与原有版本完全相同的输出格式"
+
+# =============================================================================
+# 使用说明和最佳实践
+# =============================================================================
+
+usage_notes:
+  # 新工作流的优势
+  advantages:
+    - "模块化设计：可根据需求选择功能模块"
+    - "成本控制：可跳过不需要的功能，节省计算资源"
+    - "灵活性：支持多种组合和配置"
+    - "可调试性：每个阶段独立，便于问题定位"
+    - "向后兼容：原有工作流无需修改"
+
+  # 工作流选择建议
+  selection_guide:
+    basic_usage: "使用 basic_subtitle_workflow"
+    meeting_recording: "使用 full_subtitle_workflow 或 multi_speaker_meeting_workflow"
+    noisy_video: "使用 vocal_optimized_workflow"
+    quick_transcription: "使用 transcribe_only_workflow"
+    existing_systems: "使用 legacy_subtitle_workflow（无需修改）"
+
+  # 性能优化建议
+  performance_tips:
+    - "启用GPU加速（device: cuda）"
+    - "对于不需要词级时间戳的场景，禁用词级时间戳以提高速度"
+    - "对于单人说话场景，禁用说话人分离功能"
+    - "使用人声分离预处理可以提高噪音环境下的识别准确率"
+    - "根据音频长度和复杂度选择合适的模型"
+
+# =============================================================================
+# 配置参数详细说明
+# =============================================================================
+
+parameter_descriptions:
+  # WhisperX 配置参数
+  whisperx_config:
+    enable_diarization:
+      type: "boolean"
+      default: false
+      description: "是否启用说话人分离功能"
+
+    enable_word_timestamps:
+      type: "boolean"
+      default: true
+      description: "是否生成词级时间戳"
+
+    show_speaker_labels:
+      type: "boolean"
+      default: true
+      description: "是否在字幕中显示说话人标签"
+
+    language:
+      type: "string|null"
+      default: null
+      description: "转录语言代码，null表示自动检测"
+
+    model_name:
+      type: "string"
+      default: "Systran/faster-whisper-large-v3"
+      description: "Whisper模型名称"
+
+    device:
+      type: "string"
+      default: "cuda"
+      options: ["cuda", "cpu"]
+      description: "推理设备"
+
+  # Audio Separator 配置参数
+  audio_separator_config:
+    model:
+      type: "string"
+      default: "UVR-MDX-NET-Inst_HQ_4"
+      description: "人声分离模型名称"
+
+    output_format:
+      type: "string"
+      default: "wav"
+      options: ["wav", "mp3"]
+      description: "分离后音频的格式"
