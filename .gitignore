@@ -232,6 +232,7 @@ share/
 models/
 .serena/
 packages/
+services/workers/indextts_service/src/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/

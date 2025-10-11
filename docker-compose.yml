@@ -166,6 +166,84 @@ services:
               capabilities: [gpu]
     depends_on:
       - redis
+
+  # --- IndexTTS Service (IndexTTS2 文本转语音服务) ---
+  indextts_service:
+    container_name: indextts_service
+    runtime: nvidia
+    build:
+      context: .
+      dockerfile: ./services/workers/indextts_service/Dockerfile
+    ports:
+      - "7860:7860"  # IndexTTS2 WebUI端口映射
+    volumes:
+      - ./services:/app/services
+      - ./videos:/app/videos
+      - ./locks:/app/locks
+      - ./tmp:/app/tmp
+      - ./share:/share
+      - ./models:/models  # 模型目录映射
+      - ./config.yml:/app/config.yml
+      - ~/.ssh:/root/.ssh
+      - ~/.gemini:/root/.gemini
+      # IndexTTS2 专用缓存目录
+      - ./models/indextts:/models/indextts  # IndexTTS2模型存储
+      - ./models/app/cache:/app/.cache/huggingface  # Hugging Face缓存
+      - ./models/root/cache:/app/.cache/transformers  # Transformers缓存
+      - ./models/indextts/cache:/app/.cache/indextts  # IndexTTS专用缓存
+    restart: on-failure
+    user: "0:0"
+    entrypoint: ["/app/entrypoint.sh"]
+    command: ["celery", "-A", "services.workers.indextts_service.app.celery_app", "worker", "-l", "info", "-Q", "indextts_queue", "--concurrency=1"]
+    environment:
+      # 基础环境变量
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+
+      # GPU 配置
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+
+      # IndexTTS2 专用环境变量
+      - INDEX_TTS_MODEL_DIR=/models/indextts  # IndexTTS2模型目录
+      - INDEX_TTS_CHECKPOINTS_DIR=/models/indextts/checkpoints  # 模型检查点目录
+
+      # 缓存配置
+      - HF_HOME=/app/.cache/huggingface  # Hugging Face缓存
+      - TRANSFORMERS_CACHE=/app/.cache/transformers  # Transformers缓存
+      - TORCH_HOME=/app/.cache/torch  # PyTorch缓存
+
+      # Hugging Face 配置 (用于下载模型)
+      - HF_HUB_ENABLE_HF_TRANSFER=0  # 禁用HF Transfer以提高稳定性
+      # - HF_ENDPOINT=https://hf-mirror.com  # 可选：使用镜像源
+
+      # IndexTTS2 性能优化配置
+      - INDEX_TTS_USE_FP16=true  # 启用FP16以减少显存占用
+      - INDEX_TTS_USE_DEEPSPEED=false  # 默认禁用DeepSpeed
+      - INDEX_TTS_USE_CUDA_KERNEL=false  # 默认禁用CUDA内核以提高兼容性
+    deploy:
+      resources:
+        # GPU资源配置
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+          memory: 4G
+        # 资源限制 (可根据GPU显存调整)
+        limits:
+          memory: 8G
+    depends_on:
+      - redis
+    # 健康检查配置
+    healthcheck:
+      test: ["CMD", "python", "-c", "import torch; print('GPU Available:' if torch.cuda.is_available() else 'GPU Not Available')"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 180s  # IndexTTS2需要更长的启动时间
+
   # --- MCP Services ---
 
   serena:

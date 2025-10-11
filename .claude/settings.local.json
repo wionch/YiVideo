@@ -8,7 +8,8 @@
       "Bash(find:*)",
       "Bash(curl:*)",
       "Read(//c/Users/Administrator/.claude/**)",
-      "Read(//d/Program Files/nodejs/node_modules/better-qdrant-mcp-server/build/**)"
+      "Read(//d/Program Files/nodejs/node_modules/better-qdrant-mcp-server/build/**)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []
