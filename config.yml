@@ -372,3 +372,102 @@ audio_separator_service:
   enable_monitoring: true
   # 日志级别: DEBUG, INFO, WARNING, ERROR
   log_level: "INFO"
+
+# 13. FFmpeg Service 配置 (新增)
+# FFmpeg视频处理服务，支持音频提取、关键帧提取和音频分割功能
+ffmpeg_service:
+  # === 基础配置 ===
+  # 是否启用 GPU 锁机制（推荐启用，与其他服务共享 GPU）
+  enable_gpu_lock: true
+  # FFmpeg 命令超时时间（秒）
+  command_timeout: 1800
+
+  # === 音频分割配置 ===
+  split_audio:
+    # 输出音频格式: wav(无损推荐), flac(无损), mp3(压缩), aac, m4a
+    output_format: "wav"
+    # 音频采样率 (建议16000用于语音处理)
+    sample_rate: 16000
+    # 音频声道数: 1(单声道), 2(立体声)
+    channels: 1
+    # 最小片段时长（秒），防止产生过短的片段
+    min_segment_duration: 1.0
+    # 最大片段时长（秒），防止产生过长的片段
+    max_segment_duration: 30.0
+    # 是否按说话人分组存储音频文件
+    group_by_speaker: true
+    # 是否包含静音段（时长小于min_segment_duration的片段）
+    include_silence: false
+    # 分割后的音频文件存储目录（工作流中间数据）
+    output_dir: "/share/workflows/audio_segments"
+    # FFmpeg 音频分割命令超时时间（秒）
+    split_timeout: 300
+
+  # === 字幕文件配置 ===
+  subtitle:
+    # 字幕文件优先级顺序
+    # 1. speaker_srt_path: 带说话人信息的SRT文件
+    # 2. subtitle_path: 基础SRT文件
+    # 3. speaker_json_path: 带说话人信息的JSON文件
+    priority_order: ["speaker_srt_path", "subtitle_path", "speaker_json_path"]
+    # 是否自动检测字幕文件格式
+    auto_detect_format: true
+    # 字幕时间戳容差（秒），用于验证时间戳有效性
+    timestamp_tolerance: 0.1
+
+  # === 音频源配置 ===
+  audio_source:
+    # 音频文件优先级顺序（工作流中）
+    # 1. vocal_audio: audio_separator.separate_vocals 输出的人声音频
+    # 2. audio_path: ffmpeg.extract_audio 输出的默认音频
+    priority_order: ["vocal_audio", "audio_path"]
+    # 音频格式验证：是否检查文件扩展名
+    validate_format: true
+    # 支持的音频格式
+    supported_formats: ["wav", "flac", "mp3", "aac", "m4a", "ogg", "opus"]
+
+  # === 输出目录结构配置 ===
+  output_structure:
+    # 启用按说话人分组的子目录结构
+    enable_speaker_groups: true
+    # 分组子目录名称
+    speaker_group_dir: "by_speaker"
+    # 普通片段子目录名称
+    segments_dir: "segments"
+    # 信息文件名称
+    info_filename: "split_info.json"
+    # 是否生成详细的统计信息
+    generate_statistics: true
+
+  # === 性能优化配置 ===
+  performance:
+    # 并行处理的工作进程数（0表示自动检测CPU核心数）
+    worker_processes: 0
+    # 批处理大小（用于批量分割）
+    batch_size: 10
+    # 内存使用限制（MB）
+    memory_limit: 1024
+    # 是否启用进度回调
+    enable_progress_callback: true
+
+  # === 错误处理配置 ===
+  error_handling:
+    # 重试次数
+    max_retries: 3
+    # 重试间隔（秒）
+    retry_delay: 5
+    # 是否在失败时继续处理其他片段
+    continue_on_error: true
+    # 是否记录详细的错误信息
+    verbose_errors: true
+
+  # === 监控配置 ===
+  monitoring:
+    # 是否启用性能监控
+    enable_monitoring: true
+    # 日志级别: DEBUG, INFO, WARNING, ERROR
+    log_level: "INFO"
+    # 是否记录处理统计信息
+    log_statistics: true
+    # 是否生成处理报告
+    generate_report: true

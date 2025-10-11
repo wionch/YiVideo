@@ -88,14 +88,44 @@ def separate_vocals(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
-        # 1. 从 workflow_context.input_params 中获取输入音频路径
-        # 优先使用 audio_path，否则使用 video_path（支持直接处理音频文件或视频文件）
-        audio_path = workflow_context.input_params.get("audio_path") or workflow_context.input_params.get("video_path")
+        # 1. 音频源选择逻辑：优先使用已提取的音频文件
+        audio_path = None
+        audio_source = ""
+
+        logger.info(f"[{stage_name}] 开始音频源选择逻辑")
+        logger.info(f"[{stage_name}] 当前工作流阶段数量: {len(workflow_context.stages)}")
+        logger.info(f"[{stage_name}] 可用阶段列表: {list(workflow_context.stages.keys())}")
+
+        # 优先检查 ffmpeg.extract_audio 阶段的音频输出
+        ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
+        logger.debug(f"[{stage_name}] 检查 ffmpeg.extract_audio 阶段: 状态={ffmpeg_stage.status if ffmpeg_stage else 'None'}")
+
+        if ffmpeg_stage and ffmpeg_stage.status == 'SUCCESS':
+            logger.debug(f"[{stage_name}] ffmpeg 阶段输出类型: {type(ffmpeg_stage.output)}")
+            if (ffmpeg_stage.output and
+                isinstance(ffmpeg_stage.output, dict) and
+                ffmpeg_stage.output.get('audio_path')):
+                audio_path = ffmpeg_stage.output['audio_path']
+                audio_source = "已提取音频 (ffmpeg.extract_audio)"
+                logger.info(f"[{stage_name}] 成功获取已提取音频: {audio_path}")
+
+        # 如果没有已提取音频，回退到 input_params 中的文件
         if not audio_path:
-            raise ValueError("input_params 中缺少 audio_path 或 video_path")
+            # 优先使用 audio_path，否则使用 video_path（支持直接处理音频文件或视频文件）
+            audio_path = workflow_context.input_params.get("audio_path") or workflow_context.input_params.get("video_path")
+            if audio_path:
+                audio_source = "原始输入文件"
+                logger.info(f"[{stage_name}] 回退到原始文件: {audio_path}")
+
+        if not audio_path:
+            raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
+
+        logger.info(f"[{stage_name}] ========== 音频源选择结果 ==========")
+        logger.info(f"[{stage_name}] 选择的音频源: {audio_source}")
+        logger.info(f"[{stage_name}] 音频文件路径: {audio_path}")
+        logger.info(f"[{stage_name}] =================================")
 
         logger.info(f"[{stage_name}] 开始音频分离任务")
-        logger.info(f"[{stage_name}] 输入文件: {audio_path}")
 
         # 2. 从配置文件读取默认参数
         quality_mode = "default"  # 默认质量模式
@@ -230,14 +260,14 @@ def separate_vocals(self, context: dict) -> dict:
 
         # 9. 更新 WorkflowContext
         workflow_context.stages[stage_name] = StageExecution(
-            status="COMPLETED",
+            status="SUCCESS",
             output={
                 'audio_list': audio_list,
                 'vocal_audio': vocal_audio,
                 'model_used': model_name,
-                'quality_mode': quality_mode,
-                'processing_time': round(processing_time, 2)
-            }
+                'quality_mode': quality_mode
+            },
+            duration=round(processing_time, 2)
         )
 
         # 10. 将分离结果添加到 context 中，供后续任务使用
@@ -259,9 +289,9 @@ def separate_vocals(self, context: dict) -> dict:
         workflow_context.stages[stage_name] = StageExecution(
             status="FAILED",
             output={
-                'error': str(e),
-                'processing_time': round(processing_time, 2)
-            }
+                'error': str(e)
+            },
+            duration=round(processing_time, 2)
         )
         state_manager.update_workflow_state(workflow_context)
 
@@ -272,11 +302,6 @@ def separate_vocals(self, context: dict) -> dict:
 
         # 返回失败的 context
         return workflow_context.model_dump()
-
-    finally:
-        # 确保总是设置 duration 字段
-        workflow_context.stages[stage_name].duration = time.time() - start_time
-        state_manager.update_workflow_state(workflow_context)
 
 
 @celery_app.task(
@@ -308,13 +333,44 @@ def separate_vocals_optimized(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
-        # 1. 从 workflow_context.input_params 中获取输入音频路径
-        audio_path = workflow_context.input_params.get("audio_path") or workflow_context.input_params.get("video_path")
+        # 1. 音频源选择逻辑：优先使用已提取的音频文件
+        audio_path = None
+        audio_source = ""
+
+        logger.info(f"[{stage_name}] 开始音频源选择逻辑")
+        logger.info(f"[{stage_name}] 当前工作流阶段数量: {len(workflow_context.stages)}")
+        logger.info(f"[{stage_name}] 可用阶段列表: {list(workflow_context.stages.keys())}")
+
+        # 优先检查 ffmpeg.extract_audio 阶段的音频输出
+        ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
+        logger.debug(f"[{stage_name}] 检查 ffmpeg.extract_audio 阶段: 状态={ffmpeg_stage.status if ffmpeg_stage else 'None'}")
+
+        if ffmpeg_stage and ffmpeg_stage.status == 'SUCCESS':
+            logger.debug(f"[{stage_name}] ffmpeg 阶段输出类型: {type(ffmpeg_stage.output)}")
+            if (ffmpeg_stage.output and
+                isinstance(ffmpeg_stage.output, dict) and
+                ffmpeg_stage.output.get('audio_path')):
+                audio_path = ffmpeg_stage.output['audio_path']
+                audio_source = "已提取音频 (ffmpeg.extract_audio)"
+                logger.info(f"[{stage_name}] 成功获取已提取音频: {audio_path}")
+
+        # 如果没有已提取音频，回退到 input_params 中的文件
         if not audio_path:
-            raise ValueError("input_params 中缺少 audio_path 或 video_path")
+            # 优先使用 audio_path，否则使用 video_path（支持直接处理音频文件或视频文件）
+            audio_path = workflow_context.input_params.get("audio_path") or workflow_context.input_params.get("video_path")
+            if audio_path:
+                audio_source = "原始输入文件"
+                logger.info(f"[{stage_name}] 回退到原始文件: {audio_path}")
+
+        if not audio_path:
+            raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
+
+        logger.info(f"[{stage_name}] ========== 音频源选择结果 ==========")
+        logger.info(f"[{stage_name}] 选择的音频源: {audio_source}")
+        logger.info(f"[{stage_name}] 音频文件路径: {audio_path}")
+        logger.info(f"[{stage_name}] =================================")
 
         logger.info(f"[{stage_name}] 开始优化人声分离任务")
-        logger.info(f"[{stage_name}] 输入文件: {audio_path}")
 
         # 2. 从 workflow_context.input_params 中获取配置参数
         config = self.get_config()  # 实时获取配置
@@ -399,15 +455,15 @@ def separate_vocals_optimized(self, context: dict) -> dict:
 
         # 8. 更新 WorkflowContext
         workflow_context.stages[stage_name] = StageExecution(
-            status="COMPLETED",
+            status="SUCCESS",
             output={
                 'audio_list': audio_list,
                 'vocal_audio': vocal_audio,
                 'model_used': model_name,
                 'optimization_level': optimization_level,
-                'processing_time': round(processing_time, 2),
                 'vocal_optimization_enabled': True
-            }
+            },
+            duration=round(processing_time, 2)
         )
 
         # 9. 将分离结果添加到 context 中，供后续任务使用
@@ -429,9 +485,9 @@ def separate_vocals_optimized(self, context: dict) -> dict:
         workflow_context.stages[stage_name] = StageExecution(
             status="FAILED",
             output={
-                'error': str(e),
-                'processing_time': round(processing_time, 2)
-            }
+                'error': str(e)
+            },
+            duration=round(processing_time, 2)
         )
         state_manager.update_workflow_state(workflow_context)
 
@@ -442,11 +498,6 @@ def separate_vocals_optimized(self, context: dict) -> dict:
 
         # 返回失败的 context
         return workflow_context.model_dump()
-
-    finally:
-        # 确保总是设置 duration 字段
-        workflow_context.stages[stage_name].duration = time.time() - start_time
-        state_manager.update_workflow_state(workflow_context)
 
 
 @celery_app.task(
