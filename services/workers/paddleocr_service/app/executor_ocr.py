@@ -142,8 +142,22 @@ def main():
         # 5. 输出最终结果
         string_key_results = {str(k): v for k, v in final_ocr_results.items()}
         logging.info(f"OCR processing completed, generated results for {len(string_key_results)} items")
-        # 如果需要输出到stdout，可以保留以下一行
-        # print(json.dumps(string_key_results, cls=NumpyEncoder))
+        
+        # 确保结果不为空
+        if not string_key_results:
+            logging.warning("OCR processing completed but no results were generated. This might indicate an issue with the OCR engine or input images.")
+            # 仍然输出空JSON，避免父进程等待超时
+            print("{}")
+        else:
+            # 输出JSON结果到stdout，供父进程读取
+            try:
+                json_output = json.dumps(string_key_results, cls=NumpyEncoder)
+                print(json_output)
+                logging.info(f"Successfully output JSON results ({len(json_output)} characters)")
+            except Exception as e:
+                logging.error(f"Failed to serialize OCR results to JSON: {e}")
+                # 输出空JSON作为fallback
+                print("{}")
 
     except Exception as e:
         logging.error(f"An error occurred during OCR execution: {e}", exc_info=True)

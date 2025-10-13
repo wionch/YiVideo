@@ -1,0 +1,106 @@
+# ============================================================================
+# Docker构建上下文优化文件
+# 排除不必要的文件以减少构建上下文大小和提高构建速度
+# ============================================================================
+
+# 模型文件（这些应该在运行时通过volume挂载，而不是打包到镜像中）
+services/workers/indextts_service/checkpoints/
+**/checkpoints/
+**/models/
+**/.cache/
+**/hf_cache/
+
+# Python缓存和编译文件
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.egg-info/
+
+# 日志文件
+logs/
+**/*.log
+*.log
+
+# Git版本控制
+.git/
+.gitignore
+.gitattributes
+
+# 开发工具配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统生成的文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 测试和覆盖率报告
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+
+# 文档构建
+docs/_build/
+site/
+
+# 临时文件
+*.tmp
+*.bak
+*.orig
+*.rej
+~*
+
+# Node.js（如果有前端组件）
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 环境变量文件（通常包含敏感信息）
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 大型媒体文件
+*.mp4
+*.avi
+*.mov
+*.mp3
+*.wav
+*.flac
+
+# Docker相关
+docker-compose.override.yml
+Dockerfile.dev
+.dockerignore.bak
+
+# 备份文件
+*.backup
+*.old
+
+# 编辑器临时文件
+.#*
+\#*#
+.*.swp
+.*.swo
+
+# 操作系统文件
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

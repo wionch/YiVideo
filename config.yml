@@ -8,7 +8,7 @@ core:
   # 工作流执行完成后是否删除临时文件
   # true: 执行完后删除临时文件，节省磁盘空间（推荐）
   # false: 保留临时文件，便于调试和问题排查
-  cleanup_temp_files: true
+  cleanup_temp_files: false
 
 # 1. Redis 配置 (新增)
 redis:

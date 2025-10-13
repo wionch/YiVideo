@@ -188,10 +188,10 @@ services:
       - ~/.gemini:/root/.gemini
       # IndexTTS2 专用缓存目录
       - ./models/indextts:/models/indextts  # IndexTTS2模型存储
-      - ./models/app/cache:/app/.cache/huggingface  # Hugging Face缓存
-      - ./models/root/cache:/app/.cache/transformers  # Transformers缓存
+      - ./models/app/cache/huggingface:/app/.cache/huggingface  # Hugging Face缓存
+      - ./models/root/cache/transformers:/app/.cache/transformers  # Transformers缓存
       - ./models/indextts/cache:/app/.cache/indextts  # IndexTTS专用缓存
-    restart: on-failure
+    restart: always
     user: "0:0"
     entrypoint: ["/app/entrypoint.sh"]
     command: ["celery", "-A", "services.workers.indextts_service.app.celery_app", "worker", "-l", "info", "-Q", "indextts_queue", "--concurrency=1"]

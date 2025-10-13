@@ -6,7 +6,9 @@
 # 使用 PaddlePaddle 官方镜像作为基础镜像
 # 基于 Ubuntu 22.04 + CUDA 11.8 + Python 3.10
 # 与 paddleocr_service 和 whisperx_service 共享同一基础镜像，节省磁盘空间
-FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.1.1-gpu-cuda11.8-cudnn8.9
+# FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.1.1-gpu-cuda11.8-cudnn8.9
+# FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.2.0-gpu-cuda12.9-cudnn9.9
+FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
 
 # ========================================
 # 1. 环境变量配置
@@ -25,6 +27,11 @@ ENV HF_HOME=/app/.cache/huggingface
 # 2. 安装系统依赖
 # ========================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python 3.12 和 pip
+    python3.12 \
+    python3-pip \
+    python3.12-dev \
+    python3.12-venv \
     # FFmpeg - 音频处理核心依赖
     ffmpeg \
     # 音频库依赖
@@ -35,7 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
     # 清理缓存
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*\
+    # 创建 Python 和 pip 的符号链接
+    && ln -sf /usr/bin/python3.12 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip
 
 # ========================================
 # 3. 设置工作目录
@@ -49,10 +59,7 @@ WORKDIR /app
 COPY ./services/workers/audio_separator_service/requirements.txt /tmp/requirements.txt
 
 # 安装依赖（使用阿里云镜像源，与其他服务保持一致）
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    -i http://mirrors.aliyun.com/pypi/simple/ \
-    --trusted-host mirrors.aliyun.com \
+RUN pip install --no-cache-dir --break-system-packages --timeout=1200 -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host mirrors.aliyun.com \
     -r /tmp/requirements.txt
 
 # ========================================

@@ -11,7 +11,7 @@ PyYAML
 # paddlepaddle-gpu==2.5.2
 # # paddlex==2.2.1
 paddleocr
-torch
+# torch
 av
 numpy
 opencv-python-headless
