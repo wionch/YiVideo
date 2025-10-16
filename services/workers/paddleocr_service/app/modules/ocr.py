@@ -116,50 +116,55 @@ def _full_ocr_worker_initializer(full_config: Dict):
     global full_ocr_engine_process_global
     pid = os.getpid()
     try:
-        ocr_config = full_config.get('ocr', {})
-        paddle_config = ocr_config.get('paddleocr_config', {})
-        lang = ocr_config.get('lang', 'en')
-
-        # 检测CUDA环境
+        # [修复] 基于PaddleOCR 3.x源码分析，使用正确的API参数
         try:
-            import paddle
-            if paddle.device.is_compiled_with_cuda():
-                cuda_available = paddle.device.is_available()
-                logger.info(f"[PID: {pid}] CUDA available: {cuda_available}")
-                if cuda_available:
-                    logger.info(f"[PID: {pid}] CUDA device count: {paddle.device.cuda.device_count()}")
-                    logger.info(f"[PID: {pid}] Current CUDA device: {paddle.device.cuda.current_device()}")
-            else:
-                logger.warning(f"[PID: {pid}] PaddlePaddle was not compiled with CUDA support")
-        except Exception as e:
-            logger.warning(f"[PID: {pid}] Failed to detect CUDA environment: {e}")
+            # 导入通用配置加载器
+            import sys
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+            from utils.config_loader import get_ocr_lang
 
-        logger.info(f"[PID: {pid}] Initializing full PaddleOCR engine for lang '{lang}' with config: {paddle_config}")
-        
-        # 添加use_gpu参数到配置中（如果未设置）
-        if 'use_gpu' not in paddle_config:
-            try:
-                import paddle
-                paddle_config['use_gpu'] = paddle.device.is_available()
-                logger.info(f"[PID: {pid}] Auto-detected GPU availability, setting use_gpu={paddle_config['use_gpu']}")
-            except:
-                paddle_config['use_gpu'] = False
-                logger.warning(f"[PID: {pid}] Failed to detect GPU, setting use_gpu=False")
-        
-        full_ocr_engine_process_global = PaddleOCR(lang=lang, **paddle_config)
+            # 获取语言设置
+            lang = get_ocr_lang(default_lang='zh')
+            logger.info(f"[PID: {pid}] 从配置加载语言设置: {lang}")
+
+            # [修复] 使用PaddleOCR 3.x正确参数
+            models_config = {
+                'lang': lang,
+                'use_textline_orientation': True,  # 新的正确参数名
+                'device': None,  # 让PaddleOCR自动选择设备
+            }
+
+            logger.info(f"[PID: {pid}] 使用PaddleOCR 3.x配置: {models_config}")
+
+        except Exception as e:
+            # 回退到最简配置
+            logger.warning(f"[PID: {pid}] 配置加载失败，使用最简配置: {e}")
+            lang = 'en'
+            models_config = {
+                'lang': lang,
+                'use_textline_orientation': True,
+                'device': None,
+            }
+
+        logger.info(f"[PID: {pid}] Initializing PaddleOCR engine with config: {models_config}")
+
+        # [简化] 直接使用PaddleOCR，不添加额外的参数
+        full_ocr_engine_process_global = PaddleOCR(**models_config)
         logger.info(f"[PID: {pid}] Full PaddleOCR engine initialized successfully.")
 
     except Exception as e:
         logger.error(f"[PID: {pid}] ❌ Full PaddleOCR engine initialization failed: {e}", exc_info=True)
-        # 尝试使用CPU模式作为fallback
+        # 尝试使用最简配置作为fallback
         try:
-            logger.warning(f"[PID: {pid}] Attempting to initialize PaddleOCR in CPU mode as fallback")
-            cpu_config = paddle_config.copy()
-            cpu_config['use_gpu'] = False
-            full_ocr_engine_process_global = PaddleOCR(lang=lang, **cpu_config)
-            logger.info(f"[PID: {pid}] PaddleOCR engine initialized successfully in CPU mode.")
+            logger.warning(f"[PID: {pid}] Attempting to initialize PaddleOCR with minimal config as fallback")
+            fallback_config = {
+                'lang': lang,
+                'device': 'cpu',  # 强制使用CPU
+            }
+            full_ocr_engine_process_global = PaddleOCR(**fallback_config)
+            logger.info(f"[PID: {pid}] PaddleOCR engine initialized successfully with fallback config.")
         except Exception as fallback_e:
-            logger.error(f"[PID: {pid}] ❌ Fallback CPU initialization also failed: {fallback_e}", exc_info=True)
+            logger.error(f"[PID: {pid}] ❌ Fallback initialization also failed: {fallback_e}", exc_info=True)
             full_ocr_engine_process_global = None
 
 
@@ -177,16 +182,26 @@ def _full_ocr_worker_task(task: Tuple[str, str]) -> Tuple[str, List[str], List[A
             return (task_id, [], [])
 
         ocr_output = full_ocr_engine_process_global.predict(image_data)
-        
+
         if not ocr_output or not isinstance(ocr_output, list) or not ocr_output[0]:
             return (task_id, [], [])
 
         data_dict = ocr_output[0]
-        positions = data_dict.get('rec_polys', [])
-        texts = data_dict.get('rec_texts', [])
+
+        # 尝试多种可能的字段名，确保兼容性
+        positions = data_dict.get('dt_polys', data_dict.get('rec_polys', data_dict.get('polys', [])))
+        texts = data_dict.get('rec_texts', data_dict.get('texts', data_dict.get('dt_texts', [])))
         
         final_texts = []
         final_boxes = []
+
+        # 确保texts和positions的长度匹配
+        if len(texts) != len(positions):
+            # 取最小长度，避免索引越界
+            min_length = min(len(texts), len(positions))
+            texts = texts[:min_length]
+            positions = positions[:min_length]
+
         for i, t in enumerate(texts):
             if t and t.strip():
                 final_texts.append(t.strip())

@@ -330,7 +330,7 @@ def perform_ocr(self: Task, context: dict) -> dict:
             result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=3600)
 
             if result.stderr:
-                pass  # logger.info(f"[{stage_name}] OCR 子进程 stderr 输出:\n{result.stderr.strip()}")
+                logger.info(f"[{stage_name}] OCR 子进程 stderr 输出:\n{result.stderr.strip()}")
             
             ocr_results_str = result.stdout.strip()
             if not ocr_results_str:
