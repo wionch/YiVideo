@@ -140,8 +140,7 @@ def main():
                 transformed_part = _transform_coordinates(ocr_data, sub_images_meta)
                 successful_transforms += len(transformed_part)
                 final_ocr_results.update(transformed_part)
-
-                            else:
+            else:
                 logging.warning(f"Received OCR result for an unknown image not in manifest: {stitched_filename}")
 
         # 5. 输出最终结果
