@@ -80,6 +80,7 @@ services:
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
+      - ./models/paddle:/root/.paddlex/official_models
     restart: always
     user: "0:0"
     entrypoint: ""
