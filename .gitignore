@@ -231,6 +231,7 @@ pipline/
 share/
 models/
 .serena/
+.spec-workflow/
 packages/
 services/workers/indextts_service/src/
 services/workers/whisperx_service/src/

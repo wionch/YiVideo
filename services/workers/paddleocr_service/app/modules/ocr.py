@@ -84,9 +84,9 @@ class MultiProcessOCREngine:
                 initargs=(self.config,),
                 mp_context=ctx
             ) as executor:
-                
+
                 future_to_task = {executor.submit(_full_ocr_worker_task, task): task for task in tasks}
-                
+
                 for future in as_completed(future_to_task):
                     try:
                         result = future.result(timeout=300)
@@ -96,17 +96,40 @@ class MultiProcessOCREngine:
                     except Exception as e:
                         logger.error(f"A task failed: {e}", exc_info=True)
                         progress_bar.update(1)
-            
+
+                # [新增] 确保所有子进程在任务完成后被正确终止
+                try:
+                    logger.debug("开始清理ProcessPoolExecutor...")
+                    executor.shutdown(wait=True)
+                    logger.debug("ProcessPoolExecutor已清理")
+                except Exception as shutdown_e:
+                    logger.warning(f"ProcessPoolExecutor清理时出现警告: {shutdown_e}")
+
             progress_bar.finish(f"✅ 拼接图像OCR完成")
-            
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                logger.info("主进程 GPU 缓存已清理")
+
+            # 全面清理主进程GPU显存
+            try:
+                from services.common.gpu_memory_manager import log_gpu_memory_state, force_cleanup_gpu_memory
+                log_gpu_memory_state("OCR批处理完成")
+                force_cleanup_gpu_memory(aggressive=True)
+                logger.info("主进程 GPU 显存已全面清理")
+            except Exception as cleanup_e:
+                logger.warning(f"主进程GPU显存清理失败: {cleanup_e}")
+                # 降级到原有的简单清理
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    logger.info("主进程 GPU 缓存已清理（降级模式）")
         except Exception as e:
             logger.error(f"Multi-process OCR failed: {e}", exc_info=True)
             progress_bar.finish(f"❌ 拼接图像OCR失败")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+
+            # 出错时也要清理
+            try:
+                from services.common.gpu_memory_manager import force_cleanup_gpu_memory
+                force_cleanup_gpu_memory(aggressive=True)
+            except:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         return results
 
@@ -115,6 +138,23 @@ def _full_ocr_worker_initializer(full_config: Dict):
     """Initializes a full PaddleOCR engine in each worker process."""
     global full_ocr_engine_process_global
     pid = os.getpid()
+
+    # 初始化GPU内存管理
+    try:
+        from services.common.gpu_memory_manager import initialize_worker_gpu_memory
+        initialize_worker_gpu_memory()
+        logger.info(f"[PID: {pid}] GPU内存管理初始化完成")
+    except Exception as e:
+        logger.warning(f"[PID: {pid}] GPU内存管理初始化失败: {e}")
+
+    # 注册子进程退出清理函数
+    try:
+        import atexit
+        atexit.register(_cleanup_worker_process)
+        logger.debug(f"[PID: {pid}] 已注册子进程清理函数")
+    except Exception as e:
+        logger.warning(f"[PID: {pid}] 注册清理函数失败: {e}")
+
     try:
         # [修复] 基于PaddleOCR 3.x源码分析，使用正确的API参数
         try:
@@ -208,8 +248,73 @@ def _full_ocr_worker_task(task: Tuple[str, str]) -> Tuple[str, List[str], List[A
                 if i < len(positions):
                     final_boxes.append(positions[i])
 
+              # 清理中间变量
+        del ocr_output
+        del data_dict
+        del image_data
+
         return (task_id, final_texts, final_boxes)
 
     except Exception as e:
         logger.error(f"Full OCR task {task_id} execution failed: {e}", exc_info=True)
+
+        # 出错时也要清理显存
+        try:
+            from services.common.gpu_memory_manager import force_cleanup_gpu_memory
+            force_cleanup_gpu_memory(aggressive=True)
+        except:
+            pass
+
         return (task_id, [], [])
+
+
+def _cleanup_worker_process():
+    """子进程退出前的完整清理流程"""
+    global full_ocr_engine_process_global
+    pid = os.getpid()
+
+    try:
+        logger.debug(f"[PID: {pid}] 开始清理子进程资源")
+
+        # 1. 清理PaddleOCR引擎
+        if full_ocr_engine_process_global is not None:
+            try:
+                # 清理PaddleOCR模型和GPU资源
+                del full_ocr_engine_process_global
+                full_ocr_engine_process_global = None
+                logger.debug(f"[PID: {pid}] PaddleOCR引擎已清理")
+            except Exception as e:
+                logger.warning(f"[PID: {pid}] PaddleOCR引擎清理失败: {e}")
+
+        # 2. 强制清理GPU显存
+        try:
+            from services.common.gpu_memory_manager import force_cleanup_gpu_memory
+            force_cleanup_gpu_memory(aggressive=True)
+            logger.debug(f"[PID: {pid}] GPU显存已强制清理")
+        except Exception as e:
+            logger.debug(f"[PID: {pid}] GPU显存清理失败: {e}")
+            # 降级清理
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    logger.debug(f"[PID: {pid}] GPU缓存已清理（降级模式）")
+            except:
+                pass
+
+        # 3. 清理PaddlePaddle资源
+        try:
+            import paddle
+            if paddle.device.is_compiled_with_cuda():
+                paddle.device.cuda.empty_cache()
+                logger.debug(f"[PID: {pid}] PaddlePaddle显存已清理")
+        except Exception as e:
+            logger.debug(f"[PID: {pid}] PaddlePaddle显存清理失败: {e}")
+
+        # 4. Python垃圾回收
+        import gc
+        gc.collect()
+
+        logger.debug(f"[PID: {pid}] 子进程资源清理完成")
+
+    except Exception as e:
+        logger.error(f"[PID: {pid}] 子进程清理过程中发生错误: {e}")

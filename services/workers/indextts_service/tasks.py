@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 IndexTTS Service Tasks
-IndexTTS2 文本转语音服务的具体任务实现
+IndexTTS2 文本转语音服务的具体任务实现（使用子进程隔离模式）
 """
 
 import os
@@ -14,8 +14,6 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import torch
-import torchaudio
-import soundfile as sf
 from celery import Task
 
 # 导入共享模块
@@ -35,6 +33,9 @@ config = get_config()
 
 # 从 app.py 导入 celery_app
 from .app import celery_app, gpu_lock_manager
+
+# 导入新的子进程隔离 TTS 引擎
+from .tts_engine import MultiProcessTTSEngine
 
 
 class IndexTTSTask(Task):
@@ -56,215 +57,34 @@ class IndexTTSTask(Task):
         logger.info(f"任务 {task_id} 成功完成")
 
 
-class IndexTTSModel:
-    """IndexTTS2模型管理器"""
-
-    def __init__(self, model_path: str = "/models/indextts"):
-        """
-        初始化IndexTTS模型
-
-        Args:
-            model_path: 模型存储路径
-        """
-        self.model_path = Path(model_path)
-        self.checkpoints_path = self.model_path / "checkpoints"
-        self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.logger = logger
-        self.model_version = "unknown"
-
-        self._setup_model()
-
-    def _setup_model(self):
-        """设置和加载模型"""
-        try:
-            self.logger.info(f"正在初始化IndexTTS2模型...")
-            self.logger.info(f"使用设备: {self.device}")
-
-            # 检查模型文件
-            if not self.checkpoints_path.exists():
-                raise FileNotFoundError(f"模型检查点目录不存在: {self.checkpoints_path}")
-
-            config_path = self.checkpoints_path / "config.yaml"
-            if not config_path.exists():
-                raise FileNotFoundError(f"IndexTTS2配置文件不存在: {config_path}")
-
-            # 从环境变量获取性能配置
-            use_fp16 = os.getenv('INDEX_TTS_USE_FP16', 'true').lower() == 'true'
-            use_deepspeed = os.getenv('INDEX_TTS_USE_DEEPSPEED', 'false').lower() == 'true'
-            use_cuda_kernel = os.getenv('INDEX_TTS_USE_CUDA_KERNEL', 'false').lower() == 'true'
-
-            # 导入并初始化IndexTTS2
-            try:
-                # 添加IndexTTS2路径
-                sys.path.insert(0, "/tmp/index-tts")
-                from indextts.infer_v2 import IndexTTS2
-
-                self.logger.info(f"加载IndexTTS2模型: {self.checkpoints_path}")
-                self.logger.info(f"FP16: {use_fp16}, DeepSpeed: {use_deepspeed}, CUDA Kernel: {use_cuda_kernel}")
-
-                # 初始化模型
-                self.model = IndexTTS2(
-                    cfg_path=str(config_path),
-                    model_dir=str(self.checkpoints_path),
-                    use_fp16=use_fp16,
-                    use_deepspeed=use_deepspeed,
-                    use_cuda_kernel=use_cuda_kernel
-                )
-
-                self.model_version = getattr(self.model, 'model_version', '2.0')
-                self.logger.info(f"IndexTTS2模型初始化成功! 版本: {self.model_version}")
-
-            except ImportError as e:
-                self.logger.error(f"无法导入IndexTTS2: {e}")
-                raise RuntimeError(f"IndexTTS2模块导入失败: {e}")
-
-        except Exception as e:
-            self.logger.error(f"IndexTTS2模型初始化失败: {e}")
-            raise RuntimeError(f"IndexTTS2模型初始化失败: {e}")
-
-    def generate_speech(
-        self,
-        text: str,
-        output_path: str,
-        reference_audio: Optional[str] = None,
-        emotion_reference: Optional[str] = None,
-        emotion_alpha: float = 0.65,
-        emotion_vector: Optional[List[float]] = None,
-        emotion_text: Optional[str] = None,
-        use_random: bool = False,
-        max_text_tokens_per_segment: int = 120,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        使用IndexTTS2生成语音
-
-        Args:
-            text: 要转换的文本
-            output_path: 输出音频文件路径
-            reference_audio: 参考音频文件路径 (音色)
-            emotion_reference: 情感参考音频路径
-            emotion_alpha: 情感强度 (0.0-1.0)
-            emotion_vector: 情感向量 [喜, 怒, 哀, 惧, 厌恶, 低落, 惊喜, 平静]
-            emotion_text: 情感描述文本
-            use_random: 是否使用随机采样
-            max_text_tokens_per_segment: 每段最大token数
-            **kwargs: 其他参数
-
-        Returns:
-            Dict[str, Any]: 生成结果
-        """
-        start_time = time.time()
-
-        try:
-            self.logger.info(f"开始生成语音...")
-            self.logger.info(f"文本: {text[:100]}...")
-            self.logger.info(f"输出路径: {output_path}")
-
-            # 创建输出目录
-            output_file = Path(output_path)
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # 使用真实的IndexTTS2模型
-            return self._generate_with_real_model(
-                text=text,
-                output_path=output_path,
-                reference_audio=reference_audio,
-                emotion_reference=emotion_reference,
-                emotion_alpha=emotion_alpha,
-                emotion_vector=emotion_vector,
-                emotion_text=emotion_text,
-                use_random=use_random,
-                max_text_tokens_per_segment=max_text_tokens_per_segment,
-                **kwargs
-            )
-
-        except Exception as e:
-            error_msg = f"语音生成失败: {str(e)}"
-            self.logger.error(error_msg, exc_info=True)
-            return {
-                'status': 'error',
-                'error': error_msg,
-                'output_path': output_path,
-                'processing_time': time.time() - start_time
-            }
-
-    def _generate_with_real_model(self, **kwargs) -> Dict[str, Any]:
-        """使用真实IndexTTS2模型生成语音"""
-        try:
-            start_time = time.time()
-
-            # 准备参数
-            text = kwargs['text']
-            output_path = kwargs['output_path']
-            reference_audio = kwargs.get('reference_audio')
-            emotion_reference = kwargs.get('emotion_reference')
-            emotion_alpha = kwargs.get('emotion_alpha', 0.65)
-            emotion_vector = kwargs.get('emotion_vector')
-            emotion_text = kwargs.get('emotion_text')
-            use_random = kwargs.get('use_random', False)
-            max_text_tokens_per_segment = kwargs.get('max_text_tokens_per_segment', 120)
-
-            # IndexTTS2推理
-            self.model.infer(
-                spk_audio_prompt=reference_audio,
-                text=text,
-                output_path=output_path,
-                emo_audio_prompt=emotion_reference,
-                emo_alpha=emotion_alpha,
-                emo_vector=emotion_vector,
-                use_emo_text=bool(emotion_text),
-                emo_text=emotion_text,
-                use_random=use_random,
-                max_text_tokens_per_segment=max_text_tokens_per_segment,
-                verbose=True
-            )
-
-            # 获取生成的音频信息
-            import librosa
-            audio_data, sample_rate = librosa.load(output_path)
-            duration = len(audio_data) / sample_rate
-
-            processing_time = time.time() - start_time
-            self.logger.info(f"IndexTTS2语音生成完成，耗时: {processing_time:.2f}秒")
-
-            return {
-                'status': 'success',
-                'output_path': str(output_path),
-                'duration': duration,
-                'sample_rate': sample_rate,
-                'text_length': len(text),
-                'processing_time': processing_time,
-                'model_info': {
-                    'model_type': 'IndexTTS2',
-                    'model_version': self.model_version,
-                    'device': self.device,
-                    },
-                'parameters': {
-                    'reference_audio': reference_audio,
-                    'emotion_reference': emotion_reference,
-                    'emotion_alpha': emotion_alpha,
-                    'emotion_vector': emotion_vector,
-                    'emotion_text': emotion_text,
-                    'use_random': use_random,
-                    'max_text_tokens_per_segment': max_text_tokens_per_segment
-                }
-            }
-
-        except Exception as e:
-            raise Exception(f"IndexTTS2推理失败: {str(e)}")
+# 全局 TTS 引擎实例（懒加载 + 子进程隔离模式）
+_tts_engine = None
 
 
-# 全局模型实例
-_model_instance = None
+def get_tts_engine() -> MultiProcessTTSEngine:
+    """
+    获取 TTS 引擎单例（懒加载）
 
-def get_model_instance() -> IndexTTSModel:
-    """获取模型单例"""
-    global _model_instance
-    if _model_instance is None:
-        model_path = os.environ.get('INDEX_TTS_MODEL_PATH', '/models/indextts')
-        _model_instance = IndexTTSModel(model_path)
-    return _model_instance
+    引擎在首次调用时才会创建，模型在子进程中加载
+    """
+    global _tts_engine
+    if _tts_engine is None:
+        # 从环境变量获取配置
+        model_dir = os.getenv('INDEX_TTS_MODEL_DIR', '/models/indextts')
+        use_fp16 = os.getenv('INDEX_TTS_USE_FP16', 'true').lower() == 'true'
+        use_deepspeed = os.getenv('INDEX_TTS_USE_DEEPSPEED', 'false').lower() == 'true'
+        use_cuda_kernel = os.getenv('INDEX_TTS_USE_CUDA_KERNEL', 'false').lower() == 'true'
+        num_workers = int(os.getenv('INDEX_TTS_NUM_WORKERS', '1'))
+
+        logger.info("创建 IndexTTS 引擎实例（懒加载模式）")
+        _tts_engine = MultiProcessTTSEngine({
+            'model_dir': model_dir,
+            'use_fp16': use_fp16,
+            'use_deepspeed': use_deepspeed,
+            'use_cuda_kernel': use_cuda_kernel,
+            'num_workers': num_workers
+        })
+    return _tts_engine
 
 
 @celery_app.task(bind=True, base=IndexTTSTask, name='indextts.generate_speech')
@@ -335,11 +155,11 @@ def generate_speech(
         }
 
     try:
-        # 获取模型实例
-        model = get_model_instance()
+        # 获取 TTS 引擎（懒加载 + 子进程隔离）
+        engine = get_tts_engine()
 
-        # 生成语音
-        result = model.generate_speech(
+        # 生成语音（在子进程中执行）
+        result = engine.generate_speech(
             text=text,
             output_path=output_path,
             reference_audio=reference_audio,
@@ -443,20 +263,29 @@ def get_model_info(self) -> Dict[str, Any]:
         Dict[str, Any]: 模型信息
     """
     try:
-        model = get_model_instance()
+        # 返回配置信息（不需要加载模型）
+        model_dir = os.getenv('INDEX_TTS_MODEL_DIR', '/models/indextts')
+        use_fp16 = os.getenv('INDEX_TTS_USE_FP16', 'true').lower() == 'true'
+        use_deepspeed = os.getenv('INDEX_TTS_USE_DEEPSPEED', 'false').lower() == 'true'
+        use_cuda_kernel = os.getenv('INDEX_TTS_USE_CUDA_KERNEL', 'false').lower() == 'true'
 
         info = {
             'model_type': 'IndexTTS2',
-            'model_version': model.model_version,
-            'device': model.device,
-            'model_path': str(model.model_path),
-            'status': 'ready',
+            'model_version': '2.0',
+            'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+            'model_path': model_dir,
+            'status': 'ready (lazy-loading)',
             'capabilities': {
                 'text_to_speech': True,
-                'voice_cloning': True,  # 支持音色克隆
-                'emotion_control': True,  # 支持情感控制
-                'multi_language': True,   # 支持中英文
+                'voice_cloning': True,
+                'emotion_control': True,
+                'multi_language': True,
                 'real_time': False
+            },
+            'config': {
+                'use_fp16': use_fp16,
+                'use_deepspeed': use_deepspeed,
+                'use_cuda_kernel': use_cuda_kernel
             }
         }
 

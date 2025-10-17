@@ -370,12 +370,12 @@ def perform_ocr(self: Task, context: dict) -> dict:
                 if multi_frames_path and os.path.isdir(multi_frames_path):
                     shutil.rmtree(multi_frames_path)
                     # logger.info(f"[{stage_name}] 清理临时多帧图像目录: {multi_frames_path}")
-                
+
                 # 删除 manifest 文件
                 if manifest_path and os.path.exists(manifest_path):
                     os.remove(manifest_path)
                     # logger.info(f"[{stage_name}] 清理临时清单文件: {manifest_path}")
-                
+
                 # 删除整个 cropped_images 目录（现在应该只剩空目录或其他临时文件）
                 if multi_frames_path:
                     cropped_images_parent = Path(multi_frames_path).parent
@@ -386,9 +386,25 @@ def perform_ocr(self: Task, context: dict) -> dict:
                         except Exception as e:
                             # 如果删除失败，可能是目录不为空，记录警告但不影响主流程
                             logger.warning(f"[{stage_name}] 清理cropped_images目录失败（可能不为空）: {e}")
-                
+
             except Exception as e:
                 logger.warning(f"[{stage_name}] 清理多帧图像文件失败: {e}")
+
+        # [新增] 强制清理PaddleOCR相关进程和GPU显存
+        try:
+            from services.common.gpu_memory_manager import cleanup_paddleocr_processes, log_gpu_memory_state
+
+            logger.info(f"[{stage_name}] 开始清理OCR相关进程和GPU资源...")
+            log_gpu_memory_state("OCR任务完成前")
+
+            # 清理残留的OCR进程
+            cleanup_paddleocr_processes()
+
+            # 记录清理后的状态
+            log_gpu_memory_state("OCR任务清理后")
+
+        except Exception as cleanup_e:
+            logger.warning(f"[{stage_name}] OCR资源清理过程中出现问题: {cleanup_e}")
 
     return workflow_context.model_dump()
 

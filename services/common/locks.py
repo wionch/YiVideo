@@ -734,6 +734,15 @@ def gpu_lock(lock_key: str = "gpu_lock:0",
                     raise
                 finally:
                     # 任务执行完毕，释放锁并停止心跳
+                    # GPU显存清理 - 确保任务完成后显存被释放
+                    try:
+                        from services.common.gpu_memory_manager import log_gpu_memory_state, force_cleanup_gpu_memory
+                        log_gpu_memory_state(f"GPU任务完成 - {task_name}")
+                        force_cleanup_gpu_memory(aggressive=True)
+                        logger.info(f"任务 {task_name} GPU显存清理完成")
+                    except Exception as cleanup_e:
+                        logger.warning(f"任务 {task_name} GPU显存清理失败: {cleanup_e}")
+
                     lock_manager.release_lock(task_name, lock_key, "normal")
                     stop_task_heartbeat(task_name)
             else:
@@ -745,6 +754,14 @@ def gpu_lock(lock_key: str = "gpu_lock:0",
                 stats = lock_manager.get_statistics()
                 logger.error(f"当前锁统计: 总尝试 {stats['total_attempts']}, 成功 {stats['successful_acquisitions']}, 超时 {stats['timeouts']}")
                 logger.error(f"机制统计: 事件驱动 {stats.get('event_driven_acquisitions', 0)}, 轮询 {stats.get('polling_acquisitions', 0)}")
+
+                # 获取锁失败时也要清理可能的显存残留
+                try:
+                    from services.common.gpu_memory_manager import force_cleanup_gpu_memory
+                    force_cleanup_gpu_memory(aggressive=True)
+                    logger.info(f"任务 {task_name} 获取锁失败，GPU显存已清理")
+                except:
+                    pass
 
                 # 抛出异常，让Celery和工作流引擎知道任务失败
                 raise Exception(f"GPU_LOCK_TIMEOUT: {error_msg}")

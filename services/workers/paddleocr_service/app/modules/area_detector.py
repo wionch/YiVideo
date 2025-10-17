@@ -51,21 +51,34 @@ def initialize_worker():
     为每个进程创建独立的TextDetection和TextRecognition实例。
     """
     global worker_text_detector, worker_text_recognizer
-    
+
     # 设置信号处理，确保子进程能够正确响应终止信号
     def signal_handler(signum, frame):
         logger.info(f"[PID: {os.getpid()}] 收到信号 {signum}，正在清理资源...")
         try:
+            # 导入GPU内存管理器进行清理
+            from services.common.gpu_memory_manager import cleanup_worker_gpu_memory
+
             if worker_text_detector:
                 del worker_text_detector
             if worker_text_recognizer:
                 del worker_text_recognizer
+
+            # 清理GPU显存
+            cleanup_worker_gpu_memory()
         except:
             pass
         sys.exit(0)
-    
+
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
+
+    # 初始化GPU内存管理
+    try:
+        from services.common.gpu_memory_manager import initialize_worker_gpu_memory
+        initialize_worker_gpu_memory()
+    except Exception as e:
+        logger.warning(f"[PID: {os.getpid()}] GPU内存管理初始化失败: {e}")
     
     # 使用通用配置加载器获取语言设置
     try:
@@ -198,17 +211,24 @@ def process_frame_worker(frame_data) -> List[Tuple[np.ndarray, str]]:
         # 定期清理工作进程内存
         if frame_index % 50 == 0:  # 每处理50帧清理一次
             try:
-                # 清理PaddlePaddle缓存
-                import paddle
-                if paddle.is_compiled_with_cuda():
-                    paddle.device.cuda.empty_cache()
-            except:
-                pass
-        
+                # 使用统一的GPU内存管理器清理
+                from services.common.gpu_memory_manager import force_cleanup_gpu_memory
+                force_cleanup_gpu_memory(aggressive=False)
+            except Exception as cleanup_e:
+                logger.debug(f"[PID: {pid}] 定期显存清理失败: {cleanup_e}")
+
         return detections_with_text
-        
+
     except Exception as e:
         logger.error(f"[PID: {pid}] 处理帧 {frame_index+1} 时发生错误: {e}")
+
+        # 出错时也要清理显存
+        try:
+            from services.common.gpu_memory_manager import force_cleanup_gpu_memory
+            force_cleanup_gpu_memory(aggressive=True)
+        except:
+            pass
+
         return []
 
 class SubtitleAreaDetector(BaseDetector):
@@ -510,7 +530,15 @@ class SubtitleAreaDetector(BaseDetector):
 
         total_elapsed = time.time() - start_time
         progress_bar.finish(f"✅ 区域检测完成，总耗时: {total_elapsed:.2f}s")
-        
+
+        # 最终显存清理 - 主进程层面
+        try:
+            from services.common.gpu_memory_manager import log_gpu_memory_state, force_cleanup_gpu_memory
+            log_gpu_memory_state("字幕区域检测完成")
+            force_cleanup_gpu_memory(aggressive=True)
+        except Exception as e:
+            logger.debug(f"最终显存清理失败: {e}")
+
         return all_detections
     
     def _process_frames_with_executor(self, indexed_frames, num_processes, all_detections, start_time, progress_bar):

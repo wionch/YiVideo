@@ -125,7 +125,7 @@ class SpeakerDiarizerV2:
             return api_key
 
         # 其次使用配置文件
-        api_key = self.config.get('pyannoteai_api_key', 'sk_39f32b6ba1584278a0c1c3582ae8db4f')
+        api_key = self.config.get('pyannoteai_api_key')
         if api_key:
             return api_key
 
@@ -172,9 +172,20 @@ class SpeakerDiarizerV2:
                     logger.warning("未找到HF_TOKEN环境变量，尝试使用token=True（需要已登录）")
                     token = True
 
-            # 使用官方推荐方式加载pipeline
+            # 使用官方推荐方式加载pipeline - 根据版本选择正确的参数名
             logger.info(f"使用token={token}加载模型: {model_name}")
-            self.pipeline = Pipeline.from_pretrained(model_name, token=token)
+
+            try:
+                # 尝试新版本的token参数（pyannote.audio >= 3.1.1）
+                self.pipeline = Pipeline.from_pretrained(model_name, token=token)
+            except TypeError as e:
+                if "token" in str(e):
+                    # 如果token参数不被支持，尝试使用use_auth_token参数（旧版本）
+                    logger.warning("token参数不被支持，尝试使用use_auth_token参数")
+                    self.pipeline = Pipeline.from_pretrained(model_name, use_auth_token=token)
+                else:
+                    # 其他类型的错误，重新抛出
+                    raise
 
             # 对于Community模式，将pipeline移动到指定设备
             if self.device == 'cuda' and not self._use_premium_mode():

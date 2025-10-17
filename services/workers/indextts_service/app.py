@@ -63,71 +63,9 @@ else:
 from celery import Celery
 
 # ========================================
-# IndexTTS2 模型管理
+# IndexTTS2 模型管理 (已移除，改用子进程隔离模式)
 # ========================================
-
-# 全局IndexTTS2模型实例
-tts_model = None
-
-def initialize_indextts():
-    """初始化IndexTTS2模型"""
-    global tts_model
-    try:
-        logger.info("正在初始化IndexTTS2模型...")
-
-        # 从环境变量获取配置
-        model_dir = os.getenv('INDEX_TTS_MODEL_DIR', '/models/indextts')
-        use_fp16 = os.getenv('INDEX_TTS_USE_FP16', 'true').lower() == 'true'
-        use_deepspeed = os.getenv('INDEX_TTS_USE_DEEPSPEED', 'false').lower() == 'true'
-        use_cuda_kernel = os.getenv('INDEX_TTS_USE_CUDA_KERNEL', 'false').lower() == 'true'
-
-        # 检查模型目录
-        checkpoints_dir = os.path.join(model_dir, 'checkpoints')
-        if not os.path.exists(checkpoints_dir):
-            logger.warning(f"模型检查点目录不存在: {checkpoints_dir}")
-            return False
-
-        # 配置文件路径
-        config_path = os.path.join(checkpoints_dir, 'config.yaml')
-        if not os.path.exists(config_path):
-            logger.error(f"IndexTTS2配置文件不存在: {config_path}")
-            return False
-
-        # 导入IndexTTS2
-        try:
-            from indextts.infer_v2 import IndexTTS2
-
-            logger.info(f"加载IndexTTS2模型: {checkpoints_dir}")
-            logger.info(f"FP16: {use_fp16}, DeepSpeed: {use_deepspeed}, CUDA Kernel: {use_cuda_kernel}")
-
-            # 初始化模型
-            tts_model = IndexTTS2(
-                cfg_path=config_path,
-                model_dir=checkpoints_dir,
-                use_fp16=use_fp16,
-                use_deepspeed=use_deepspeed,
-                use_cuda_kernel=use_cuda_kernel
-            )
-
-            logger.info("IndexTTS2模型初始化成功!")
-            logger.info(f"模型版本: {getattr(tts_model, 'model_version', 'Unknown')}")
-            return True
-
-        except ImportError as e:
-            logger.error(f"无法导入IndexTTS2: {e}")
-            return False
-
-    except Exception as e:
-        logger.error(f"IndexTTS2模型初始化失败: {e}")
-        return False
-
-def get_tts_model():
-    """获取IndexTTS2模型实例，如果未初始化则尝试初始化"""
-    global tts_model
-    if tts_model is None:
-        if not initialize_indextts():
-            raise RuntimeError("IndexTTS2模型未初始化")
-    return tts_model
+# 模型加载逻辑已迁移到 tts_engine.py，使用懒加载 + 子进程隔离模式
 
 # ========================================
 # Celery 应用配置
@@ -184,12 +122,8 @@ from celery.signals import worker_ready
 
 @worker_ready.connect
 def worker_ready_handler(sender=None, **kwargs):
-    """Worker准备就绪时初始化IndexTTS2模型"""
-    logger.info("IndexTTS Worker 准备就绪，开始初始化模型...")
-    if initialize_indextts():
-        logger.info("IndexTTS2模型初始化完成，Worker已准备就绪")
-    else:
-        logger.warning("IndexTTS2模型初始化失败，但Worker将继续运行")
+    """Worker准备就绪时的回调 - 不再预加载模型，改为懒加载"""
+    logger.info("IndexTTS Worker 准备就绪 (懒加载模式，模型将在首次任务时加载)")
 
 # ========================================
 # 导入任务模块
