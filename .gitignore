@@ -236,6 +236,8 @@ packages/
 services/workers/indextts_service/src/
 services/workers/whisperx_service/src/
 services/workers/paddleocr_service/src/
+services/workers/faster_whisper_service/src/
+services/workers/pyannote_audio_service/src/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/

@@ -3,7 +3,8 @@
 
 """
 GPU显存管理工具模块
-提供统一的GPU显存监控、清理和管理功能，解决多进程环境下的显存泄漏问题
+专门提供GPU显存监控、清理和管理功能，解决多进程环境下的显存泄漏问题
+专注于PyTorch和PaddlePaddle的GPU显存管理
 """
 
 import gc
@@ -12,7 +13,6 @@ import os
 import threading
 import time
 from typing import Dict, Any, Optional, List
-import psutil
 
 from services.common.logger import get_logger
 
@@ -341,28 +341,7 @@ class GPUMemoryManager:
         except Exception as e:
             logger.debug(f"记录GPU显存状态失败: {e}")
 
-    def get_process_memory_info(self) -> Dict[str, Any]:
-        """
-        获取当前进程的内存使用信息
-
-        Returns:
-            Dict[str, Any]: 进程内存信息
-        """
-        try:
-            process = psutil.Process(os.getpid())
-            memory_info = process.memory_info()
-
-            return {
-                'pid': os.getpid(),
-                'rss_mb': memory_info.rss / (1024 * 1024),  # 物理内存
-                'vms_mb': memory_info.vms / (1024 * 1024),  # 虚拟内存
-                'percent': process.memory_percent(),  # 内存使用百分比
-                'timestamp': time.time()
-            }
-        except Exception as e:
-            logger.debug(f"获取进程内存信息失败: {e}")
-            return {'error': str(e)}
-
+  
     def cleanup_worker_process(self, device_id: int = 0):
         """
         子进程退出前的完整清理流程
@@ -452,63 +431,6 @@ def force_cleanup_gpu_memory(device_id: int = None, aggressive: bool = False):
     gpu_memory_manager.force_cleanup_memory(device_id, aggressive)
 
 
-def cleanup_paddleocr_processes():
-    """
-    清理残留的PaddleOCR相关进程
-    专门处理OCR任务完成后可能遗留的僵尸进程
-    """
-    try:
-        import psutil
-        current_pid = os.getpid()
-        cleaned_count = 0
-
-        # 查找当前进程的所有子进程
-        parent_process = psutil.Process(current_pid)
-        child_processes = parent_process.children(recursive=True)
-
-        for child in child_processes:
-            try:
-                # 检查是否是Python进程且可能包含PaddleOCR
-                if 'python' in child.name().lower():
-                    # 检查进程是否僵尸状态
-                    if child.status() == psutil.STATUS_ZOMBIE:
-                        logger.warning(f"发现僵尸PaddleOCR进程: PID {child.pid}, 状态: {child.status()}")
-                        try:
-                            # 尝试等待僵尸进程
-                            os.waitpid(child.pid, os.WNOHANG)
-                            cleaned_count += 1
-                        except:
-                            pass
-                    elif child.status() in [psutil.STATUS_SLEEPING, psutil.STATUS_RUNNING]:
-                        # 检查命令行参数，确认是否与OCR相关
-                        try:
-                            cmdline = ' '.join(child.cmdline())
-                            if any(keyword in cmdline.lower() for keyword in ['paddleocr', 'executor_ocr.py', 'celery']):
-                                logger.info(f"发现活跃的PaddleOCR进程: PID {child.pid}, 命令: {cmdline[:100]}...")
-                                # 温和地终止进程
-                                child.terminate()
-                                cleaned_count += 1
-                                logger.debug(f"已发送终止信号给进程 {child.pid}")
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-
-        if cleaned_count > 0:
-            logger.info(f"已清理 {cleaned_count} 个PaddleOCR相关进程")
-
-            # 等待进程完全退出
-            import time
-            time.sleep(2)
-
-            # 再次强制清理GPU内存
-            force_cleanup_gpu_memory(aggressive=True)
-
-        else:
-            logger.debug("未发现需要清理的PaddleOCR进程")
-
-    except Exception as e:
-        logger.error(f"清理PaddleOCR进程失败: {e}")
 
 
 def monitor_gpu_memory(device_id: int = 0, threshold: float = 0.9) -> Dict[str, Any]:

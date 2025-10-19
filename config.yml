@@ -170,10 +170,10 @@ llm_service:
       # DeepSeek 模型的API Endpoint
       api_base_url: "https://api.deepseek.com/chat/completions"
 
-# 9. WhisperX 服务配置 (新增)
-whisperx_service:
+# 9. Faster Whisper Service 配置 (新增)
+faster_whisper_service:
   # === 基础 ASR 配置 ===
-  # WhisperX ASR 模型设置
+  # Faster Whisper ASR 模型设置
   # 使用与v3测试脚本相同的Systran优化模型
   model_name: "Systran/faster-whisper-large-v3"
   # ASR 语言代码。如果设置为null，将自动检测。
@@ -199,20 +199,6 @@ whisperx_service:
   # 启用说话人分离（可选，会增加计算开销）
   enable_diarization: true
 
-  # === 说话人分离配置 ===
-  # 说话人分离模型选择
-  # 可选: "pyannote/speaker-diarization-community-1", "pyannote/speaker-diarization-precision-2"
-  diarization_model: "pyannote/speaker-diarization-precision-2"
-  # 最小/最大说话人数量（帮助模型确定说话人范围）
-  min_speakers: 1
-  max_speakers: 8
-  # 聚类阈值（0.0-1.0，值越小越严格，可能导致更多说话人）
-  clustering_threshold: 0.5
-  # 说话人分离的批处理大小（根据显存调整）
-  diarization_batch_size: 32
-  # 是否在字幕中显示说话人标签
-  show_speaker_labels: true
-
   # === 词级说话人匹配配置 ===
   # 是否启用词级时间戳精确匹配（推荐启用）
   enable_word_level_matching: true
@@ -223,19 +209,23 @@ whisperx_service:
   # 是否启用智能断句（在保持说话人边界的前提下）
   enable_smart_breaking: true
 
-  # === 付费接口配置 ===
-  # 是否启用付费接口（Precision-2模型）
-  # 启用后将使用pyannoteAI服务，需要配置PYANNOTEAI_API_KEY
-  enable_premium_diarization: true
-  # PyannoteAI API Key（用于付费接口）
-  # 可通过环境变量 PYANNOTEAI_API_KEY 设置，或在此处直接配置
-  pyannoteai_api_key: ""
-
   # === 音频配置 ===
   # 音频采样率
   audio_sample_rate: 16000
   # 音频通道数
   audio_channels: 1
+
+  # === GPU配置 ===
+  # 是否启用GPU锁机制
+  enable_gpu_lock: true
+  # GPU设备ID，-1表示自动选择，0表示第一个GPU
+  gpu_device_id: 0
+
+  # === 监控配置 ===
+  # 是否启用性能监控
+  enable_monitoring: true
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
 
 # 10. GPU锁配置 (新增)
 # 用于优化GPU资源的并发访问控制，提升系统吞吐量
@@ -481,3 +471,66 @@ ffmpeg_service:
     log_statistics: true
     # 是否生成处理报告
     generate_report: true
+
+# 14. Pyannote Audio Service 配置 (新增)
+# 基于 pyannote.audio 的说话人分离服务
+pyannote_audio_service:
+  # === 模式配置 ===
+  # 是否使用付费接口 (precision-2 模型)
+  # false: 使用免费的 community-1 模型，需要在 .env 文件中配置 HF_TOKEN
+  # true: 使用付费的 precision-2 模型，需要在 .env 文件中配置 PYANNOTEAI_API_KEY
+  # 注意: 此功能开关仅在配置文件中管理，不被环境变量覆盖
+  use_paid_api: false
+
+  # === 模型配置 ===
+  # 说话人分离模型选择 (自动根据 use_paid_api 选择)
+  # 免费模式: pyannote/speaker-diarization-community-1 (需要 .env 中的 HF_TOKEN)
+  # 付费模式: pyannote/speaker-diarization-precision-2 (需要 .env 中的 PYANNOTEAI_API_KEY)
+  # 注意: 实际使用的模型会根据 use_paid_api 配置自动选择，此处仅为参考
+  diarization_model: "pyannote/speaker-diarization-community-1"
+
+  # === 处理配置 ===
+  # 音频采样率 (与whisperx_service保持一致)
+  audio_sample_rate: 16000
+  # 最小片段时长（秒），小于此值的片段将被合并
+  min_segment_duration: 0.5
+  # 最大片段时长（秒），大于此值的片段将被分割
+  max_segment_duration: 30.0
+  # 是否启用片段优化
+  enable_segment_optimization: true
+
+  # === GPU配置 ===
+  # 是否启用GPU锁机制
+  enable_gpu_lock: true
+  # GPU设备ID，-1表示自动选择，0表示第一个GPU
+  gpu_device_id: 0
+
+  # === 质量控制 ===
+  # 是否启用结果验证
+  enable_validation: true
+  # 最小说话人数量，低于此值将重新处理
+  min_speakers: 1
+  # 最大说话人数量，超过此值将重新处理
+  max_speakers: 10
+
+  # === 错误处理 ===
+  # 重试次数
+  max_retries: 2
+  # 重试间隔（秒）
+  retry_delay: 10
+
+  # === 性能优化 ===
+  # 是否启用缓存
+  enable_cache: true
+  # 缓存过期时间（小时）
+  cache_ttl_hours: 24
+  # 是否启用并行处理
+  enable_parallel: false
+
+  # === 监控配置 ===
+  # 是否启用性能监控
+  enable_monitoring: true
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+  # 是否记录详细的处理日志
+  verbose_processing: false

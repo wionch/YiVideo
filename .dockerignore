@@ -104,3 +104,5 @@ Dockerfile.dev
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+**/pyannote-audio/

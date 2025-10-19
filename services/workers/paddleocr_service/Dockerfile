@@ -3,7 +3,7 @@
 # 1. 使用 PaddlePaddle 官方镜像作为基础镜像
 # 基于 Ubuntu 22.04 + CUDA 12.9 + Python 3.10
 # FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.2.0-gpu-cuda12.9-cudnn9.9
-FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
+FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04
 
 # 2. 设置环境变量
 ENV DEBIAN_FRONTEND=noninteractive

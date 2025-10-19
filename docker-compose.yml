@@ -20,7 +20,7 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
+      - ./share:/share
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
@@ -45,7 +45,7 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
+      - ./share:/share
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
@@ -76,11 +76,11 @@ services:
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
+      - ./share:/share
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-      - ./models/paddle:/root/.paddlex/official_models
+      - paddle_models_volume:/root/.paddlex/official_models
     restart: always
     user: "0:0"
     entrypoint: ""
@@ -98,38 +98,126 @@ services:
     depends_on:
       - redis
 
-  whisperx_service:
-    container_name: whisperx_service
+  # whisperx_service:
+  #   container_name: whisperx_service
+  #   runtime: nvidia
+  #   build:
+  #     context: .
+  #     dockerfile: ./services/workers/whisperx_service/Dockerfile
+  #   volumes:
+  #     - ./services:/app/services
+  #     - ./videos:/app/videos
+  #     - ./locks:/app/locks
+  #     - ./tmp:/app/tmp
+  #     - ./share:/share
+  #     - ./config.yml:/app/config.yml
+  #     - ~/.ssh:/root/.ssh
+  #     - ~/.gemini:/root/.gemini
+  #     - huggingface_cache_volume:/app/.cache
+  #     - transformers_cache_volume:/root/.cache
+  #   restart: on-failure
+  #   user: "0:0"
+  #   entrypoint: ""
+  #   command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "whisperx_queue"]
+  #   environment:
+  #     - PYTHONPATH=/app
+  #     - HF_TOKEN=${HF_TOKEN}
+  #     - HF_HOME=/app/.cache/huggingface
+  #     - HF_HUB_ENABLE_HF_TRANSFER=0
+  #     - TRANSFORMERS_CACHE=/root/.cache/transformers
+  #     - PYANNOTEAI_API_KEY=${PYANNOTEAI_API_KEY}
+  #   depends_on:
+  #     - redis
+
+  # --- Faster Whisper Service (WhisperX拆分) ---
+  faster_whisper_service:
+    container_name: faster_whisper_service
     runtime: nvidia
     build:
       context: .
-      dockerfile: ./services/workers/whisperx_service/Dockerfile
+      dockerfile: ./services/workers/faster_whisper_service/Dockerfile
     volumes:
       - ./services:/app/services
       - ./videos:/app/videos
       - ./locks:/app/locks
       - ./tmp:/app/tmp
-      - ./share:/share  # <--- ADDED
+      - ./share:/share
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-      - ./models/app/cache:/app/.cache  # <--- ADDED: Hugging Face模型缓存
-      - ./models/root/cache:/root/.cache  # <--- ADDED: Transformers缓存
+      - huggingface_cache_volume:/app/.cache
+      - transformers_cache_volume:/root/.cache
     restart: on-failure
     user: "0:0"
     entrypoint: ""
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "whisperx_queue"]
+    command: ["celery", "-A", "services.workers.faster_whisper_service.app.celery_app", "worker", "-l", "info", "-Q", "faster_whisper_queue"]
     environment:
       - PYTHONPATH=/app
-      - HF_TOKEN=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
-      - HF_HOME=/app/.cache/huggingface  # <--- ADDED: 确保使用正确的缓存路径
-      # - HF_ENDPOINT=https://hf-mirror.com #https://aifasthub.com # <--- ADDED: 使用镜像地址
-      - HF_HUB_ENABLE_HF_TRANSFER=0  # <--- ADDED: 启用HF Transfer
-      - TRANSFORMERS_CACHE=/app/.cache/transformers  # <--- ADDED: Transformers缓存路径
-      - PYANNOTEAI_API_KEY=sk_39f32b6ba1584278a0c1c3582ae8db4f  # <--- ADDED: PyannoteAI API Key
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - HF_TOKEN=${HF_TOKEN}
+      - HF_HOME=/app/.cache/huggingface
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - TRANSFORMERS_CACHE=/root/.cache/transformers
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     depends_on:
       - redis
-  # --- Audio Separator Service (新增) ---
+
+  # --- Pyannote Audio Service (WhisperX拆分) ---
+  pyannote_audio_service:
+    container_name: pyannote_audio_service
+    runtime: nvidia
+    build:
+      context: .
+      dockerfile: ./services/workers/pyannote_audio_service/Dockerfile
+    volumes:
+      - ./services:/app/services
+      - ./videos:/app/videos
+      - ./locks:/app/locks
+      - ./tmp:/app/tmp
+      - ./share:/share
+      - ./config.yml:/app/config.yml
+      - ~/.ssh:/root/.ssh
+      - ~/.gemini:/root/.gemini
+      - huggingface_cache_volume:/app/.cache
+      - transformers_cache_volume:/root/.cache
+    restart: unless-stopped
+    user: "0:0"
+    entrypoint: ""
+    # command: ["celery", "-A", "services.workers.pyannote_audio_service.app.celery_app", "worker", "-l", "info", "-Q", "pyannote_audio_queue"]
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - HF_TOKEN=${HF_TOKEN}
+      - HF_HOME=/app/.cache/huggingface
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - TRANSFORMERS_CACHE=/root/.cache/transformers
+      - PYANNOTEAI_API_KEY=${PYANNOTEAI_API_KEY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - PYANNOTE_SKIP_DEPENDENCY_CHECK=0
+      - TORCH_CUDA_ARCH_LIST="8.6"
+      - CUDA_LAUNCH_BLOCKING=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - redis
+
+  # --- Audio Separator Service ---
   audio_separator_service:
     container_name: audio_separator_service
     runtime: nvidia
@@ -142,12 +230,12 @@ services:
       - ./locks:/app/locks
       - ./tmp:/app/tmp
       - ./share:/share
-      - ./models:/models  # 模型目录映射
+      - audio_separator_models_volume:/models
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-      - ./models/app/cache:/app/.cache  # <--- ADDED: Hugging Face模型缓存
-      - ./models/root/cache:/root/.cache  # <--- ADDED: Transformers缓存
+      - huggingface_cache_volume:/app/.cache
+      - transformers_cache_volume:/root/.cache
     restart: on-failure
     user: "0:0"
     entrypoint: ""
@@ -183,15 +271,14 @@ services:
       - ./locks:/app/locks
       - ./tmp:/app/tmp
       - ./share:/share
-      - ./models:/models  # 模型目录映射
+      - indextts_models_volume:/models/indextts
       - ./config.yml:/app/config.yml
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
-      # IndexTTS2 专用缓存目录
-      - ./models/indextts:/models/indextts  # IndexTTS2模型存储
-      - ./models/app/cache/huggingface:/app/.cache/huggingface  # Hugging Face缓存
-      - ./models/root/cache/transformers:/app/.cache/transformers  # Transformers缓存
-      - ./models/indextts/cache:/app/.cache/indextts  # IndexTTS专用缓存
+      - huggingface_cache_volume:/app/.cache/huggingface
+      - transformers_cache_volume:/app/.cache/transformers
+      - indextts_cache_volume:/app/.cache/indextts
+      - torch_cache_volume:/app/.cache/torch
     restart: always
     user: "0:0"
     entrypoint: ["/app/entrypoint.sh"]
@@ -207,61 +294,49 @@ services:
       - CUDA_VISIBLE_DEVICES=0
 
       # IndexTTS2 专用环境变量
-      - INDEX_TTS_MODEL_DIR=/models/indextts  # IndexTTS2模型目录
-      - INDEX_TTS_CHECKPOINTS_DIR=/models/indextts/checkpoints  # 模型检查点目录
+      - INDEX_TTS_MODEL_DIR=/models/indextts
+      - INDEX_TTS_CHECKPOINTS_DIR=/models/indextts/checkpoints
 
       # 缓存配置
-      - HF_HOME=/app/.cache/huggingface  # Hugging Face缓存
-      - TRANSFORMERS_CACHE=/app/.cache/transformers  # Transformers缓存
-      - TORCH_HOME=/app/.cache/torch  # PyTorch缓存
+      - HF_HOME=/app/.cache/huggingface
+      - TRANSFORMERS_CACHE=/app/.cache/transformers
+      - TORCH_HOME=/app/.cache/torch
 
-      # Hugging Face 配置 (用于下载模型)
-      - HF_HUB_ENABLE_HF_TRANSFER=0  # 禁用HF Transfer以提高稳定性
-      # - HF_ENDPOINT=https://hf-mirror.com  # 可选：使用镜像源
+      # Hugging Face 配置
+      - HF_HUB_ENABLE_HF_TRANSFER=0
 
       # IndexTTS2 性能优化配置
-      - INDEX_TTS_USE_FP16=true  # 启用FP16以减少显存占用
-      - INDEX_TTS_USE_DEEPSPEED=false  # 默认禁用DeepSpeed
-      - INDEX_TTS_USE_CUDA_KERNEL=false  # 默认禁用CUDA内核以提高兼容性
+      - INDEX_TTS_USE_FP16=true
+      - INDEX_TTS_USE_DEEPSPEED=false
+      - INDEX_TTS_USE_CUDA_KERNEL=false
     deploy:
       resources:
-        # GPU资源配置
         reservations:
           devices:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
           memory: 4G
-        # 资源限制 (可根据GPU显存调整)
         limits:
           memory: 8G
     depends_on:
       - redis
-    # 健康检查配置
     healthcheck:
       test: ["CMD", "python", "-c", "import torch; print('GPU Available:' if torch.cuda.is_available() else 'GPU Not Available')"]
       interval: 60s
       timeout: 30s
       retries: 3
-      start_period: 180s  # IndexTTS2需要更长的启动时间
+      start_period: 180s
 
-  # --- MCP Services ---
 
-  serena:
-    image: ghcr.io/oraios/serena:latest
-    container_name: serena
-    command: >
-      serena start-mcp-server
-      --transport streamable-http
-      --port 9121
-    volumes:
-      - ./:/workspaces/YiVideo
-    ports:
-      - "9121:9121"     # MCP HTTP 服务端点: http://localhost:9121/mcp
-      - "24282:24282"   # 可选：Dashboard（若端口被占用会自增）
-    restart: unless-stopped
-
-# 添加npm缓存卷
+# 定义所有卷
 volumes:
-  npm_cache:  
-  
+  npm_cache:
+  paddle_models_volume:
+  huggingface_cache_volume:
+  transformers_cache_volume:
+  audio_separator_models_volume:
+  indextts_models_volume:
+  indextts_cache_volume:
+  torch_cache_volume:
+  serena_cache_volume:

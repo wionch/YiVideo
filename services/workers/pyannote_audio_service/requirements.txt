@@ -1,0 +1,28 @@
+# pyannote-audio 服务依赖配置
+# 基础依赖
+celery==5.3.4
+redis==5.0.1
+numpy>=1.24.0
+pyyaml>=6.0
+librosa>=0.10.0
+pydantic>=2.0.0
+soundfile>=0.12.1
+
+# # 音频处理依赖
+# torchaudio>=2.8.0
+
+# # pyannote-audio 4.0.x - 支持最新特性和性能提升
+pyannote.audio>=4.0.0
+
+# # HuggingFace 生态系统
+# transformers>=4.21.0
+# huggingface-hub>=0.13.0
+
+# # 数据处理
+# pandas>=1.5.0
+
+# # 可选：音频可视化
+# matplotlib>=3.5.0
+
+# 注意：PyTorch核心依赖已在Dockerfile中分步安装
+# 此文件包含除PyTorch生态系统外的所有依赖

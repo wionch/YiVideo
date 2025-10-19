@@ -6,7 +6,8 @@
 # 使用 PaddlePaddle 官方镜像作为基础镜像
 # 基于 Ubuntu 22.04 + CUDA 12.9 + Python 3.10
 # 满足 IndexTTS2 的 CUDA 12.8+ 要求
-FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.2.0-gpu-cuda12.9-cudnn9.9
+# FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.2.0-gpu-cuda12.9-cudnn9.9
+FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
 
 # ========================================
 # 1. 环境变量配置
@@ -42,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     # Python 开发工具
     python3-dev \
+    python3-pip \
     # 清理缓存
     && rm -rf /var/lib/apt/lists/*
 
@@ -51,12 +53,12 @@ RUN git lfs install
 # ========================================
 # 3. 安装 uv 包管理器 (IndexTTS2 强制要求)
 # ========================================
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv  --break-system-packages
 
 # ========================================
 # 4. 设置工作目录
 # ========================================
-WORKDIR /app
+WORKDIR /app/services/workers/indextts_service
 
 # ========================================
 # 5. 复制 IndexTTS2 项目代码

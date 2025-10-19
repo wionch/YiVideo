@@ -12,7 +12,8 @@ YiVideo 是一个基于动态工作流引擎的AI视频处理平台，采用微�
 - **api_gateway**: 系统总入口和大脑，负责HTTP请求处理、工作流动态构建、状态管理
 - **AI Workers**: 独立的Celery worker服务
   - `ffmpeg_service`: 视频处理、音频提取和分割
-  - `whisperx_service`: 语音识别(ASR)和说话人分离
+  - `faster_whisper_service`: 语音识别(ASR)，基于faster-whisper高版本支持
+  - `pyannote_audio_service`: 说话人分离，基于pyannote-audio独立部署
   - `paddleocr_service`: 光学字符识别(OCR)
   - `audio_separator_service`: 人声/背景音分离
   - `indextts_service`: 文本转语音(TTS)
@@ -37,10 +38,12 @@ docker-compose ps
 
 # 查看特定服务日志
 docker-compose logs -f api_gateway
-docker-compose logs -f whisperx_service
+docker-compose logs -f faster_whisper_service
+docker-compose logs -f pyannote_audio_service
 
 # 重启特定服务
-docker-compose restart whisperx_service
+docker-compose restart faster_whisper_service
+docker-compose restart pyannote_audio_service
 
 # 停止所有服务
 docker-compose down
@@ -92,7 +95,7 @@ docker-compose exec api_gateway pytest tests/e2e/
     "workflow_config": {
         "subtitle_generation": {
             "strategy": "asr",
-            "provider": "whisperx"
+            "provider": "faster_whisper"
         },
         "subtitle_refinement": {
             "strategy": "llm_proofread",
@@ -106,7 +109,7 @@ docker-compose exec api_gateway pytest tests/e2e/
 
 ### GPU锁装饰器使用
 ```python
-from services.common.gpu_lock import gpu_lock
+from services.common.locks import gpu_lock
 
 @gpu_lock(timeout=1800, poll_interval=0.5)
 def gpu_intensive_task(self, context):
@@ -130,7 +133,8 @@ def gpu_intensive_task(self, context):
 
 ### 关键配置项
 - **Redis配置**: 多数据库分离使用（broker:0, backend:1, locks:2, state:3）
-- **WhisperX配置**: 模型选择、GPU加速、说话人分离
+- **语音识别配置**: faster_whisper模型选择、GPU加速、参数优化
+- **说话人分离配置**: pyannote-audio模型选择、GPU加速、说话人数量设置
 - **OCR配置**: PaddleOCR参数优化、多语言支持
 - **GPU锁配置**: 轮询间隔、超时设置、指数退避
 
