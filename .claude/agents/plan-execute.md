@@ -1,7 +1,21 @@
 ---
 name: plan-execute
 description: Planning and execution phase - specifications and implementation
-tools: Read, Write, Edit, MultiEdit, Bash, Grep, Glob, LS
+tools:
+  # Serena MCP主要工具
+  mcp__serena__get_symbols_overview,
+  mcp__serena__find_symbol,
+  mcp__serena__replace_symbol_body,
+  mcp__serena__insert_after_symbol,
+  mcp__serena__insert_before_symbol,
+  mcp__serena__rename_symbol,
+  mcp__serena__search_for_pattern,
+  mcp__serena__list_dir,
+  mcp__serena__find_file,
+  mcp__serena__think_about_task_adherence,
+  mcp__serena__think_about_whether_you_are_done,
+  # 传统工具（兼容性保障）
+  Read, Write, Edit, MultiEdit, Bash, Grep, Glob, LS
 model: sonnet
 ---
 

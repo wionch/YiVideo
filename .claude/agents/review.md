@@ -1,7 +1,16 @@
 ---
 name: review
 description: Validation and quality assurance - ruthlessly verify implementation against plan
-tools: Read, Bash, Grep, Glob, LS, WebFetch
+tools:
+  # Serena MCP主要工具
+  mcp__serena__get_symbols_overview,
+  mcp__serena__find_symbol,
+  mcp__serena__find_referencing_symbols,
+  mcp__serena__search_for_pattern,
+  mcp__serena__list_dir,
+  mcp__serena__think_about_collected_information,
+  # 传统工具
+  Read, Bash, Grep, Glob, LS, WebFetch
 model: sonnet
 ---
 

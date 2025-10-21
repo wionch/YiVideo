@@ -1,7 +1,19 @@
 ---
 name: research-innovate
 description: Research and innovation phase - information gathering and brainstorming
-tools: Read, Grep, Glob, LS, WebSearch, WebFetch
+tools:
+  # Serena MCP主要工具（优先使用）
+  mcp__serena__get_symbols_overview,
+  mcp__serena__find_symbol,
+  mcp__serena__find_referencing_symbols,
+  mcp__serena__search_for_pattern,
+  mcp__serena__list_dir,
+  mcp__serena__find_file,
+  mcp__serena__read_memory,
+  mcp__serena__write_memory,
+  mcp__serena__think_about_collected_information,
+  # 传统工具（向后兼容/fallback）
+  Read, Grep, Glob, LS, WebSearch, WebFetch
 model: sonnet
 ---
 
