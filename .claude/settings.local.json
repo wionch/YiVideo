@@ -51,9 +51,13 @@
       "Bash(do echo \"=== $file ===\")",
       "Bash(head:*)",
       "Bash(done)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(git pull:*)",
+      "Bash(git merge:*)"
     ],
-    "deny": [],
+    "deny": [
+      "Bash(docker build:*)"
+    ],
     "ask": []
   },
   "outputStyle": "engineer-professional"
