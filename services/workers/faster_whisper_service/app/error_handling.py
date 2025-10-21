@@ -5,10 +5,9 @@
 """
 
 import time
-import logging
 import traceback
 from enum import Enum
-from typing import Dict, Any, Optional, Callable, Type, Union, List
+from typing import Dict, Any, Optional, Callable, Type, List
 from dataclasses import dataclass, field
 from functools import wraps
 from contextlib import contextmanager

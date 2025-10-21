@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-基于 Pydantic 的 WhisperX 配置验证系统
+基于 Pydantic 的 faster-whisper 配置验证系统
 提供严格的配置验证和类型检查
 """
 
@@ -52,12 +52,12 @@ class LanguageCode(str, Enum):
     AUTO = "auto"
 
 class WhisperxServiceConfig(BaseModel):
-    """WhisperX 服务配置验证模型"""
+    """faster-whisper 服务配置验证模型"""
 
     # 基础配置
     model_name: ModelName = Field(
         default=ModelName.LARGE_V2,
-        description="WhisperX 模型名称"
+        description="faster-whisper 模型名称"
     )
     language: LanguageCode = Field(
         default=LanguageCode.ZH,
@@ -225,7 +225,7 @@ class WhisperxServiceConfig(BaseModel):
         allow_mutation = True
 
 class WhisperxConfigManager:
-    """WhisperX 配置管理器"""
+    """faster-whisper 配置管理器"""
 
     def __init__(self):
         self._config: Optional[WhisperxServiceConfig] = None

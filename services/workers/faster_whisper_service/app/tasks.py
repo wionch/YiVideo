@@ -1,8 +1,8 @@
-# services/workers/whisperx_service/app/tasks.py
+# services/workers/faster_whisper_service/app/tasks.py
 # -*- coding: utf-8 -*-
 
 """
-WhisperX Service 的 Celery 任务定义。
+faster-whisper Service 的 Celery 任务定义。
 优化版本：直接使用faster-whisper原生API的词级时间戳功能，参考v3脚本实现。
 修复版本：解决WhisperX封装层词级时间戳丢失问题，使用faster-whisper原生API。
 GPU锁版本：使用GPU锁装饰器保护GPU资源，实现细粒度资源管理。
@@ -11,7 +11,6 @@ GPU锁版本：使用GPU锁装饰器保护GPU资源，实现细粒度资源管�
 import os
 import time
 import json
-import numpy as np
 
 from services.common.logger import get_logger
 from services.common import state_manager
@@ -847,8 +846,6 @@ def generate_subtitles(self, context: dict) -> dict:
     - 本地模型CUDA模式下的说话人分离功能会自动获取GPU锁
     - CPU模式和付费接口模式下直接执行，无需等待锁
     """
-    from celery import Task
-
     start_time = time.time()
     workflow_context = WorkflowContext(**context)
     stage_name = self.name

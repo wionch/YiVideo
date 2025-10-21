@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-线程安全的 WhisperX 模型管理器
+线程安全的 faster-whisper 模型管理器
 解决全局变量的并发访问问题，提供安全的模型加载和管理机制
 """
 
 import threading
-import logging
 import time
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -69,7 +68,7 @@ class ThreadSafeModelManager:
 
     def _load_asr_model(self, config: ModelConfig) -> Any:
         """加载 ASR 模型"""
-        logger.info(f"Loading WhisperX ASR model '{config.model_name}' with configuration:")
+        logger.info(f"Loading faster-whisper ASR model '{config.model_name}' with configuration:")
         logger.info(f"  - Device: {config.device}")
         logger.info(f"  - Compute type: {config.compute_type}")
         logger.info(f"  - Batch size: {config.batch_size}")
@@ -115,7 +114,7 @@ class ThreadSafeModelManager:
             return None, None
 
         try:
-            logger.info(f"Loading WhisperX Alignment model for language '{config.language}'...")
+            logger.info(f"Loading faster-whisper Alignment model for language '{config.language}'...")
             align_model, align_metadata = whisperx.load_align_model(
                 language_code=config.language,
                 device=config.device
@@ -158,7 +157,7 @@ class ThreadSafeModelManager:
             self._align_model, self._align_metadata = self._load_alignment_model(self._model_config)
 
             self._last_load_time = time.time()
-            logger.info("WhisperX models loading process completed")
+            logger.info("faster-whisper models loading process completed")
             return True
 
         except Exception as e:
@@ -226,7 +225,7 @@ class ThreadSafeModelManager:
     def unload_models(self):
         """卸载模型"""
         with self._lock:
-            logger.info("Unloading WhisperX models...")
+            logger.info("Unloading faster-whisper models...")
             self._asr_model = None
             self._align_model = None
             self._align_metadata = None
@@ -289,57 +288,3 @@ def segments_to_srt(segments: list) -> str:
     return srt_content
 
 
-def segments_to_word_timestamp_json(segments: list, include_segment_info: bool = True) -> str:
-    """
-    将WhisperX的segments转换为包含词级时间戳的JSON格式
-
-    Args:
-        segments: WhisperX转录结果的segments列表
-        include_segment_info: 是否包含句子级别信息
-
-    Returns:
-        JSON格式的字符串，包含详细的词级时间戳信息
-    """
-    import json
-
-    result = {
-        "format": "word_timestamps",
-        "total_segments": len(segments),
-        "segments": []
-    }
-
-    for i, segment in enumerate(segments):
-        segment_data = {
-            "id": i + 1,
-            "start": segment["start"],
-            "end": segment["end"],
-            "text": segment["text"].strip()
-        }
-
-        # 如果包含句子级别信息，添加SRT格式时间
-        if include_segment_info:
-            segment_data["srt_time"] = f"{int(segment['start'] // 3600):02}:{int((segment['start'] % 3600) // 60):02}:{int(segment['start'] % 60):02},{int((segment['start'] * 1000) % 1000):03} --> {int(segment['end'] // 3600):02}:{int((segment['end'] % 3600) // 60):02}:{int(segment['end'] % 60):02},{int((segment['end'] * 1000) % 1000):03}"
-
-        # 检查是否有词级时间戳数据
-        if "words" in segment and segment["words"]:
-            segment_data["words"] = []
-            for word_info in segment["words"]:
-                word_data = {
-                    "word": word_info["word"],
-                    "start": word_info["start"],
-                    "end": word_info["end"],
-                    "confidence": word_info.get("confidence", 0.0)
-                }
-                segment_data["words"].append(word_data)
-        else:
-            # 如果没有词级时间戳，将整个segment作为一个词处理
-            segment_data["words"] = [{
-                "word": segment["text"].strip(),
-                "start": segment["start"],
-                "end": segment["end"],
-                "confidence": 1.0
-            }]
-
-        result["segments"].append(segment_data)
-
-    return json.dumps(result, indent=2, ensure_ascii=False)
