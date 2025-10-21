@@ -38,7 +38,20 @@
       "WebFetch(domain:www.volcengine.com)",
       "WebFetch(domain:api-docs.deepseek.com)",
       "WebFetch(domain:www.datastudios.org)",
-      "mcp__serena__think_about_collected_information"
+      "mcp__serena__think_about_collected_information",
+      "Bash(git rev-parse:*)",
+      "Bash(cp:*)",
+      "Bash(echo:*)",
+      "Bash(BACKUP_DIR=\"/tmp/faster_whisper_cleanup_backup/20251021_144458\")",
+      "WebFetch(domain:opennmt.net)",
+      "WebFetch(domain:docs.pytorch.org)",
+      "mcp__serena__read_memory",
+      "Bash(git checkout:*)",
+      "Bash(for file in .claude/agents/*.md)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(head:*)",
+      "Bash(done)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []
