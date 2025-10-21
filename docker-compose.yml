@@ -22,6 +22,7 @@ services:
       - ./tmp:/app/tmp
       - ./share:/share
       - ./config.yml:/app/config.yml
+      - ./config:/app/config
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
@@ -47,6 +48,7 @@ services:
       - ./tmp:/app/tmp
       - ./share:/share
       - ./config.yml:/app/config.yml
+      - ./config:/app/config
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
@@ -78,6 +80,7 @@ services:
       - ./tmp:/app/tmp
       - ./share:/share
       - ./config.yml:/app/config.yml
+      - ./config:/app/config
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - paddle_models_volume:/root/.paddlex/official_models
@@ -98,36 +101,6 @@ services:
     depends_on:
       - redis
 
-  # whisperx_service:
-  #   container_name: whisperx_service
-  #   runtime: nvidia
-  #   build:
-  #     context: .
-  #     dockerfile: ./services/workers/whisperx_service/Dockerfile
-  #   volumes:
-  #     - ./services:/app/services
-  #     - ./videos:/app/videos
-  #     - ./locks:/app/locks
-  #     - ./tmp:/app/tmp
-  #     - ./share:/share
-  #     - ./config.yml:/app/config.yml
-  #     - ~/.ssh:/root/.ssh
-  #     - ~/.gemini:/root/.gemini
-  #     - huggingface_cache_volume:/app/.cache
-  #     - transformers_cache_volume:/root/.cache
-  #   restart: on-failure
-  #   user: "0:0"
-  #   entrypoint: ""
-  #   command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "whisperx_queue"]
-  #   environment:
-  #     - PYTHONPATH=/app
-  #     - HF_TOKEN=${HF_TOKEN}
-  #     - HF_HOME=/app/.cache/huggingface
-  #     - HF_HUB_ENABLE_HF_TRANSFER=0
-  #     - TRANSFORMERS_CACHE=/root/.cache/transformers
-  #     - PYANNOTEAI_API_KEY=${PYANNOTEAI_API_KEY}
-  #   depends_on:
-  #     - redis
 
   # --- Faster Whisper Service (WhisperX拆分) ---
   faster_whisper_service:
@@ -143,6 +116,7 @@ services:
       - ./tmp:/app/tmp
       - ./share:/share
       - ./config.yml:/app/config.yml
+      - ./config:/app/config
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -158,6 +132,10 @@ services:
       - HF_TOKEN=${HF_TOKEN}
       - HF_HOME=/app/.cache/huggingface
       - HF_HUB_ENABLE_HF_TRANSFER=0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY}
+      - VOLCENGINE_API_KEY=${VOLCENGINE_API_KEY}
       - TRANSFORMERS_CACHE=/root/.cache/transformers
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_VISIBLE_DEVICES=0
@@ -185,6 +163,7 @@ services:
       - ./tmp:/app/tmp
       - ./share:/share
       - ./config.yml:/app/config.yml
+      - ./config:/app/config
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -232,6 +211,7 @@ services:
       - ./share:/share
       - audio_separator_models_volume:/models
       - ./config.yml:/app/config.yml
+      - ./config:/app/config
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -273,6 +253,7 @@ services:
       - ./share:/share
       - indextts_models_volume:/models/indextts
       - ./config.yml:/app/config.yml
+      - ./config:/app/config
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache/huggingface

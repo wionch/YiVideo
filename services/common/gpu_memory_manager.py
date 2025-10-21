@@ -135,49 +135,6 @@ class GPUMemoryManager:
 
         return memory_info
 
-    def warm_up_gpu(self, device_id: int = 0):
-        """
-        GPU预热 - 在子进程中进行小规模GPU操作以预热GPU
-
-        Args:
-            device_id: GPU设备ID
-        """
-        if not self.initialized:
-            logger.warning("GPU管理器未初始化，跳过GPU预热")
-            return
-
-        try:
-            logger.debug(f"开始预热GPU设备 {device_id}")
-
-            # 使用PyTorch预热
-            if TORCH_AVAILABLE and torch.cuda.is_available():
-                torch.cuda.set_device(device_id)
-
-                # 创建小张量进行预热
-                x = torch.randn(100, 100, device=f'cuda:{device_id}')
-                y = torch.matmul(x, x.T)
-
-                # 同步并清理
-                torch.cuda.synchronize(device_id)
-                del x, y
-
-            # 使用PaddlePaddle预热
-            if PADDLE_AVAILABLE and paddle.is_compiled_with_cuda():
-                paddle.set_device(device_id)
-
-                # 创建小张量进行预热
-                x = paddle.randn([100, 100], dtype='float32')
-                y = paddle.matmul(x, x.T)
-
-                # 同步并清理
-                paddle.device.cuda.synchronize()
-                del x, y
-
-            logger.debug(f"GPU设备 {device_id} 预热完成")
-
-        except Exception as e:
-            logger.warning(f"GPU设备 {device_id} 预热失败: {e}")
-
     def force_cleanup_memory(self, device_id: int = None, aggressive: bool = False):
         """
         强制清理GPU显存
@@ -248,60 +205,6 @@ class GPUMemoryManager:
 
             except Exception as e:
                 logger.error(f"强制清理GPU显存失败: {e}")
-
-    def monitor_memory_usage(self, device_id: int = 0, threshold: float = 0.9) -> Dict[str, Any]:
-        """
-        监控GPU显存使用情况
-
-        Args:
-            device_id: GPU设备ID
-            threshold: 使用率阈值 (0.0-1.0)
-
-        Returns:
-            Dict[str, Any]: 监控结果
-        """
-        if not self.initialized:
-            return {'error': 'GPU管理器未初始化'}
-
-        try:
-            current_info = self.get_memory_info(device_id)
-            initial_info = self.initial_memory_info.get(device_id, {})
-
-            # 计算使用率
-            if current_info.get('total', 0) > 0:
-                utilization = current_info.get('used', 0) / current_info['total']
-            else:
-                utilization = 0.0
-
-            # 判断是否超过阈值
-            is_above_threshold = utilization > threshold
-
-            # 计算增长量
-            memory_growth = 0
-            if initial_info.get('total', 0) > 0:
-                initial_used = initial_info.get('used', 0)
-                current_used = current_info.get('used', 0)
-                memory_growth = current_used - initial_used
-
-            monitoring_result = {
-                'device_id': device_id,
-                'current_utilization': utilization,
-                'is_above_threshold': is_above_threshold,
-                'memory_growth_mb': memory_growth / (1024 * 1024),
-                'threshold': threshold,
-                'timestamp': time.time(),
-                'current_info': current_info,
-                'initial_info': initial_info
-            }
-
-            if is_above_threshold:
-                logger.warning(f"GPU设备 {device_id} 显存使用率过高: {utilization:.1%}")
-
-            return monitoring_result
-
-        except Exception as e:
-            logger.error(f"监控GPU显存使用失败: {e}")
-            return {'error': str(e)}
 
     def log_memory_state(self, context: str = "", device_id: int = 0):
         """
@@ -379,34 +282,6 @@ def get_gpu_memory_manager() -> GPUMemoryManager:
     return gpu_memory_manager
 
 
-def initialize_worker_gpu_memory(device_id: int = 0):
-    """
-    初始化工作进程的GPU内存管理
-
-    Args:
-        device_id: GPU设备ID
-    """
-    try:
-        # 预热GPU
-        gpu_memory_manager.warm_up_gpu(device_id)
-
-        # 记录初始化状态
-        gpu_memory_manager.log_memory_state(f"工作进程初始化 (PID: {os.getpid()})", device_id)
-
-        logger.info(f"工作进程GPU内存初始化完成 (PID: {os.getpid()}, 设备: {device_id})")
-
-    except Exception as e:
-        logger.error(f"工作进程GPU内存初始化失败: {e}")
-
-
-def cleanup_worker_gpu_memory(device_id: int = 0):
-    """
-    清理工作进程的GPU内存
-
-    Args:
-        device_id: GPU设备ID
-    """
-    gpu_memory_manager.cleanup_worker_process(device_id)
 
 
 def log_gpu_memory_state(context: str = "", device_id: int = 0):
@@ -429,19 +304,3 @@ def force_cleanup_gpu_memory(device_id: int = None, aggressive: bool = False):
         aggressive: 是否使用激进清理
     """
     gpu_memory_manager.force_cleanup_memory(device_id, aggressive)
-
-
-
-
-def monitor_gpu_memory(device_id: int = 0, threshold: float = 0.9) -> Dict[str, Any]:
-    """
-    监控GPU内存使用情况的便捷函数
-
-    Args:
-        device_id: GPU设备ID
-        threshold: 使用率阈值
-
-    Returns:
-        Dict[str, Any]: 监控结果
-    """
-    return gpu_memory_manager.monitor_memory_usage(device_id, threshold)

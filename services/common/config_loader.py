@@ -19,6 +19,32 @@ from typing import Dict
 
 import yaml
 
+
+def _read_config_file() -> Dict[str, Any]:
+    """
+    统一的配置文件读取逻辑。
+
+    该函数被所有配置读取函数调用，提供统一的文件读取、错误处理和日志记录。
+
+    Returns:
+        Dict[str, Any]: 配置字典，如果读取失败返回空字典
+    """
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(current_dir, '..', '..', 'config.yml')
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        return config if config else {}
+    except FileNotFoundError:
+        logger.error("配置文件未找到")
+        return {}
+    except Exception as e:
+        logger.error(f"读取配置文件时出错: {e}")
+        return {}
+
+
 def get_config() -> Dict[str, Any]:
     """
     实时读取并返回全局配置字典。
@@ -29,30 +55,13 @@ def get_config() -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: 包含所有配置的字典。
     """
-    config_path = ""
-    try:
-        # 配置文件位于项目根目录，此文件位于 services/common/ 下
-        # 因此需要向上回溯两级目录
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, '..', '..', 'config.yml')
+    config = _read_config_file()
+    if not config:
+        logger.warning("配置文件为空或读取失败，返回空字典")
+    # 减少日志频率，避免大量日志输出
+    # logger.debug(f"配置文件实时读取成功")
+    return config
 
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-
-        if config:
-            # 减少日志频率，避免大量日志输出
-            # logger.debug(f"配置文件 {config_path} 实时读取成功。")
-            return config
-        else:
-            logger.error(f"配置文件 {config_path} 为空或格式错误。")
-            return {}
-
-    except FileNotFoundError:
-        logger.error(f"无法在路径 '{config_path}' 找到 config.yml 文件。")
-        return {}
-    except Exception as e:
-        logger.error(f"加载 config.yml 时发生未知错误: {e}")
-        return {}
 
 def get_cleanup_temp_files_config() -> bool:
     """
@@ -64,37 +73,21 @@ def get_cleanup_temp_files_config() -> bool:
     Returns:
         bool: True表示需要清理临时文件，False表示保留临时文件。默认为True。
     """
-    try:
-        # 每次都重新读取配置文件，确保获取最新配置
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, '..', '..', 'config.yml')
-
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-
-        if not config:
-            logger.warning("配置文件为空，使用默认值 cleanup_temp_files=True")
-            return True
-
-        core_config = config.get('core', {})
-        cleanup_config = core_config.get('cleanup_temp_files', True)  # 默认为True
-
-        logger.info(f"实时读取配置 cleanup_temp_files: {cleanup_config}")
-
-        # 确保返回的是boolean类型
-        if isinstance(cleanup_config, bool):
-            return cleanup_config
-        elif isinstance(cleanup_config, str):
-            return cleanup_config.lower() in ('true', '1', 'yes', 'on')
-        else:
-            logger.warning(f"cleanup_temp_files 配置值 '{cleanup_config}' 格式不正确，使用默认值 True")
-            return True
-
-    except FileNotFoundError:
-        logger.error("配置文件未找到，使用默认值 cleanup_temp_files=True")
+    config = _read_config_file()
+    if not config:
+        logger.warning("配置文件为空，使用默认值 cleanup_temp_files=True")
         return True
-    except Exception as e:
-        logger.error(f"读取配置文件时出错: {e}，使用默认值 cleanup_temp_files=True")
+
+    cleanup_config = config.get('core', {}).get('cleanup_temp_files', True)
+    logger.info(f"实时读取配置 cleanup_temp_files: {cleanup_config}")
+
+    # 确保返回的是boolean类型
+    if isinstance(cleanup_config, bool):
+        return cleanup_config
+    elif isinstance(cleanup_config, str):
+        return cleanup_config.lower() in ('true', '1', 'yes', 'on')
+    else:
+        logger.warning(f"cleanup_temp_files 配置值 '{cleanup_config}' 格式不正确，使用默认值 True")
         return True
 
 
@@ -115,36 +108,22 @@ def get_gpu_lock_config() -> Dict[str, Any]:
             - use_event_driven: 是否启用事件驱动机制（Redis Pub/Sub）
             - fallback_timeout: 事件驱动回退超时时间（秒）
     """
-    try:
-        # 每次都重新读取配置文件，确保获取最新配置
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, '..', '..', 'config.yml')
-
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-
-        if not config:
-            logger.warning("配置文件为空，使用默认GPU锁配置")
-            return _get_default_gpu_lock_config()
-
-        gpu_lock_config = config.get('gpu_lock', {})
-
-        # 使用默认值填充缺失的配置项
-        default_config = _get_default_gpu_lock_config()
-        final_config = default_config.copy()
-        final_config.update(gpu_lock_config)
-
-        logger.info(f"实时读取GPU锁配置: {final_config}")
-
-        # 验证配置值的合法性
-        return _validate_gpu_lock_config(final_config)
-
-    except FileNotFoundError:
-        logger.error("配置文件未找到，使用默认GPU锁配置")
+    config = _read_config_file()
+    if not config:
+        logger.warning("配置文件为空，使用默认GPU锁配置")
         return _get_default_gpu_lock_config()
-    except Exception as e:
-        logger.error(f"读取GPU锁配置时出错: {e}，使用默认配置")
-        return _get_default_gpu_lock_config()
+
+    gpu_lock_config = config.get('gpu_lock', {})
+
+    # 使用默认值填充缺失的配置项
+    default_config = _get_default_gpu_lock_config()
+    final_config = default_config.copy()
+    final_config.update(gpu_lock_config)
+
+    logger.info(f"实时读取GPU锁配置: {final_config}")
+
+    # 验证配置值的合法性
+    return _validate_gpu_lock_config(final_config)
 
 
 def _get_default_gpu_lock_config() -> Dict[str, Any]:
@@ -178,33 +157,21 @@ def get_gpu_lock_monitor_config() -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: 包含GPU锁监控配置的字典
     """
-    try:
-        # 每次都重新读取配置文件，确保获取最新配置
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(current_dir, '..', '..', 'config.yml')
-
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-
-        if not config:
-            logger.warning("配置文件为空，使用默认GPU锁监控配置")
-            return _get_default_gpu_lock_monitor_config()
-
-        monitor_config = config.get('gpu_lock_monitor', {})
-
-        # 使用默认值填充缺失的配置项
-        default_config = _get_default_gpu_lock_monitor_config()
-        for key, value in default_config.items():
-            if key not in monitor_config:
-                monitor_config[key] = value
-
-        # 验证配置的合法性
-        validated_config = _validate_gpu_lock_monitor_config(monitor_config)
-        return validated_config
-
-    except Exception as e:
-        logger.error(f"读取GPU锁监控配置失败: {e}，使用默认配置")
+    config = _read_config_file()
+    if not config:
+        logger.warning("配置文件为空，使用默认GPU锁监控配置")
         return _get_default_gpu_lock_monitor_config()
+
+    monitor_config = config.get('gpu_lock_monitor', {})
+
+    # 使用默认值填充缺失的配置项
+    default_config = _get_default_gpu_lock_monitor_config()
+    for key, value in default_config.items():
+        if key not in monitor_config:
+            monitor_config[key] = value
+
+    # 验证配置的合法性
+    return _validate_gpu_lock_monitor_config(monitor_config)
 
 
 def _get_default_gpu_lock_monitor_config() -> Dict[str, Any]:

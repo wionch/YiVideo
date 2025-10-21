@@ -50,7 +50,7 @@ class ThreadSafeModelManager:
 
     def _load_config(self) -> ModelConfig:
         """从配置文件加载模型配置"""
-        cfg = CONFIG.get('whisperx_service', {})
+        cfg = CONFIG.get('faster_whisper_service', {})
 
         return ModelConfig(
             model_name=cfg.get('model_name', 'large-v2'),

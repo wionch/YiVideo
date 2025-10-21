@@ -930,7 +930,7 @@ def generate_subtitles(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] =================================")
 
         # 加载配置
-        whisperx_config = CONFIG.get('whisperx_service', {})
+        whisperx_config = CONFIG.get('faster_whisper_service', {})
         enable_diarization = whisperx_config.get('enable_diarization', False)
         show_speaker_labels = whisperx_config.get('show_speaker_labels', True)
         enable_word_timestamps = whisperx_config.get('enable_word_timestamps', True)
@@ -1141,10 +1141,75 @@ def generate_subtitles(self, context: dict) -> dict:
             except Exception as e:
                 logger.warning(f"[{stage_name}] 生成词级时间戳JSON文件失败: {e}")
 
+        # === 字幕校正功能集成 ===
+        # 检查是否启用字幕校正
+        enable_correction = workflow_context.input_params.get('enable_subtitle_correction', False)
+        correction_provider = workflow_context.input_params.get('correction_provider', None)
+
+        if enable_correction and subtitle_path:
+            logger.info(f"[{stage_name}] ========== 启用AI字幕校正 ==========")
+            logger.info(f"[{stage_name}] 校正提供商: {correction_provider or '使用默认配置'}")
+
+            try:
+                # 导入字幕校正模块
+                from services.common.subtitle import SubtitleCorrector
+
+                # 创建字幕校正器
+                corrector = SubtitleCorrector(provider=correction_provider)
+
+                # 执行字幕校正
+                logger.info(f"[{stage_name}] 开始AI字幕校正...")
+                import asyncio
+
+                # 在同步函数中运行异步校正
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    correction_result = loop.run_until_complete(
+                        corrector.correct_subtitle_file(subtitle_path=subtitle_path)
+                    )
+                finally:
+                    loop.close()
+
+                if correction_result.success:
+                    # 将校正结果添加到输出数据
+                    output_data["corrected_subtitle_path"] = correction_result.corrected_subtitle_path
+                    output_data["correction_statistics"] = correction_result.statistics
+                    output_data["correction_provider_used"] = correction_result.provider_used
+
+                    logger.info(f"[{stage_name}] ✅ 字幕校正完成!")
+                    logger.info(f"[{stage_name}] 校正后字幕: {correction_result.corrected_subtitle_path}")
+                    logger.info(f"[{stage_name}] 使用提供商: {correction_result.provider_used}")
+                    logger.info(f"[{stage_name}] 处理时间: {correction_result.processing_time:.2f}秒")
+                    logger.info(f"[{stage_name}] 统计信息: {correction_result.statistics}")
+
+                    # 如果启用备份，备份原始字幕
+                    if corrector.config.backup_original:
+                        import shutil
+                        backup_path = subtitle_path.replace('.srt', '_original.srt')
+                        shutil.copy2(subtitle_path, backup_path)
+                        output_data["original_subtitle_backup"] = backup_path
+                        logger.info(f"[{stage_name}] 原始字幕已备份: {backup_path}")
+
+                else:
+                    logger.error(f"[{stage_name}] ❌ 字幕校正失败: {correction_result.error_message}")
+                    output_data["correction_error"] = correction_result.error_message
+
+            except ImportError as e:
+                logger.error(f"[{stage_name}] 字幕校正模块导入失败: {e}")
+                logger.error(f"[{stage_name}] 请确保字幕校正模块已正确安装")
+                output_data["correction_error"] = f"模块导入失败: {str(e)}"
+
+            except Exception as e:
+                logger.error(f"[{stage_name}] 字幕校正过程中发生错误: {e}", exc_info=True)
+                output_data["correction_error"] = f"校正过程错误: {str(e)}"
+        else:
+            logger.debug(f"[{stage_name}] 字幕校正功能未启用")
+
         # 标记任务成功
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
-        
+
         logger.info(f"[{stage_name}] 字幕生成任务完成")
 
     except Exception as e:
@@ -1239,7 +1304,7 @@ def transcribe_audio(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] =================================")
 
         # 加载WhisperX配置
-        whisperx_config = CONFIG.get('whisperx_service', {})
+        whisperx_config = CONFIG.get('faster_whisper_service', {})
         enable_word_timestamps = whisperx_config.get('enable_word_timestamps', True)
 
         logger.info(f"[{stage_name}] 开始语音转录流程")
@@ -1427,7 +1492,7 @@ def diarize_speakers(self, context: dict) -> dict:
             transcribe_data = None
 
         # 加载WhisperX配置
-        whisperx_config = CONFIG.get('whisperx_service', {})
+        whisperx_config = CONFIG.get('faster_whisper_service', {})
         enable_diarization = whisperx_config.get('enable_diarization', False)
 
         logger.info(f"[{stage_name}] 开始说话人分离流程")
@@ -1645,7 +1710,7 @@ def generate_subtitle_files(self, context: dict) -> dict:
             logger.info(f"[{stage_name}] 从Redis内存加载segments (旧格式)")
 
         # 加载WhisperX配置（提前定义以便在说话人匹配中使用）
-        whisperx_config = CONFIG.get('whisperx_service', {})
+        whisperx_config = CONFIG.get('faster_whisper_service', {})
 
         # 检查是否有说话人分离结果
         speaker_segments = None

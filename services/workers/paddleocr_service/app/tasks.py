@@ -38,8 +38,8 @@ from services.common.config_loader import get_cleanup_temp_files_config
 # 导入标准上下文、锁和状态管理器
 from services.common.context import StageExecution
 from services.common.context import WorkflowContext
-# 使用智能锁选择器，根据配置自动选择V1或V2
-from services.common.lock_selector import gpu_lock
+# 使用智能GPU锁机制
+from services.common.locks import gpu_lock
 
 # --- 日志配置 ---
 # 日志已统一管理，使用 services.common.logger

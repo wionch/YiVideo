@@ -36,14 +36,16 @@
 
 ## 配置
 
-通过 `config.yml` 的 `whisperx_service` 部分配置（兼容配置）：
+通过 `config.yml` 的 `faster_whisper_service` 部分配置：
 
 ```yaml
-whisperx_service:
-  model_name: "base"
+faster_whisper_service:
+  model_name: "Systran/faster-whisper-large-v3"
   device: "cuda"
   compute_type: "float16"
   enable_word_timestamps: true
+  enable_gpu_lock: true
+  gpu_device_id: 0
 ```
 
 ## Celery 队列

@@ -24,8 +24,8 @@ from services.common import state_manager
 # 导入项目定义的标准上下文、状态管理和分布式锁
 from services.common.context import StageExecution
 from services.common.context import WorkflowContext
-# 使用智能锁选择器，根据配置自动选择V1或V2
-from services.common.lock_selector import gpu_lock
+# 使用智能GPU锁机制
+from services.common.locks import gpu_lock
 
 # 导入该服务内部的核心视频处理逻辑模块
 from .modules.video_decoder import extract_random_frames

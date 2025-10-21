@@ -32,7 +32,13 @@
       "Bash(mkdir:*)",
       "Bash(docker:*)",
       "Bash(rm:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "mcp__exa__web_search_exa",
+      "WebFetch(domain:www.volcengine.com)",
+      "WebFetch(domain:api-docs.deepseek.com)",
+      "WebFetch(domain:www.datastudios.org)",
+      "mcp__serena__think_about_collected_information"
     ],
     "deny": [],
     "ask": []

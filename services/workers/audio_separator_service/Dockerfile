@@ -77,8 +77,7 @@ COPY ./services/workers/audio_separator_service /app/services/workers/audio_sepa
 RUN mkdir -p \
     /app/.cache/audio_separator \
     /models/uvr_mdx \
-    /app/services/workers/audio_separator_service/logs \
-    /share/workflows/audio_separated
+    /app/services/workers/audio_separator_service/logs
 
 # 设置目录权限
 RUN chmod -R 755 /models /share /app/.cache

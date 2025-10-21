@@ -201,17 +201,17 @@ elif lock_age >= warning_threshold:
 
 #### 心跳管理
 ```python
-# services/common/task_heartbeat_integration.py
-class TaskHeartbeatIntegration:
-    """任务心跳集成管理器"""
+# services/api_gateway/app/monitoring/heartbeat_manager.py
+class TaskHeartbeatManager:
+    """任务心跳管理器（由API Gateway统一管理）"""
 
-    def start_heartbeat(self, task_id: str):
-        """启动心跳线程"""
+    def start_task_heartbeat(self, task_id: str):
+        """启动任务心跳"""
 
-    def update_heartbeat(self, task_id: str, status: str, progress: float, message: str):
+    def update_task_heartbeat(self, task_id: str, status: str, progress: float, message: str):
         """更新心跳状态"""
 
-    def stop_heartbeat(self, task_id: str):
+    def stop_task_heartbeat(self, task_id: str):
         """停止心跳并清理数据"""
 ```
 
@@ -389,11 +389,10 @@ GET /api/v1/monitoring/monitor/status
 services/
 ├── common/
 │   ├── locks.py                    # GPU锁管理器
-│   ├── config_loader.py            # 配置加载器
-│   └── task_heartbeat_integration.py # 任务心跳集成
+│   └── config_loader.py            # 配置加载器
 └── api_gateway/app/monitoring/
     ├── gpu_lock_monitor.py         # GPU锁监控器
-    ├── heartbeat_manager.py        # 心跳管理器
+    ├── heartbeat_manager.py        # 任务心跳管理器
     ├── timeout_manager.py          # 超时管理器
     ├── api_endpoints.py            # 监控API端点
     └── __init__.py                 # 监控模块初始化
@@ -476,34 +475,29 @@ def _diarize_speakers_with_gpu_lock(audio_path: str, transcribe_result: dict, wh
 
 #### 手动管理GPU锁
 ```python
-from services.common.locks import lock_manager
-from services.common.task_heartbeat_integration import (
-    start_task_heartbeat,
-    update_task_heartbeat,
-    stop_task_heartbeat
-)
+from services.common.locks import lock_manager, get_gpu_lock_config
 
 def manual_gpu_task():
     task_name = "manual_gpu_task"
     lock_key = "gpu_lock:0"
+    config = get_gpu_lock_config()
 
     # 获取锁
     if lock_manager.acquire_lock_with_smart_polling(task_name, lock_key, config):
         try:
-            # 启动心跳
-            start_task_heartbeat(task_name)
-
-            # 更新进度
-            update_task_heartbeat(task_name, "running", 50, "处理中")
-
-            # 执行任务
+            # 执行任务（心跳管理由@gpu_lock装饰器自动处理）
             result = do_gpu_work()
 
             return result
         finally:
             # 清理资源
-            stop_task_heartbeat(task_name)
             lock_manager.release_lock(task_name, lock_key)
+
+# 推荐使用装饰器方式，自动管理锁和心跳
+@gpu_lock()
+def recommended_gpu_task():
+    """使用装饰器自动管理GPU锁和心跳"""
+    return do_gpu_work()
 ```
 
 ### 2. 监控和调试

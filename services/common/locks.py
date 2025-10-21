@@ -21,7 +21,6 @@ from redis import Redis
 # 导入配置加载器以支持运行时配置
 from services.common.config_loader import get_gpu_lock_config
 from services.common.logger import get_logger
-from services.common.task_heartbeat_integration import update_task_heartbeat, stop_task_heartbeat
 
 logger = get_logger('locks')
 
@@ -710,9 +709,6 @@ def gpu_lock(lock_key: str = "gpu_lock:0",
                     # 成功获取锁，执行任务
                     logger.info(f"任务 {task_name} 开始执行")
 
-                    # 启动任务心跳
-                    update_task_heartbeat(task_name, "running", 0, f"GPU任务开始执行 ({mechanism.value})")
-
                     result = func(self, *args, **kwargs)
                     logger.info(f"任务 {task_name} 执行完成")
 
@@ -720,20 +716,16 @@ def gpu_lock(lock_key: str = "gpu_lock:0",
                     execution_time = time.time() - task_start_time
                     lock_manager.record_execution_time(execution_time)
 
-                    # 更新任务心跳为完成状态
-                    update_task_heartbeat(task_name, "completed", 100, "GPU任务执行完成")
-
                     # 记录成功统计
                     stats = lock_manager.get_statistics()
                     logger.info(f"锁统计: 成功率 {stats['success_rate']:.2%}, 事件驱动率 {stats['event_driven_rate']:.2%}, 执行时间: {execution_time:.2f}秒")
 
                     return result
                 except Exception as e:
-                    # 更新任务心跳为失败状态
-                    update_task_heartbeat(task_name, "failed", None, f"GPU任务执行失败: {e}")
+                    logger.error(f"任务 {task_name} 执行失败: {e}")
                     raise
                 finally:
-                    # 任务执行完毕，释放锁并停止心跳
+                    # 任务执行完毕，释放锁
                     # GPU显存清理 - 确保任务完成后显存被释放
                     try:
                         from services.common.gpu_memory_manager import log_gpu_memory_state, force_cleanup_gpu_memory
@@ -744,7 +736,6 @@ def gpu_lock(lock_key: str = "gpu_lock:0",
                         logger.warning(f"任务 {task_name} GPU显存清理失败: {cleanup_e}")
 
                     lock_manager.release_lock(task_name, lock_key, "normal")
-                    stop_task_heartbeat(task_name)
             else:
                 # 获取锁失败，抛出异常
                 error_msg = f"任务 {task_name} 无法获取锁 '{lock_key}'，任务放弃执行"

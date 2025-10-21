@@ -185,19 +185,9 @@ faster_whisper_service:
   # 转录时的批处理大小，根据显存调整
   batch_size: 4
 
-  # === Faster-Whisper 优化配置 ===
-  # 启用 Faster-Whisper 后端以获得4倍性能提升
-  use_faster_whisper: true
-  # 并发线程数，建议2-8，根据CPU核心数调整
-  faster_whisper_threads: 4
-  # 模型量化方式，推荐 "float16" 或 "int8"
-  model_quantization: "float16"
-
   # === 高级功能配置 ===
   # 启用词级时间戳（推荐启用）
   enable_word_timestamps: true
-  # 启用说话人分离（可选，会增加计算开销）
-  enable_diarization: true
 
   # === 词级说话人匹配配置 ===
   # 是否启用词级时间戳精确匹配（推荐启用）
@@ -317,10 +307,9 @@ audio_separator_service:
   # === 输出配置 ===
   # 输出音频格式: flac(无损推荐), wav(无损), mp3(压缩)
   output_format: "flac"
-  # 分离后音频文件存储目录（工作流中间数据）
-  output_dir: "/share/workflows/audio_separated"
   # 音频归一化阈值（0.0-1.0）
   normalization_threshold: 0.9
+  # 注意：输出目录已改为按工作流ID动态创建: /share/workflows/{workflow_id}/audio/audio_separated
 
   # === 性能配置 ===
   # MDX 模型分段大小（影响显存占用和速度）
@@ -339,15 +328,6 @@ audio_separator_service:
   # Demucs模型 shifts参数（提高质量但降低速度）
   # 范围: 0-10，值越大质量越高但速度越慢
   demucs_shifts: 2
-  
-  # Demucs模型是否启用多进程
-  # 值: 0表示使用所有可用CPU核心，正数表示指定进程数
-  # 注意: 此参数在audio-separator库中可能不被使用
-  demucs_workers: 1
-  
-  # Demucs模型设备ID
-  # 值: 0表示第一个GPU，依此类推
-  demucs_gpu_id: 0
 
   # === 文件管理配置 ===
   # 是否自动清理临时文件
@@ -445,8 +425,6 @@ ffmpeg_service:
     worker_processes: 0
     # 批处理大小（用于批量分割）
     batch_size: 10
-    # 内存使用限制（MB）
-    memory_limit: 1024
     # 是否启用进度回调
     enable_progress_callback: true
 
@@ -481,13 +459,6 @@ pyannote_audio_service:
   # true: 使用付费的 precision-2 模型，需要在 .env 文件中配置 PYANNOTEAI_API_KEY
   # 注意: 此功能开关仅在配置文件中管理，不被环境变量覆盖
   use_paid_api: false
-
-  # === 模型配置 ===
-  # 说话人分离模型选择 (自动根据 use_paid_api 选择)
-  # 免费模式: pyannote/speaker-diarization-community-1 (需要 .env 中的 HF_TOKEN)
-  # 付费模式: pyannote/speaker-diarization-precision-2 (需要 .env 中的 PYANNOTEAI_API_KEY)
-  # 注意: 实际使用的模型会根据 use_paid_api 配置自动选择，此处仅为参考
-  diarization_model: "pyannote/speaker-diarization-community-1"
 
   # === 处理配置 ===
   # 音频采样率 (与whisperx_service保持一致)
@@ -524,8 +495,6 @@ pyannote_audio_service:
   enable_cache: true
   # 缓存过期时间（小时）
   cache_ttl_hours: 24
-  # 是否启用并行处理
-  enable_parallel: false
 
   # === 监控配置 ===
   # 是否启用性能监控
@@ -534,3 +503,138 @@ pyannote_audio_service:
   log_level: "INFO"
   # 是否记录详细的处理日志
   verbose_processing: false
+
+# 15. 字幕校正服务配置 (新增)
+# 基于AI的字幕校正功能，支持多个AI服务提供商进行字幕质量优化
+subtitle_correction:
+  # === 基础配置 ===
+  # 默认AI服务提供商
+  default_provider: deepseek
+
+  # === 处理配置 ===
+  # 单次处理的最大字符数（基于智能token估算优化）
+  # 注意：虽然DeepSeek支持128K tokens，但为了稳定性推荐使用较小值
+  # 系统会根据实际情况自动判断是否需要分批处理
+  max_subtitle_length: 8000
+  # AI响应的最大令牌数
+  max_tokens: 8000
+  # AI响应温度参数（0.0-2.0，越低越保守）
+  temperature: 0.1
+  # API请求超时时间（秒）
+  timeout_seconds: 600
+
+  # === 文件配置 ===
+  # 系统提示词文件路径
+  system_prompt_path: "/app/config/system_prompt/subtitle_optimization.md"
+  # 输出字幕格式
+  output_format: "srt"
+  # 是否备份原始字幕文件
+  backup_original: true
+
+  # === 处理选项 ===
+  # 是否启用批量处理（长字幕自动分批）
+  batch_processing: true
+  # 批处理大小
+  batch_size: 5
+  # 是否保持原始时间戳（推荐启用）
+  preserve_timestamps: true
+  # 最大重试次数
+  max_retry_attempts: 3
+  # 重试延迟时间（秒）
+  retry_delay: 2.0
+
+  # === 本地合并配置 ===
+  # 是否启用本地短字幕合并预处理
+  enable_local_merge: true
+  # 短字幕的最大字符数（1个字的字幕会尝试合并）
+  local_merge_max_chars: 1
+  # 合并后每行最大字符数（超过此长度不会合并）
+  local_merge_max_line_length: 20
+
+  # === AI服务提供商配置 ===
+  providers:
+    # DeepSeek (deepseek-chat)
+    deepseek:
+      # API密钥（从环境变量 DEEPSEEK_API_KEY 读取）
+      api_key: ""
+      # API基础URL
+      api_base_url: "https://api.deepseek.com/chat/completions"
+      # 模型名称
+      model: "deepseek-chat"
+      # 最大令牌数（可覆盖全局设置）
+      max_tokens: 8000
+      # 温度参数（可覆盖全局设置）
+      temperature: 0.1
+      # 请求超时时间（秒）
+      timeout: 300
+      # 是否启用此提供商
+      enabled: true
+
+    # Google Gemini (gemini-pro)
+    gemini:
+      # API密钥（从环境变量 GEMINI_API_KEY 读取，复用现有配置）
+      api_key: ""
+      # API基础URL
+      api_base_url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+      # 模型名称
+      model: "gemini-pro"
+      max_tokens: 8000
+      temperature: 0.1
+      timeout: 300
+      enabled: true
+
+    # 智谱AI (glm-4)
+    zhipu:
+      # API密钥（从环境变量 ZHIPU_API_KEY 读取）
+      api_key: ""
+      # API基础URL
+      api_base_url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+      # 模型名称
+      model: "glm-4"
+      max_tokens: 8000
+      temperature: 0.1
+      timeout: 300
+      enabled: true
+
+    # 火山引擎 (doubao-pro-32k)
+    volcengine:
+      # API密钥（从环境变量 VOLCENGINE_API_KEY 读取）
+      api_key: ""
+      # API基础URL
+      api_base_url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+      # 模型名称
+      model: "doubao-pro-32k"
+      # 端点ID（如果需要）
+      endpoint_id: ""
+      max_tokens: 8000
+      temperature: 0.1
+      timeout: 300
+      enabled: true
+
+  # === 质量控制 ===
+  # 是否启用结果验证
+  enable_validation: true
+  # 最小校正质量分数（0.0-1.0）
+  min_quality_score: 0.7
+  # 是否启用自动重试（质量不达标时）
+  auto_retry_on_low_quality: false
+
+  # === 性能优化 ===
+  # 是否启用响应缓存
+  enable_cache: false
+  # 缓存过期时间（小时）
+  cache_ttl_hours: 24
+  # 是否启用并发处理（多批处理）
+  enable_concurrent_batches: false
+  # 最大并发批数
+  max_concurrent_batches: 2
+
+  # === 监控配置 ===
+  # 是否启用性能监控
+  enable_monitoring: true
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+  # 是否记录详细的处理日志
+  verbose_processing: false
+  # 是否记录API调用统计
+  log_api_stats: true

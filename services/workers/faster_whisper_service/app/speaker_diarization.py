@@ -47,7 +47,7 @@ class SpeakerDiarizerV2:
         Args:
             config: 配置字典，如果为None则从CONFIG加载
         """
-        self.config = config or CONFIG.get('whisperx_service', {})
+        self.config = config or CONFIG.get('faster_whisper_service', {})
         self.pipeline = None
         self.device = self._get_device()
 
