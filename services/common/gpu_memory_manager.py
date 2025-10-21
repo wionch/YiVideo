@@ -304,3 +304,24 @@ def force_cleanup_gpu_memory(device_id: int = None, aggressive: bool = False):
         aggressive: 是否使用激进清理
     """
     gpu_memory_manager.force_cleanup_memory(device_id, aggressive)
+
+
+def initialize_worker_gpu_memory(device_id: int = 0):
+    """初始化worker GPU内存"""
+    # 实现逻辑或映射到现有功能
+    logger.info(f"Initializing GPU memory for device {device_id}")
+    # 清理现有GPU内存
+    force_cleanup_gpu_memory(device_id=device_id)
+
+
+def cleanup_worker_gpu_memory(device_id: int = 0):
+    """清理worker GPU内存"""
+    logger.info(f"Cleaning up GPU memory for device {device_id}")
+    force_cleanup_gpu_memory(device_id=device_id)
+
+
+def cleanup_paddleocr_processes():
+    """清理PaddleOCR相关进程和内存"""
+    logger.info("Cleaning up PaddleOCR processes")
+    # 强制清理GPU内存
+    force_cleanup_gpu_memory(aggressive=True)
