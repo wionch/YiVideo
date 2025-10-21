@@ -291,191 +291,170 @@ def _transcribe_audio_without_lock(audio_path: str, whisperx_config: dict, stage
 
 def _execute_transcription(audio_path: str, whisperx_config: dict, stage_name: str) -> dict:
     """
-    执行语音转录 - 使用 subprocess 隔离模式
-
-    改造说明:
-    - 原: 直接在 Celery worker 进程中加载 WhisperModel
-    - 新: 通过 subprocess 调用独立推理脚本
-    - 原因: 解决 Celery prefork pool 与 CUDA 初始化冲突
-
+    执行语音转录的核心逻辑（无GPU锁）
+    
     Args:
         audio_path: 音频文件路径
         whisperx_config: WhisperX配置
         stage_name: 阶段名称（用于日志）
-
+    
     Returns:
         dict: 转录结果，包含segments、audio_path、audio_duration等信息
     """
-    import subprocess
-    import sys
-    import json
-    from pathlib import Path
-
-    logger.info(f"[{stage_name}] 开始处理音频 (subprocess模式): {audio_path}")
+    logger.info(f"[{stage_name}] 开始处理音频: {audio_path}")
     
     # 验证音频文件是否存在
     if not os.path.exists(audio_path):
         error_msg = f"音频文件不存在: {audio_path}"
         logger.error(f"[{stage_name}] {error_msg}")
+        # 抛出ValueError而不是FileNotFoundError，避免触发Celery重试机制
         raise ValueError(error_msg)
 
-    # ===== 参数提取 =====
-    model_name = whisperx_config.get('model_name', 'large-v3')
-    device = whisperx_config.get('device', 'cuda')
-    compute_type = whisperx_config.get('compute_type', 'float16')
-    language = whisperx_config.get('language', None)
-    beam_size = whisperx_config.get('beam_size', 3)
-    best_of = whisperx_config.get('best_of', 3)
-    temperature = whisperx_config.get('temperature', [0.0, 0.2, 0.4, 0.6])
-    word_timestamps = whisperx_config.get('word_timestamps', True)
-    vad_filter = whisperx_config.get('vad_filter', False)
-    vad_parameters = whisperx_config.get('vad_parameters', None)
+    # 加载配置参数
+    model_name = whisperx_config.get('model_name', 'base')
+    device = whisperx_config.get('device', 'cpu')
+    compute_type = whisperx_config.get('compute_type', 'float32')
+    enable_word_timestamps = whisperx_config.get('enable_word_timestamps', True)
 
-    # ===== 准备输出路径 =====
-    # 使用临时目录存储推理结果
-    import tempfile
-    temp_dir = tempfile.gettempdir()
-    output_file = Path(temp_dir) / f"faster_whisper_result_{int(time.time() * 1000)}.json"
+    logger.info(f"[{stage_name}] 使用配置: {model_name}")
+    logger.info(f"[{stage_name}] 设备: {device}, 计算类型: {compute_type}")
 
-    logger.info(f"[{stage_name}] 准备通过 subprocess 执行转录")
-    logger.info(f"[{stage_name}] 音频文件: {audio_path}")
-    logger.info(f"[{stage_name}] 结果文件: {output_file}")
+    # CUDA检测和设备自动切换
+    if device == 'cuda':
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                logger.warning(f"[{stage_name}] CUDA不可用，自动切换到CPU模式")
+                device = 'cpu'
+                if compute_type == 'float16':
+                    compute_type = 'float32'
+                    logger.info(f"[{stage_name}] CPU模式：自动调整计算类型为 float32")
+            else:
+                logger.info(f"[{stage_name}] CUDA可用，使用GPU模式")
+        except ImportError:
+            logger.warning(f"[{stage_name}] PyTorch未安装，自动切换到CPU模式")
+            device = 'cpu'
+            compute_type = 'float32'
 
-    # ===== 准备推理脚本路径 =====
-    current_dir = Path(__file__).parent
-    infer_script = current_dir / "faster_whisper_infer.py"
+    # 加载音频
+    import librosa
+    audio, sr = librosa.load(audio_path, sr=16000)  # 确保采样率为16kHz
+    audio_duration = len(audio) / sr
+    logger.info(f"[{stage_name}] 音频加载完成，时长: {audio_duration:.2f}s")
 
-    if not infer_script.exists():
-        raise FileNotFoundError(f"推理脚本不存在: {infer_script}")
+    # 检查Hugging Face Token是否已配置
+    hf_token = os.getenv('HF_TOKEN')
+    if hf_token:
+        logger.info(f"[{stage_name}] Hugging Face Token已配置，将使用环境变量中的token")
+    else:
+        logger.warning(f"[{stage_name}] 未找到Hugging Face Token，可能会遇到访问限制")
 
-    logger.info(f"[{stage_name}] 推理脚本: {infer_script}")
+    # 加载模型并转录
+    logger.info(f"[{stage_name}] 加载faster-whisper模型: {model_name} (使用原生API)")
+    
+    # 导入faster-whisper模型
+    from faster_whisper import WhisperModel
+    
+    # 直接创建faster-whisper模型实例
+    model = WhisperModel(
+        model_name,
+        device=device,
+        compute_type=compute_type
+    )
 
-    # ===== 构建命令 =====
-    cmd = [
-        sys.executable,  # 使用当前 Python 解释器
-        str(infer_script),
-        "--audio_path", str(audio_path),
-        "--output_file", str(output_file),
-        "--model_name", model_name,
-        "--device", device,
-        "--compute_type", compute_type,
-        "--beam_size", str(beam_size),
-        "--best_of", str(best_of),
-        "--temperature", ','.join(map(str, temperature)),
-    ]
+    logger.info(f"[{stage_name}] 开始转录...")
+    logger.info(f"[{stage_name}] 词级时间戳JSON文件生成: {'启用' if enable_word_timestamps else '禁用'}")
 
-    # 可选参数
-    if language:
-        cmd.extend(["--language", language])
+    # 执行转录 - 使用faster-whisper的原生API
+    transcribe_options = {
+        "beam_size": 3,
+        "best_of": 3,
+        "temperature": (0.0, 0.2, 0.4, 0.6),
+        "condition_on_previous_text": False,
+        "compression_ratio_threshold": 2.4,
+        "no_speech_threshold": 0.5,
+        "without_timestamps": False,
+        "word_timestamps": True,
+        "language": whisperx_config.get('language', None),
+    }
 
-    if word_timestamps:
-        cmd.append("--word_timestamps")
+    transcribe_start_time = time.time()
+    
+    # 使用faster-whisper的原生transcribe方法
+    segments_generator, info = model.transcribe(
+        audio,
+        **transcribe_options
+    )
+    
+    # 将生成器转换为列表，同时提取词级时间戳信息
+    segments = []
+    for segment in segments_generator:
+        # 转换Segment对象到字典格式
+        segment_dict = {
+            "start": segment.start,
+            "end": segment.end,
+            "text": segment.text,
+            "words": []  # 包含词级时间戳
+        }
+        
+        # 添加词级时间戳信息（如果存在）
+        if segment.words:
+            for word in segment.words:
+                word_dict = {
+                    "word": word.word,
+                    "start": word.start,
+                    "end": word.end,
+                    "probability": word.probability
+                }
+                segment_dict["words"].append(word_dict)
+        
+        segments.append(segment_dict)
+    
+    transcribe_duration = time.time() - transcribe_start_time
 
-    if vad_filter:
-        cmd.append("--vad_filter")
+    logger.info(f"[{stage_name}] 转录完成，耗时: {transcribe_duration:.2f}秒")
+    logger.info(f"[{stage_name}] 转录完成，词级时间戳已启用（确保时间戳准确度）")
 
-    if vad_parameters:
-        cmd.extend(["--vad_parameters", json.dumps(vad_parameters)])
-
-    # 日志命令
-    cmd_str = ' '.join(cmd)
-    logger.info(f"[{stage_name}] 执行命令: {cmd_str}")
-
-    # ===== 执行 subprocess =====
-    logger.info(f"[{stage_name}] 开始执行 subprocess 推理...")
-    start_time = time.time()
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=1800,  # 30 分钟超时
-            cwd=str(current_dir),
-            env=os.environ.copy()  # 继承环境变量（包括 CUDA_VISIBLE_DEVICES）
-        )
-
-        execution_time = time.time() - start_time
-        logger.info(f"[{stage_name}] subprocess 执行完成，耗时: {execution_time:.3f}s")
-
-        # ===== 检查执行结果 =====
-        if result.returncode != 0:
-            error_msg = f"subprocess 执行失败，返回码: {result.returncode}"
-            logger.error(f"[{stage_name}] {error_msg}")
-            logger.error(f"[{stage_name}] stdout: {result.stdout}")
-            logger.error(f"[{stage_name}] stderr: {result.stderr}")
-            raise RuntimeError(f"{error_msg}\nstderr: {result.stderr}")
-
-        logger.info(f"[{stage_name}] subprocess 执行成功")
-
-        # 记录 stderr 输出（推理脚本的日志）
-        if result.stderr:
-            logger.debug(f"[{stage_name}] subprocess stderr 输出:")
-            for line in result.stderr.strip().split('\n')[:20]:  # 只显示前20行
-                logger.debug(f"  | {line}")
-
-    except subprocess.TimeoutExpired as e:
-        error_msg = f"subprocess 执行超时 (30分钟)"
-        logger.error(f"[{stage_name}] {error_msg}")
-        raise RuntimeError(error_msg) from e
-
-    except Exception as e:
-        error_msg = f"subprocess 执行异常: {str(e)}"
-        logger.error(f"[{stage_name}] {error_msg}")
-        raise RuntimeError(error_msg) from e
-
-    # ===== 读取结果文件 =====
-    if not output_file.exists():
-        raise RuntimeError(f"推理结果文件不存在: {output_file}")
-
-    logger.info(f"[{stage_name}] 读取推理结果: {output_file}")
-
-    try:
-        with open(output_file, 'r', encoding='utf-8') as f:
-            result_data = json.load(f)
-    except json.JSONDecodeError as e:
-        logger.error(f"[{stage_name}] 结果文件 JSON 解析失败: {e}")
-        raise RuntimeError(f"结果文件 JSON 解析失败: {e}") from e
-
-    # ===== 验证结果 =====
-    if not result_data.get('success', False):
-        error_info = result_data.get('error', {})
-        error_msg = error_info.get('message', '未知错误')
-        error_type = error_info.get('type', 'Unknown')
-
-        logger.error(f"[{stage_name}] 推理失败: {error_type}: {error_msg}")
-        raise RuntimeError(f"推理失败: {error_type}: {error_msg}")
-
-    # ===== 提取结果数据 =====
-    segments_list = result_data.get('segments', [])
-    info_dict = result_data.get('info', {})
-    statistics = result_data.get('statistics', {})
-
-    logger.info(f"[{stage_name}] ========== 转录结果统计 ==========")
-    logger.info(f"[{stage_name}] 转录片段数: {statistics.get('total_segments', len(segments_list))}")
-    logger.info(f"[{stage_name}] 音频时长: {statistics.get('audio_duration', 0):.2f}s")
-    logger.info(f"[{stage_name}] 转录耗时: {statistics.get('transcribe_duration', 0):.2f}s")
-    logger.info(f"[{stage_name}] 检测语言: {statistics.get('language', 'unknown')}")
-    logger.info(f"[{stage_name}] =====================================")
-
-    # ===== 清理临时文件 =====
-    try:
-        output_file.unlink()
-        logger.debug(f"[{stage_name}] 已清理临时结果文件: {output_file}")
-    except Exception as e:
-        logger.warning(f"[{stage_name}] 清理临时文件失败: {e}")
-
-    # ===== 构建返回结果（保持与原格式兼容）=====
+    # 构建返回数据
     result = {
-        "segments": segments_list,
+        "segments": segments,
         "audio_path": audio_path,
-        "audio_duration": info_dict.get('duration', 0),
-        "language": info_dict.get('language'),
-        "transcribe_duration": statistics.get('transcribe_duration', 0),
+        "audio_duration": audio_duration,
+        "language": info.language,
+        "transcribe_duration": transcribe_duration,
         "model_name": model_name,
         "device": device,
-        "enable_word_timestamps": word_timestamps
+        "enable_word_timestamps": enable_word_timestamps
     }
+
+    # 显式释放faster-whisper模型
+    logger.info(f"[{stage_name}] 开始释放faster-whisper模型...")
+    try:
+        # 如果是CUDA模式，将模型移至CPU
+        if device == 'cuda':
+            import torch
+            if hasattr(model, 'model'):
+                # faster-whisper内部模型对象
+                if hasattr(model.model, 'cpu'):
+                    model.model.cpu()
+            # 尝试移动整个模型对象
+            if hasattr(model, 'cpu'):
+                model.cpu()
+
+        # 删除模型引用
+        del model
+        logger.info(f"[{stage_name}] faster-whisper模型已删除")
+
+        # 强制垃圾回收
+        import gc
+        collected = gc.collect()
+        logger.info(f"[{stage_name}] 垃圾回收: 清理了 {collected} 个对象")
+
+    except Exception as e:
+        logger.warning(f"[{stage_name}] 释放模型时出错: {e}")
+
+    # 执行GPU显存清理
+    _cleanup_gpu_memory(stage_name)
 
     return result
 
