@@ -11,7 +11,7 @@ from .subtitle_correction import SubtitleCorrector
 from .subtitle_parser import SubtitleEntry, SRTParser, parse_srt_file, write_srt_file
 
 # AI提供商
-from .ai_providers import get_ai_provider, AIProviderFactory
+from .ai_providers import AIProviderFactory
 
 # 字幕校正配置
 from .subtitle_correction_config import SubtitleCorrectionConfig
@@ -25,7 +25,6 @@ __all__ = [
     'parse_srt_file',
     'write_srt_file',
     # AI提供商
-    'get_ai_provider',
     'AIProviderFactory',
     # 配置
     'SubtitleCorrectionConfig',

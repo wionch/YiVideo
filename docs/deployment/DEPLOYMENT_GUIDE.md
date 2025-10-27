@@ -54,12 +54,12 @@ python3 --version
 
 ```bash
 # 创建专用用户
-sudo useradd -m -s /bin/bash whisperx
-sudo usermod -aG docker whisperx
-sudo usermod -aG sudo whisperx
+sudo useradd -m -s /bin/bash yivideo
+sudo usermod -aG docker yivideo
+sudo usermod -aG sudo yivideo
 
 # 切换到专用用户
-sudo su - whisperx
+sudo su - yivideo
 ```
 
 ---
@@ -162,7 +162,7 @@ mkdir -p /opt/yivideo/{logs,data,backup,config}
 mkdir -p /opt/yivideo/videos/{input,output,temp}
 
 # 设置权限
-sudo chown -R whisperx:whisperx /opt/yivideo
+sudo chown -R yivideo:yivideo /opt/yivideo
 chmod -R 755 /opt/yivideo
 ```
 
@@ -192,8 +192,8 @@ NVIDIA_VISIBLE_DEVICES=0
 
 # WhisperX 配置 (新增)
 HF_TOKEN=hf_your_huggingface_token_here
-WHISPERX_MODEL_CACHE_DIR=/app/.cache/whisperx
 HF_HOME=/app/.cache/huggingface
+# 模型缓存目录现在通过 config.yml 进行配置
 TRANSFORMERS_CACHE=/app/.cache/transformers
 
 # 监控配置
@@ -216,7 +216,7 @@ sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /etc/ssl/yivideo/
 sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem /etc/ssl/yivideo/
 
 # 设置权限
-sudo chown -R whisperx:whisperx /etc/ssl/yivideo
+sudo chown -R yivideo:yivideo /etc/ssl/yivideo
 sudo chmod 600 /etc/ssl/yivideo/*
 ```
 
@@ -253,7 +253,7 @@ curl http://localhost:3000/api/health
 
 ```yaml
 # config.yml
-whisperx_service:
+faster_whisper_service:
   # 性能优化
   model_name: "large-v2"
   compute_type: "float16"
@@ -353,9 +353,13 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  - job_name: 'whisperx'
+  - job_name: 'faster_whisper'
     static_configs:
-      - targets: ['whisperx_service:8080']
+      - targets: ['faster_whisper_service:8000']
+    scrape_interval: 30s
+  - job_name: 'pyannote_audio'
+    static_configs:
+      - targets: ['pyannote_audio_service:8000']
     scrape_interval: 30s
     metrics_path: '/metrics'
 
@@ -395,10 +399,10 @@ datasources:
 ```yaml
 # monitoring/rules/alerts.yml
 groups:
-  - name: whisperx.alerts
+  - name: asr.alerts
     rules:
-      - alert: WhisperxExecutionTimeHigh
-        expr: whisperx_execution_time_seconds > 300
+      - alert: FasterWhisperExecutionTimeHigh
+        expr: faster_whisper_execution_time_seconds > 300
         for: 5m
         labels:
           severity: warning
@@ -518,7 +522,7 @@ sudo tee /etc/logrotate.d/yivideo << EOF
     compress
     delaycompress
     notifempty
-    create 644 whisperx whisperx
+    create 644 yivideo yivideo
     postrotate
         docker-compose exec api_gateway python -c "import logging; logging.getLogger().handlers[0].doRollover()"
     endscript
@@ -671,7 +675,7 @@ curl http://localhost:9090/targets
 curl http://localhost:3000/api/health
 
 # 性能测试
-python scripts/whisperx_performance_benchmark.py
+# python scripts/performance_benchmark.py --service faster_whisper
 ```
 
 ### 2. 生产环境检查清单

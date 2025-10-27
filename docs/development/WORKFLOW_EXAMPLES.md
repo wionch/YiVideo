@@ -21,7 +21,7 @@ VIDEO_PATH="/share/videos/666.mp4"
 这个工作流执行完整的视频处理流程：
 1. 视频 → 视频 + 音频
 2. 音频 → 人声音频 + 背景声音频
-3. 人声音频 → 字幕文件 + 词级时间戳json文件 + 说话人字幕文件
+3. 人声音频 → 转录数据 → 字幕文件
 
 ```bash
 curl -X POST "${API_BASE_URL}/v1/workflows" \
@@ -32,7 +32,8 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
       "workflow_chain": [
         "ffmpeg.extract_audio",
         "audio_separator.separate_vocals",
-        "whisperx.generate_subtitles"
+        "faster_whisper.transcribe_audio",
+        "faster_whisper.generate_subtitle_files"
       ]
     }
   }'
@@ -50,7 +51,8 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
     "workflow_config": {
       "workflow_chain": [
         "ffmpeg.extract_audio",
-        "whisperx.generate_subtitles"
+        "faster_whisper.transcribe_audio",
+        "faster_whisper.generate_subtitle_files"
       ]
     }
   }'
@@ -74,9 +76,15 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
   }'
 ```
 
-## 自定义配置工作流
+## 完整字幕工作流（带说话人分离）
 
-### 带WhisperX配置的字幕生成
+这个工作流在基础字幕生成之上，增加了说话人分离的步骤，最终生成的字幕会标记出不同的说话人。
+
+1.  **视频** → 音频
+2.  音频 → **人声** + 背景音
+3.  人声 → **转录数据** (包含词级时间戳)
+4.  人声 → **说话人时间戳**
+5.  (转录数据 + 说话人时间戳) → **带说话人标签的字幕文件**
 
 ```bash
 curl -X POST "${API_BASE_URL}/v1/workflows" \
@@ -87,16 +95,35 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
       "workflow_chain": [
         "ffmpeg.extract_audio",
         "audio_separator.separate_vocals",
-        "whisperx.generate_subtitles"
+        "faster_whisper.transcribe_audio",
+        "pyannote_audio.diarize_speakers",
+        "faster_whisper.generate_subtitle_files"
       ]
-    },
-    "whisperx_config": {
-      "model_name": "base",
-      "language": "zh",
-      "enable_diarization": true,
-      "enable_word_timestamps": true
     }
   }'
+```
+## 语音合成工作流
+
+### 1. 基础语音合成
+
+这个工作流使用指定的参考音频，将文本转换为具有相同音色的语音。
+
+```bash
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow_config": {
+      "workflow_chain": [
+        "indextts.generate_speech"
+      ]
+    },
+    "indextts_service": {
+      "text": "你好，这是一个使用IndexTTS2生成的语音。",
+      "output_path": "/share/outputs/tts_example.wav",
+      "spk_audio_prompt": "/share/videos/reference_audio.wav"
+    }
+  }'
+| `indextts.generate_speech` | 基于参考音频生成语音 | 无 |
 ```
 
 ## 工作链说明
@@ -104,10 +131,12 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
 ### 可用任务
 
 | 任务名称 | 描述 | 依赖 |
-|---------|------|------|
+|---|---|---|
 | `ffmpeg.extract_audio` | 从视频中提取音频 | 无 |
 | `audio_separator.separate_vocals` | 分离人声和背景音 | `ffmpeg.extract_audio` |
-| `whisperx.generate_subtitles` | 生成字幕和词级时间戳 | `ffmpeg.extract_audio` 或 `audio_separator.separate_vocals` |
+| `faster_whisper.transcribe_audio` | 对音频进行语音转录，生成包含词级时间戳的中间数据 | `ffmpeg.extract_audio` 或 `audio_separator.separate_vocals` |
+| `pyannote_audio.diarize_speakers` | 对音频进行说话人分离 | `ffmpeg.extract_audio` 或 `audio_separator.separate_vocals` |
+| `faster_whisper.generate_subtitle_files` | 基于转录数据和可选的说话人数据生成多种格式的字幕文件 | `faster_whisper.transcribe_audio` |
 
 ### 任务输出
 
@@ -115,14 +144,28 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
 - `audio_path`: 提取的音频文件路径
 
 #### audio_separator.separate_vocals
+#### indextts.generate_speech
+- `output_path`: 生成的语音文件路径。
+- `processing_time`: 处理时长（秒）。
 - `audio_list`: 所有分离的音频文件列表
 - `vocal_audio`: 人声音频文件路径（推荐用于字幕生成）
 - `model_used`: 使用的分离模型
 - `quality_mode`: 质量模式
 - `processing_time`: 处理时间
 
-#### whisperx.generate_subtitles
-- `subtitle_path`: 基础SRT字幕文件路径
+#### faster_whisper.transcribe_audio
+- `segments_file`: 包含完整转录结果（含词级时间戳）的JSON文件路径。
+- `transcribe_duration`: 转录处理时长（秒）。
+- `language`: 检测到的语言代码。
+
+#### faster_whisper.generate_subtitle_files
+- `subtitle_path`: 基础SRT字幕文件路径。
+- `speaker_srt_path`: (如果提供了说话人数据) 带说话人信息的SRT字幕文件路径。
+- `speaker_json_path`: (如果提供了说话人数据) 带说话人信息的JSON文件路径。
+- `word_timestamps_json_path`: 词级时间戳JSON文件路径。
+
+#### pyannote_audio.diarize_speakers
+- `diarization_path`: 说话人分离结果文件路径
 - `speaker_srt_path`: 带说话人信息的SRT字幕文件路径（如果启用）
 - `speaker_json_path`: 带说话人信息的JSON文件路径（如果启用）
 - `word_timestamps_json_path`: 词级时间戳JSON文件路径（如果启用）

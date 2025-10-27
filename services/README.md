@@ -12,7 +12,8 @@
 
 - `paddleocr_service`: 提供 OCR 服务。
 - `inpainting_service`: 提供视频修复（硬字幕去除）服务。
-- `whisperx_service`: 提供 ASR 服务。
+- `faster_whisper_service`: 提供 ASR 服务。
+- `pyannote_audio_service`: 提供说话人分离服务。
 - `indextts_service`: 提供 TTS 服务 (IndexTTS方案)。
 - `gptsovits_service`: 提供 TTS 服务 (GPT-SoVITS方案)。
 

@@ -36,12 +36,6 @@ route:
       receiver: 'warning-alerts'
       continue: true
 
-    # WhisperX 服务告警路由
-    - match:
-        service: whisperx
-      receiver: 'whisperx-alerts'
-      continue: true
-
     # 系统告警路由
     - match:
         service: system
@@ -86,24 +80,6 @@ receivers:
           服务: {{ .Labels.service }}
           开始时间: {{ .StartsAt }}
           {{ end }}
-
-  # WhisperX 服务告警接收者
-  - name: 'whisperx-alerts'
-    email_configs:
-      - to: 'whisperx-team@yivideo.com'
-        subject: '[WhisperX] {{ .GroupLabels.alertname }}'
-        body: |
-          {{ range .Alerts }}
-          告警名称: {{ .Annotations.summary }}
-          告警描述: {{ .Annotations.description }}
-          严重程度: {{ .Labels.severity }}
-          工作流ID: {{ .Labels.workflow_id }}
-          后端类型: {{ .Labels.backend_type }}
-          开始时间: {{ .StartsAt }}
-          {{ end }}
-    webhook_configs:
-      - url: 'https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN'
-        send_resolved: true
 
   # 系统告警接收者
   - name: 'system-alerts'

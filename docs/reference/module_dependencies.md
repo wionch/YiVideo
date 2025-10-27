@@ -43,7 +43,6 @@
 - **源码仓库**: [https://github.com/m-bain/whisperX](https://github.com/m-bain/whisperX)
 - **安装指令**:
   ```bash
-  pip install whisperx
   ```
 - **系统依赖**: `ffmpeg` (应已包含在基础镜像中)。
 

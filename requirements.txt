@@ -33,7 +33,6 @@ opencv-python-headless
 # -------------------------
 # WhisperX: 语音转录，带词级时间戳和说话人分离
 # 注意: 安装此库可能需要在Dockerfile中预装git
-whisperx
 
 # audio-separator: 基于Demucs的人声/背景音分离
 audio-separator[gpu]

@@ -1,19 +1,18 @@
 # paddleocr_service dependencies
 
 # Celery for task queuing
-celery
-redis
+celery>=5.2.0
+redis>=4.5.0
 
-# # Config file parsing
-PyYAML
+# Config file parsing
+PyYAML>=6.0
 
-# # Core AI/CV libraries (versions from root requirements.txt)
+# Core AI/CV libraries (versions from root requirements.txt)
 # paddlepaddle-gpu==2.5.2
-# # paddlex==2.2.1
-paddleocr
+# paddlex==2.2.1
+paddleocr>=2.7.0
 # torch
-av
-numpy
-opencv-python-headless
-av
-pydantic
+av>=10.0.0
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+pydantic>=2.0.0

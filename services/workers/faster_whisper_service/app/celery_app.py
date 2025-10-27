@@ -25,4 +25,9 @@ celery_app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
+    broker_connection_retry_on_startup=True,
+    broker_transport_options={
+        'visibility_timeout': 3600,  # 1 hour
+        'max_connections': 10,
+    }
 )

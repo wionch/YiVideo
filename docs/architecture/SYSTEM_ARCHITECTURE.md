@@ -23,8 +23,9 @@ graph TD
     B -- "8. 状态查询" --> D(State Store - Redis);
 
     C -- "3. 任务分发" --> W1[ffmpeg_service];
-    C -- " " --> W2[whisperx_service];
-    C -- " " --> W3[paddleocr_service];
+    C -- " " --> W2[faster_whisper_service];
+    C -- " " --> W3[pyannote_audio_service];
+    C -- " " --> W4[paddleocr_service];
     C -- " " --> W4[llm_service];
 
     W1 -- "4. 更新状态" --> D;
@@ -58,7 +59,8 @@ graph TD
 
 - **AI功能服务 (Workers)**: **系统的“手和脚”**，每个服务都是一个独立的Celery worker。
   - `ffmpeg_service`: 基础视频操作。
-  - `whisperx_service`: 语音识别（ASR）。
+  - `faster_whisper_service`: 语音识别（ASR）。
+  - `pyannote_audio_service`: 说话人分离。
   - `paddleocr_service`: 光学字符识别（OCR）。
   - `llm_service`: (新) 与大语言模型交互（校对、翻译）。
   - `indextts_service` / `gptsovits_service`: 文本转语音（TTS）。
@@ -79,7 +81,7 @@ graph TD
   {
       "video_path": "/share/videos/input/example.mp4",
       "workflow_config": {
-          "subtitle_generation": { "strategy": "asr", "provider": "whisperx" },
+          "subtitle_generation": { "strategy": "asr", "provider": "faster_whisper" },
           "subtitle_refinement": { "strategy": "llm_proofread", "provider": "gemini" }
       }
   }
@@ -235,8 +237,9 @@ graph TD
     subgraph "Worker服务层"
         W1[paddleocr_service]
         W2[ffmpeg_service]
-        W3[whisperx_service]
-        W4[其他GPU服务]
+        W3[faster_whisper_service]
+        W4[pyannote_audio_service]
+        W5[其他GPU服务]
     end
 
     M1 --> R1

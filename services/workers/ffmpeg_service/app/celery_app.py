@@ -6,8 +6,8 @@ from celery import Celery
 # The backend argument specifies the URL of the result backend (also Redis).
 celery_app = Celery(
     'ffmpeg_service',
-    broker='redis://redis:6379/0',
-    backend='redis://redis:6379/0',
+    broker=os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0'),
+    backend=os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/1'),
     include=['app.tasks']  # List of modules to import when the worker starts.
 )
 

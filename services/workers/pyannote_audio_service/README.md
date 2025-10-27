@@ -39,7 +39,7 @@
 ### 本地模式（GPU）
 
 ```yaml
-whisperx_service:
+pyannote_audio_service:
   diarization:
     use_paid_api: false
     hf_token: "your_huggingface_token"
@@ -48,7 +48,7 @@ whisperx_service:
 ### API 模式（pyannoteAI）
 
 ```yaml
-whisperx_service:
+pyannote_audio_service:
   diarization:
     use_paid_api: true
     api_key: "your_pyannote_api_key"

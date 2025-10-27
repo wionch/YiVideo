@@ -1,86 +1,70 @@
 # YiVideo 项目文档
 
+本文档是 YiVideo 项目的中央索引，旨在为不同角色的团队成员提供清晰的指引。
+
 ## 📚 文档目录
 
 ### 🏗️ 架构设计 (`docs/architecture/`)
-- **[SYSTEM_ARCHITECTURE.md](architecture/SYSTEM_ARCHITECTURE.md)** - 系统总体架构设计
-- **[SDD.md](architecture/SDD.md)** - 技术设计文档 (TDD)
+- **[SYSTEM_ARCHITECTURE.md](architecture/SYSTEM_ARCHITECTURE.md)** - 系统总体架构设计，了解项目核心组件和交互方式。
+- **[WORKFLOW_ANALYSIS.md](architecture/WORKFLOW_ANALYSIS.md)** - 核心工作流深入分析，理解数据处理流程。
+- **[SDD.md](architecture/SDD.md)** - 软件设计文档，包含关键模块的技术实现细节。
 
-### 🎯 WhisperX 优化系统 (`docs/whisperx/`)
-- **[WHISPERX_COMPLETE_GUIDE.md](whisperx/WHISPERX_COMPLETE_GUIDE.md)** - WhisperX 优化系统完整指南
-- **[WHISPERX_TECHNICAL_SPEC.md](whisperx/WHISPERX_TECHNICAL_SPEC.md)** - WhisperX 技术规格文档
-- **[WHISPERX_CONFIG_OPTIMIZATION.md](whisperx/WHISPERX_CONFIG_OPTIMIZATION.md)** - WhisperX 配置优化和部署指南
+### 🚀 部署与配置 (`docs/deployment/`)
+- **[DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)** - 完整的生产环境部署指南。
+- **[INDEXTTS_DEPLOYMENT.md](deployment/INDEXTTS_DEPLOYMENT.md)** - IndexTTS 服务专项部署与配置说明。
 
-### 🚀 部署指南 (`docs/deployment/`)
-- **[DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)** - 生产环境部署指南
+### 💻 开发指南 (`docs/development/`)
+- **[INDEXTTS_SERVICE_GUIDE.md](development/INDEXTTS_SERVICE_GUIDE.md)** - IndexTTS 服务开发与集成指南。
+- **[INDEXTTS_USER_GUIDE.md](development/INDEXTTS_USER_GUIDE.md)** - IndexTTS 服务 API 使用指南。
+- **[INDEXTTS_CONFIG_GUIDE.md](development/INDEXTTS_CONFIG_GUIDE.md)** - IndexTTS 服务高级配置详解。
+- **[WORKFLOW_EXAMPLES.md](development/WORKFLOW_EXAMPLES.md)** - 工作流配置示例与说明。
+- **[PADDLEOCR_API_COMPATIBILITY_FIX.md](development/PADDLEOCR_API_COMPATIBILITY_FIX.md)** - PaddleOCR API 兼容性修复说明。
 
 ### 🔧 运维手册 (`docs/operations/`)
-- **[OPERATIONS_MANUAL.md](operations/OPERATIONS_MANUAL.md)** - 运维手册
-- **[TROUBLESHOOTING_GUIDE.md](operations/TROUBLESHOOTING_GUIDE.md)** - 故障排除指南
+- **[OPERATIONS_MANUAL.md](operations/OPERATIONS_MANUAL.md)** - 系统日常运维手册，包含监控、备份等。
+- **[SYSTEM_TROUBLESHOOTING_GUIDE.md](operations/SYSTEM_TROUBLESHOOTING_GUIDE.md)** - 通用故障排除指南，覆盖常见问题。
 
-### 💻 开发文档 (`docs/development/`)
-- **[PRD.md](development/PRD.md)** - 产品需求文档 (PRD)
-- **[TESTING_STRATEGY.md](development/TESTING_STRATEGY.md)** - 测试策略文档
-- **[WORKFLOW_EXAMPLES.md](development/WORKFLOW_EXAMPLES.md)** - 工作流示例文档
+### 📖 参考资料 (`docs/reference/`)
+- **[GPU_LOCK_COMPLETE_GUIDE.md](reference/GPU_LOCK_COMPLETE_GUIDE.md)** - GPU 锁系统设计与使用。
+- **[faster_whisper_complete_parameter_guide.md](reference/faster_whisper_complete_parameter_guide.md)** - Faster-Whisper 模型参数详解。
+- **[REDIS_OPTIMIZATION_SUMMARY.md](reference/REDIS_OPTIMIZATION_SUMMARY.md)** - Redis 性能优化实践。
+- **[AUDIO_SPLIT_GUIDE.md](reference/AUDIO_SPLIT_GUIDE.md)** - FFMPEG 音频切分功能说明。
+- **[SUBTITLE_KEYFRAME_EXTRACTION.md](reference/SUBTITLE_KEYFRAME_EXTRACTION.md)** - 字幕关键帧提取功能说明。
+- **[module_dependencies.md](reference/module_dependencies.md)** - 核心 AI 模块依赖项清单。
 
-### 📖 参考文档 (`docs/reference/`)
-- **[GPU_LOCK_COMPLETE_GUIDE.md](reference/GPU_LOCK_COMPLETE_GUIDE.md)** - GPU锁系统完整文档
-- **[module_dependencies.md](reference/module_dependencies.md)** - AI模块依赖项清单
-- **[SUBTITLE_KEYFRAME_EXTRACTION.md](reference/SUBTITLE_KEYFRAME_EXTRACTION.md)** - 字幕关键帧提取功能说明
+### 📦 历史归档 (`docs/archive/`)
+- 此目录存放项目过程中的历史文档，如产品需求（PRD）、分析报告、测试策略等。这些文档主要用于追溯历史，不代表项目当前状态。
 
 ---
 
 ## 🚀 快速开始
 
 ### 新用户推荐阅读顺序
-1. **产品概念** → [PRD.md](development/PRD.md)
-2. **系统架构** → [SYSTEM_ARCHITECTURE.md](architecture/SYSTEM_ARCHITECTURE.md)
-3. **技术设计** → [SDD.md](architecture/SDD.md)
-4. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)
+1. **系统架构** → [SYSTEM_ARCHITECTURE.md](architecture/SYSTEM_ARCHITECTURE.md)
+2. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)
 
 ### 开发人员推荐阅读顺序
 1. **系统架构** → [SYSTEM_ARCHITECTURE.md](architecture/SYSTEM_ARCHITECTURE.md)
-2. **技术设计** → [SDD.md](architecture/SDD.md)
-3. **测试策略** → [TESTING_STRATEGY.md](development/TESTING_STRATEGY.md)
-4. **工作流示例** → [WORKFLOW_EXAMPLES.md](development/WORKFLOW_EXAMPLES.md)
-5. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)
+2. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)
+3. **工作流示例** → [WORKFLOW_EXAMPLES.md](development/WORKFLOW_EXAMPLES.md)
+4. **开发指南** → 浏览 `docs/development/` 下的相关文档。
 
 ### 运维人员推荐阅读顺序
 1. **部署指南** → [DEPLOYMENT_GUIDE.md](deployment/DEPLOYMENT_GUIDE.md)
 2. **运维手册** → [OPERATIONS_MANUAL.md](operations/OPERATIONS_MANUAL.md)
-3. **故障排除** → [TROUBLESHOOTING_GUIDE.md](operations/TROUBLESHOOTING_GUIDE.md)
-
-### WhisperX 优化专题
-1. **完整指南** → [WHISPERX_COMPLETE_GUIDE.md](whisperx/WHISPERX_COMPLETE_GUIDE.md)
-2. **技术规格** → [WHISPERX_TECHNICAL_SPEC.md](whisperx/WHISPERX_TECHNICAL_SPEC.md)
-3. **配置优化** → [WHISPERX_CONFIG_OPTIMIZATION.md](whisperx/WHISPERX_CONFIG_OPTIMIZATION.md)
+3. **故障排除** → [SYSTEM_TROUBLESHOOTING_GUIDE.md](operations/SYSTEM_TROUBLESHOOTING_GUIDE.md)
 
 ---
 
 ## 📋 文档维护
 
 ### 分类原则
-- **architecture/**: 系统架构和设计文档
-- **whisperx/**: WhisperX 优化系统专项文档
-- **deployment/**: 部署和安装相关文档
-- **operations/**: 运维和故障排除文档
-- **development/**: 开发过程和需求文档
-- **reference/**: 参考资料和技术细节
-
-### 文档规范
-- 使用 Markdown 格式
-- 文件名使用英文，单词间用下划线分隔
-- 文档标题使用中文，便于阅读
-- 重要文档需要包含版本信息和最后更新时间
+- **architecture/**: 系统架构和高级设计文档。
+- **deployment/**: 部署、安装和配置相关指南。
+- **development/**: 针对特定服务的开发和使用指南。
+- **operations/**: 日常运维、监控和故障排除手册。
+- **reference/**: 具体技术点的参考资料和深度说明。
+- **archive/**: 项目过程中的历史文档归档。
 
 ---
-
-## 🔗 相关链接
-
-- **项目主页**: [GitHub Repository](https://github.com/your-repo/yivideo)
-- **问题反馈**: [GitHub Issues](https://github.com/your-repo/yivideo/issues)
-- **讨论区**: [GitHub Discussions](https://github.com/your-repo/yivideo/discussions)
-
----
-
-*最后更新: 2025-09-30 | 文档版本: 2.1*
+*最后更新: 2025-10-27 | 文档版本: 3.0*

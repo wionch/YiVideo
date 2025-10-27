@@ -68,9 +68,8 @@ workflow_config = {
     "workflow_chain": [
         "ffmpeg.extract_audio",
         "audio_separator.separate_vocals",
-        "whisperx.transcribe_audio",
-        "whisperx.diarize_speakers",
-        "whisperx.generate_subtitle_files",
+        "faster_whisper.generate_subtitles",
+        "pyannote_audio.diarize_speakers",
         "ffmpeg.split_audio_segments"  # 音频分割节点
     ]
 }
@@ -87,8 +86,7 @@ curl --request POST \
   "workflow_config": {
     "workflow_chain": [
       "ffmpeg.extract_audio",
-      "whisperx.transcribe_audio",
-      "whisperx.generate_subtitle_files",
+      "faster_whisper.generate_subtitles",
       "ffmpeg.split_audio_segments"
     ]
   }

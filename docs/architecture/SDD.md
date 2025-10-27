@@ -35,8 +35,9 @@ graph TD
     subgraph "工作服务 (运行于 Worker 集群中)"
         W1(downloader_service)
         W2(paddleocr_service)
-        W3(whisperx_service)
-        W4(inpainting_service)
+        W3(faster_whisper_service)
+        W4(pyannote_audio_service)
+        W5(inpainting_service)
         W5(indextts_service)
         W6(gptsovits_service)
         W7(...)
@@ -77,7 +78,8 @@ graph TD
 │       ├── orchestrator_service/
 │       ├── downloader_service/
 │       ├── paddleocr_service/      # 新：PaddleOCR 服务
-│       ├── whisperx_service/       # 新：WhisperX ASR 服务
+│       ├── faster_whisper_service/ # 新：Faster Whisper ASR 服务
+│       ├── pyannote_audio_service/ # 新：Pyannote Audio 说话人分离服务
 │       ├── inpainting_service/     # 新：视频修复服务 (STTN/LAMA/PROPAINTER)
 │       ├── indextts_service/       # 新：IndexTTS 服务
 │       ├── gptsovits_service/      # 新：GPT-SoVITS 服务
@@ -114,9 +116,12 @@ graph TD
     *   **职责**: 提供OCR能力，从视频帧中提取硬字幕。
     *   **核心依赖**: `paddleocr`。
 
-*   **`whisperx_service` (新)**
-    *   **职责**: 提供ASR能力，从音轨中提取语音字幕。
-    *   **核心依赖**: `whisperx`。
+*   **`faster_whisper_service` (新)**
+    *   **职责**: 提供高效的ASR能力，从音轨中提取语音字幕。
+    *   **核心依赖**: `faster-whisper`。
+*   **`pyannote_audio_service` (新)**
+    *   **职责**: 提供说话人分离能力。
+    *   **核心依赖**: `pyannote.audio`。
 
 *   **`inpainting_service` (新)**
     *   **职责**: 去除视频中的硬字幕，对背景进行修复。
@@ -282,9 +287,12 @@ services:
           devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
     restart: on-failure
 
-  whisperx_service:
+  faster_whisper_service:
     build:
-      context: ./services/workers/whisperx_service
+      context: ./services/workers/faster_whisper_service
+  pyannote_audio_service:
+    build:
+      context: ./services/workers/pyannote_audio_service
     deploy:
       resources:
         reservations:
@@ -445,7 +453,8 @@ def remove_hard_subtitles(self, *args, **kwargs):
 | --- | --- | --- |
 | 视频下载 | `downloader_service` | `yt-dlp` |
 | 字幕提取 (OCR) | `paddleocr_service` | `PaddleOCR` |
-| 字幕提取 (ASR) | `whisperx_service` | `whisperX` |
+| 字幕提取 (ASR) | `faster_whisper_service` | `faster-whisper` |
+| 说话人分离 | `pyannote_audio_service` | `pyannote.audio` |
 | 硬字幕去除 | `inpainting_service` | `STTN`, `LAMA`, `PROPAINTER` |
 | AI配音 (方案一) | `indextts_service` | `IndexTTS` |
 | AI配音 (方案二) | `gptsovits_service` | `GPT-SoVITS` |

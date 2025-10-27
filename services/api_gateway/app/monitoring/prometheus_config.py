@@ -31,13 +31,21 @@ class PrometheusConfig:
                 {
                     'job_name': 'redis',
                     'static_configs': [
-                        {'targets': ['redis:6379']}
+                        {'targets': [f"${os.environ.get('REDIS_HOST', 'redis')}:{os.environ.get('REDIS_PORT', '6379')}"]}
                     ]
                 },
                 {
-                    'job_name': 'whisperx_service',
+                    'job_name': 'faster_whisper_service',
                     'static_configs': [
-                        {'targets': ['whisperx_service:8080']}
+                        {'targets': ['faster_whisper_service:8080']}
+                    ],
+                    'metrics_path': '/metrics',
+                    'scrape_interval': '30s'
+                },
+                {
+                    'job_name': 'pyannote_audio_service',
+                    'static_configs': [
+                        {'targets': ['pyannote_audio_service:8080']}
                     ],
                     'metrics_path': '/metrics',
                     'scrape_interval': '30s'
@@ -68,7 +76,7 @@ class PrometheusConfig:
                 ]
             },
             'rule_files': [
-                'rules/whisperx_alerts.yml',
+                'rules/asr_alerts.yml',
                 'rules/system_alerts.yml'
             ]
         }
@@ -125,7 +133,7 @@ class GrafanaConfig:
                     'name': 'Redis',
                     'type': 'redis-datasource',
                     'access': 'proxy',
-                    'url': 'redis:6379',
+                    'url': f"${os.environ.get('REDIS_HOST', 'redis')}:{os.environ.get('REDIS_PORT', '6379')}",
                     'password': '',
                     'user': '',
                     'database': '',
@@ -146,8 +154,8 @@ class GrafanaConfig:
         return {
             'dashboard': {
                 'id': None,
-                'title': 'WhisperX 性能监控',
-                'tags': ['whisperx', 'performance'],
+                'title': 'ASR & Diarization 性能监控',
+                'tags': ['asr', 'diarization', 'performance'],
                 'timezone': 'Asia/Shanghai',
                 'panels': [
                     {
@@ -156,7 +164,7 @@ class GrafanaConfig:
                         'type': 'graph',
                         'targets': [
                             {
-                                'expr': 'rate(whisperx_execution_time_seconds[5m])',
+                                'expr': 'rate(faster_whisper_execution_time_seconds[5m])',
                                 'legendFormat': '{{backend_type}} - {{status}}'
                             }
                         ],
@@ -201,7 +209,7 @@ class GrafanaConfig:
                         'type': 'graph',
                         'targets': [
                             {
-                                'expr': 'whisperx_processing_speed_x',
+                                'expr': 'faster_whisper_processing_speed_x',
                                 'legendFormat': '处理速度 (x)'
                             }
                         ],
@@ -216,7 +224,7 @@ class GrafanaConfig:
                         'type': 'stat',
                         'targets': [
                             {
-                                'expr': 'sum(rate(whisperx_workflows_total{status="success"}[5m])) / sum(rate(whisperx_workflows_total[5m])) * 100',
+                                'expr': 'sum(rate(faster_whisper_workflows_total{status="success"}[5m])) / sum(rate(faster_whisper_workflows_total[5m])) * 100',
                                 'legendFormat': '成功率'
                             }
                         ],
@@ -279,36 +287,49 @@ class AlertRules:
     """告警规则配置"""
 
     def __init__(self):
-        self.whisperx_alerts = self._get_whisperx_alerts()
+        self.asr_alerts = self._get_asr_alerts()
         self.system_alerts = self._get_system_alerts()
 
-    def _get_whisperx_alerts(self) -> Dict[str, Any]:
-        """获取 WhisperX 告警规则"""
+    def _get_asr_alerts(self) -> Dict[str, Any]:
+        """获取 ASR 相关告警规则"""
         return {
             'groups': [
                 {
-                    'name': 'whisperx.alerts',
+                    'name': 'asr.alerts',
                     'rules': [
                         {
-                            'alert': 'WhisperxExecutionTimeHigh',
-                            'expr': 'whisperx_execution_time_seconds > 300',
+                            'alert': 'FasterWhisperExecutionTimeHigh',
+                            'expr': 'faster_whisper_execution_time_seconds > 300',
                             'for': '5m',
                             'labels': {
                                 'severity': 'warning',
-                                'service': 'whisperx'
+                                'service': 'faster_whisper'
                             },
                             'annotations': {
-                                'summary': 'WhisperX 执行时间过长',
-                                'description': 'WhisperX 工作流执行时间超过 5 分钟 (当前值: {{ $value }} 秒)'
+                                'summary': 'FasterWhisper 执行时间过长',
+                                'description': 'FasterWhisper 工作流执行时间超过 5 分钟 (当前值: {{ $value }} 秒)'
                             }
                         },
                         {
-                            'alert': 'WhisperxGpuMemoryHigh',
+                            'alert': 'PyannoteExecutionTimeHigh',
+                            'expr': 'pyannote_audio_execution_time_seconds > 300',
+                            'for': '5m',
+                            'labels': {
+                                'severity': 'warning',
+                                'service': 'pyannote_audio'
+                            },
+                            'annotations': {
+                                'summary': 'Pyannote Audio 执行时间过长',
+                                'description': 'Pyannote Audio 工作流执行时间超过 5 分钟 (当前值: {{ $value }} 秒)'
+                            }
+                        },
+                        {
+                            'alert': 'GpuMemoryHigh',
                             'expr': 'gpu_memory_used_gb > 8',
                             'for': '5m',
                             'labels': {
                                 'severity': 'warning',
-                                'service': 'whisperx'
+                                'service': 'gpu'
                             },
                             'annotations': {
                                 'summary': 'GPU 显存使用过高',
@@ -316,42 +337,29 @@ class AlertRules:
                             }
                         },
                         {
-                            'alert': 'WhisperxGpuUtilizationHigh',
-                            'expr': 'gpu_utilization_percent > 95',
-                            'for': '5m',
-                            'labels': {
-                                'severity': 'warning',
-                                'service': 'whisperx'
-                            },
-                            'annotations': {
-                                'summary': 'GPU 利用率过高',
-                                'description': 'GPU 利用率超过 95% (当前值: {{ $value }}%)'
-                            }
-                        },
-                        {
-                            'alert': 'WhisperxProcessingSpeedLow',
-                            'expr': 'whisperx_processing_speed_x < 0.5',
+                            'alert': 'FasterWhisperProcessingSpeedLow',
+                            'expr': 'faster_whisper_processing_speed_x < 0.5',
                             'for': '10m',
                             'labels': {
                                 'severity': 'warning',
-                                'service': 'whisperx'
+                                'service': 'faster_whisper'
                             },
                             'annotations': {
-                                'summary': 'WhisperX 处理速度过慢',
-                                'description': 'WhisperX 处理速度低于 0.5x (当前值: {{ $value }}x)'
+                                'summary': 'FasterWhisper 处理速度过慢',
+                                'description': 'FasterWhisper 处理速度低于 0.5x (当前值: {{ $value }}x)'
                             }
                         },
                         {
-                            'alert': 'WhisperxSuccessRateLow',
-                            'expr': 'sum(rate(whisperx_workflows_total{status="success"}[5m])) / sum(rate(whisperx_workflows_total[5m])) * 100 < 90',
+                            'alert': 'FasterWhisperSuccessRateLow',
+                            'expr': 'sum(rate(faster_whisper_workflows_total{status="success"}[5m])) / sum(rate(faster_whisper_workflows_total[5m])) * 100 < 90',
                             'for': '10m',
                             'labels': {
                                 'severity': 'critical',
-                                'service': 'whisperx'
+                                'service': 'faster_whisper'
                             },
                             'annotations': {
-                                'summary': 'WhisperX 成功率过低',
-                                'description': 'WhisperX 工作流成功率低于 90% (当前值: {{ $value }}%)'
+                                'summary': 'FasterWhisper 成功率过低',
+                                'description': 'FasterWhisper 工作流成功率低于 90% (当前值: {{ $value }}%)'
                             }
                         }
                     ]
@@ -428,9 +436,9 @@ class AlertRules:
         try:
             os.makedirs(output_dir, exist_ok=True)
 
-            # 生成 WhisperX 告警规则
-            with open(f'{output_dir}/whisperx_alerts.yml', 'w') as f:
-                yaml.dump(self.whisperx_alerts, f, default_flow_style=False)
+            # 生成 ASR 告警规则
+            with open(f'{output_dir}/asr_alerts.yml', 'w') as f:
+                yaml.dump(self.asr_alerts, f, default_flow_style=False)
 
             # 生成系统告警规则
             with open(f'{output_dir}/system_alerts.yml', 'w') as f:

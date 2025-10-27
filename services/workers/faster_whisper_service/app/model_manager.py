@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from contextlib import contextmanager
 
-import whisperx
+from faster_whisper import WhisperModel
 
 from services.common.config_loader import CONFIG
 from services.common.logger import get_logger
@@ -25,11 +25,9 @@ class ModelConfig:
     device: str
     compute_type: str
     batch_size: int
-    use_faster_whisper: bool
     faster_whisper_threads: int
     model_quantization: str
     enable_word_timestamps: bool
-    enable_diarization: bool
     audio_sample_rate: int
     audio_channels: int
 
@@ -39,8 +37,6 @@ class ThreadSafeModelManager:
     def __init__(self):
         self._lock = threading.RLock()
         self._asr_model = None
-        self._align_model = None
-        self._align_metadata = None
         self._model_config = None
         self._last_load_time = 0
         self._load_in_progress = False
@@ -57,11 +53,9 @@ class ThreadSafeModelManager:
             device=cfg.get('device', 'cuda'),
             compute_type=cfg.get('compute_type', 'float16'),
             batch_size=cfg.get('batch_size', 4),
-            use_faster_whisper=cfg.get('use_faster_whisper', True),
             faster_whisper_threads=cfg.get('faster_whisper_threads', 4),
             model_quantization=cfg.get('model_quantization', 'float16'),
             enable_word_timestamps=cfg.get('enable_word_timestamps', True),
-            enable_diarization=cfg.get('enable_diarization', False),
             audio_sample_rate=cfg.get('audio_sample_rate', 16000),
             audio_channels=cfg.get('audio_channels', 1)
         )
@@ -71,60 +65,26 @@ class ThreadSafeModelManager:
         logger.info(f"Loading faster-whisper ASR model '{config.model_name}' with configuration:")
         logger.info(f"  - Device: {config.device}")
         logger.info(f"  - Compute type: {config.compute_type}")
-        logger.info(f"  - Batch size: {config.batch_size}")
-        logger.info(f"  - Language: {config.language}")
-        logger.info(f"  - Faster-Whisper: {config.use_faster_whisper}")
-
-        if config.use_faster_whisper:
-            logger.info(f"  - Threads: {config.faster_whisper_threads}")
-            logger.info(f"  - Quantization: {config.model_quantization}")
+        logger.info(f"  - CPU Threads: {config.faster_whisper_threads}")
+        logger.info(f"  - Quantization: {config.model_quantization}")
 
         # 构建模型加载参数
         model_kwargs = {
             'device': config.device,
             'compute_type': config.compute_type,
-            'language': config.language
+            'cpu_threads': config.faster_whisper_threads,
+            'num_workers': 4,
         }
-
-        # 启用 Faster-Whisper 后端
-        if config.use_faster_whisper:
-            model_kwargs['threads'] = config.faster_whisper_threads
 
         try:
             # 加载 ASR 模型
-            model = whisperx.load_model(config.model_name, **model_kwargs)
+            model = WhisperModel(config.model_name, **model_kwargs)
             logger.info("✓ ASR model loaded successfully")
             return model
 
         except Exception as e:
             logger.error(f"Failed to load ASR model: {e}")
-            # 降级策略：尝试使用原生后端
-            if config.use_faster_whisper:
-                logger.warning("Attempting fallback to native backend...")
-                model_kwargs.pop('threads', None)
-                model = whisperx.load_model(config.model_name, **model_kwargs)
-                logger.info("✓ Fallback to native backend successful")
-                return model
             raise
-
-    def _load_alignment_model(self, config: ModelConfig) -> tuple[Optional[Any], Optional[Dict]]:
-        """加载对齐模型"""
-        if not config.language or not config.enable_diarization:
-            logger.info("Alignment model skipped (diarization disabled or no language specified)")
-            return None, None
-
-        try:
-            logger.info(f"Loading faster-whisper Alignment model for language '{config.language}'...")
-            align_model, align_metadata = whisperx.load_align_model(
-                language_code=config.language,
-                device=config.device
-            )
-            logger.info("✓ Alignment model loaded successfully")
-            return align_model, align_metadata
-
-        except Exception as e:
-            logger.warning(f"Failed to load alignment model: {e}")
-            return None, None
 
     def _load_models_internal(self) -> bool:
         """内部模型加载方法（已加锁）"""
@@ -152,9 +112,6 @@ class ThreadSafeModelManager:
 
             # 加载 ASR 模型
             self._asr_model = self._load_asr_model(self._model_config)
-
-            # 加载对齐模型
-            self._align_model, self._align_metadata = self._load_alignment_model(self._model_config)
 
             self._last_load_time = time.time()
             logger.info("faster-whisper models loading process completed")
@@ -191,11 +148,9 @@ class ThreadSafeModelManager:
                 config1.device == config2.device and
                 config1.compute_type == config2.compute_type and
                 config1.batch_size == config2.batch_size and
-                config1.use_faster_whisper == config2.use_faster_whisper and
                 config1.faster_whisper_threads == config2.faster_whisper_threads and
                 config1.model_quantization == config2.model_quantization and
-                config1.enable_word_timestamps == config2.enable_word_timestamps and
-                config1.enable_diarization == config2.enable_diarization)
+                config1.enable_word_timestamps == config2.enable_word_timestamps)
 
     @contextmanager
     def get_models(self):
@@ -204,7 +159,7 @@ class ThreadSafeModelManager:
 
         try:
             with self._lock:
-                yield self._asr_model, self._align_model, self._align_metadata, self._model_config
+                yield self._asr_model, self._model_config
         except Exception as e:
             logger.error(f"Error while using models: {e}")
             raise
@@ -214,7 +169,6 @@ class ThreadSafeModelManager:
         with self._lock:
             return {
                 'asr_model_loaded': self._asr_model is not None,
-                'align_model_loaded': self._align_model is not None,
                 'model_config': self._model_config.__dict__ if self._model_config else None,
                 'last_load_time': self._last_load_time,
                 'load_in_progress': self._load_in_progress,
@@ -227,8 +181,6 @@ class ThreadSafeModelManager:
         with self._lock:
             logger.info("Unloading faster-whisper models...")
             self._asr_model = None
-            self._align_model = None
-            self._align_metadata = None
             self._model_config = None
             self._last_load_time = 0
             self._load_failed = False
@@ -241,7 +193,6 @@ class ThreadSafeModelManager:
             status = {
                 'status': 'healthy',
                 'asr_model_available': self._asr_model is not None,
-                'align_model_available': self._align_model is not None,
                 'last_load_time': self._last_load_time,
                 'configuration_valid': self._model_config is not None
             }
@@ -266,13 +217,8 @@ def get_model_manager() -> ThreadSafeModelManager:
     """获取模型管理器实例"""
     return model_manager
 
-# 向后兼容的全局函数
-def get_whisperx_models():
-    """向后兼容的模型加载函数"""
-    return model_manager.ensure_models_loaded()
-
-def segments_to_srt(segments: list) -> str:
-    """Converts whisperx segments to SRT format."""
+def _format_segments_to_srt(segments: list) -> str:
+    """将分段转换为SRT格式"""
     srt_content = ""
     for i, segment in enumerate(segments):
         start_time = segment['start']

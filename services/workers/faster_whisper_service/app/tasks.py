@@ -4,7 +4,7 @@
 """
 faster-whisper Service 的 Celery 任务定义。
 优化版本：直接使用faster-whisper原生API的词级时间戳功能，参考v3脚本实现。
-修复版本：解决WhisperX封装层词级时间戳丢失问题，使用faster-whisper原生API。
+修复版本：解决之前实现中词级时间戳丢失问题，使用faster-whisper原生API。
 GPU锁版本：使用GPU锁装饰器保护GPU资源，实现细粒度资源管理。
 """
 
@@ -24,6 +24,17 @@ from services.common.config_loader import CONFIG
 
 # 导入GPU锁装饰器
 from services.common.locks import gpu_lock
+
+# 导入字幕合并模块
+from services.workers.faster_whisper_service.app.subtitle_merger import (
+    SubtitleMerger,
+    WordLevelMerger,
+    create_subtitle_merger,
+    create_word_level_merger,
+    validate_speaker_segments
+)
+# 导入字幕校正模块
+from services.common.subtitle.subtitle_correction import SubtitleCorrector, CorrectionResult
 
 logger = get_logger('tasks')
 
@@ -225,7 +236,7 @@ def get_speaker_data(stage_output: dict) -> dict:
     return {}
 
 
-def _transcribe_audio_with_lock(audio_path: str, whisperx_config: dict, stage_name: str) -> dict:
+def _transcribe_audio_with_lock(audio_path: str, service_config: dict, stage_name: str) -> dict:
     """
     使用faster-whisper原生API进行ASR，生成转录结果。
     
@@ -235,32 +246,32 @@ def _transcribe_audio_with_lock(audio_path: str, whisperx_config: dict, stage_na
     
     Args:
         audio_path: 音频文件路径
-        whisperx_config: WhisperX配置
+        service_config: 服务配置
         stage_name: 阶段名称（用于日志）
     
     Returns:
         dict: 转录结果，包含segments、audio_path、audio_duration等信息
     """
     # 检查是否需要使用GPU锁
-    need_gpu_lock = _should_use_gpu_lock_for_transcription(whisperx_config)
+    need_gpu_lock = _should_use_gpu_lock_for_transcription(service_config)
     
     if need_gpu_lock:
         # 需要GPU锁，调用带锁版本
-        return _transcribe_audio_with_gpu_lock(audio_path, whisperx_config, stage_name)
+        return _transcribe_audio_with_gpu_lock(audio_path, service_config, stage_name)
     else:
         # 不需要GPU锁，直接执行
         logger.info(f"[{stage_name}] 语音转录使用非GPU模式，跳过GPU锁")
-        return _transcribe_audio_without_lock(audio_path, whisperx_config, stage_name)
+        return _transcribe_audio_without_lock(audio_path, service_config, stage_name)
 
 
 @gpu_lock()  # 仅在CUDA模式下获取GPU锁
-def _transcribe_audio_with_gpu_lock(audio_path: str, whisperx_config: dict, stage_name: str) -> dict:
+def _transcribe_audio_with_gpu_lock(audio_path: str, service_config: dict, stage_name: str) -> dict:
     """
     带GPU锁的语音转录功能（CUDA模式）
     
     Args:
         audio_path: 音频文件路径
-        whisperx_config: WhisperX配置
+        service_config: 服务配置
         stage_name: 阶段名称（用于日志）
     
     Returns:
@@ -268,16 +279,16 @@ def _transcribe_audio_with_gpu_lock(audio_path: str, whisperx_config: dict, stag
     """
     logger.info(f"[{stage_name}] 语音转录使用GPU锁模式（CUDA）")
     # 直接执行转录逻辑，GPU锁由装饰器管理
-    return _execute_transcription(audio_path, whisperx_config, stage_name)
+    return _execute_transcription(audio_path, service_config, stage_name)
 
 
-def _transcribe_audio_without_lock(audio_path: str, whisperx_config: dict, stage_name: str) -> dict:
+def _transcribe_audio_without_lock(audio_path: str, service_config: dict, stage_name: str) -> dict:
     """
     不带GPU锁的语音转录功能（CPU模式）
     
     Args:
         audio_path: 音频文件路径
-        whisperx_config: WhisperX配置
+        service_config: 服务配置
         stage_name: 阶段名称（用于日志）
     
     Returns:
@@ -285,10 +296,10 @@ def _transcribe_audio_without_lock(audio_path: str, whisperx_config: dict, stage
     """
     logger.info(f"[{stage_name}] 语音转录使用非GPU模式")
     # 直接执行转录逻辑，无需GPU锁
-    return _execute_transcription(audio_path, whisperx_config, stage_name)
+    return _execute_transcription(audio_path, service_config, stage_name)
 
 
-def _execute_transcription(audio_path: str, whisperx_config: dict, stage_name: str) -> dict:
+def _execute_transcription(audio_path: str, service_config: dict, stage_name: str) -> dict:
     """
     执行语音转录 - 使用 subprocess 隔离模式
 
@@ -299,7 +310,7 @@ def _execute_transcription(audio_path: str, whisperx_config: dict, stage_name: s
 
     Args:
         audio_path: 音频文件路径
-        whisperx_config: WhisperX配置
+        service_config: 服务配置
         stage_name: 阶段名称（用于日志）
 
     Returns:
@@ -319,16 +330,16 @@ def _execute_transcription(audio_path: str, whisperx_config: dict, stage_name: s
         raise ValueError(error_msg)
 
     # ===== 参数提取 =====
-    model_name = whisperx_config.get('model_name', 'large-v3')
-    device = whisperx_config.get('device', 'cuda')
-    compute_type = whisperx_config.get('compute_type', 'float16')
-    language = whisperx_config.get('language', None)
-    beam_size = whisperx_config.get('beam_size', 3)
-    best_of = whisperx_config.get('best_of', 3)
-    temperature = whisperx_config.get('temperature', [0.0, 0.2, 0.4, 0.6])
-    word_timestamps = whisperx_config.get('word_timestamps', True)
-    vad_filter = whisperx_config.get('vad_filter', False)
-    vad_parameters = whisperx_config.get('vad_parameters', None)
+    model_name = service_config.get('model_name', 'large-v3')
+    device = service_config.get('device', 'cuda')
+    compute_type = service_config.get('compute_type', 'float16')
+    language = service_config.get('language', None)
+    beam_size = service_config.get('beam_size', 3)
+    best_of = service_config.get('best_of', 3)
+    temperature = service_config.get('temperature', [0.0, 0.2, 0.4, 0.6])
+    word_timestamps = service_config.get('word_timestamps', True)
+    vad_filter = service_config.get('vad_filter', False)
+    vad_parameters = service_config.get('vad_parameters', None)
 
     # ===== 准备输出路径 =====
     # 使用临时目录存储推理结果
@@ -479,196 +490,8 @@ def _execute_transcription(audio_path: str, whisperx_config: dict, stage_name: s
     return result
 
 
-def _diarize_speakers_with_lock(audio_path: str, transcribe_result: dict, whisperx_config: dict, stage_name: str) -> dict:
-    """
-    执行说话人分离功能，支持本地CUDA模式和远程付费接口模式。
-    
-    根据配置条件性使用GPU锁：
-    - 本地CUDA模式：使用GPU锁
-    - 付费接口模式：跳过GPU锁
-    - CPU模式：跳过GPU锁
-    
-    Args:
-        audio_path: 音频文件路径
-        transcribe_result: 转录结果
-        whisperx_config: WhisperX配置
-        stage_name: 阶段名称（用于日志）
-    
-    Returns:
-        dict: 说话人分离结果
-    """
-    # 检查是否需要使用GPU锁
-    need_gpu_lock = _should_use_gpu_lock_for_diarization(whisperx_config)
-    
-    if need_gpu_lock:
-        # 需要GPU锁，调用带锁版本
-        return _diarize_speakers_with_gpu_lock(audio_path, transcribe_result, whisperx_config, stage_name)
-    else:
-        # 不需要GPU锁，直接执行
-        logger.info(f"[{stage_name}] 说话人分离使用非GPU模式，跳过GPU锁")
-        return _diarize_speakers_without_lock(audio_path, transcribe_result, whisperx_config, stage_name)
 
 
-@gpu_lock()  # 仅在本地CUDA模式下获取GPU锁
-def _diarize_speakers_with_gpu_lock(audio_path: str, transcribe_result: dict, whisperx_config: dict, stage_name: str) -> dict:
-    """
-    带GPU锁的说话人分离功能（本地CUDA模式）
-    
-    Args:
-        audio_path: 音频文件路径
-        transcribe_result: 转录结果
-        whisperx_config: WhisperX配置
-        stage_name: 阶段名称（用于日志）
-    
-    Returns:
-        dict: 说话人分离结果
-    """
-    logger.info(f"[{stage_name}] 说话人分离使用GPU锁模式（本地CUDA）")
-    # 直接执行说话人分离逻辑，GPU锁由装饰器管理
-    return _execute_speaker_diarization(audio_path, transcribe_result, whisperx_config, stage_name)
-
-
-def _diarize_speakers_without_lock(audio_path: str, transcribe_result: dict, whisperx_config: dict, stage_name: str) -> dict:
-    """
-    不带GPU锁的说话人分离功能（付费接口模式或CPU模式）
-    
-    Args:
-        audio_path: 音频文件路径
-        transcribe_result: 转录结果
-        whisperx_config: WhisperX配置
-        stage_name: 阶段名称（用于日志）
-    
-    Returns:
-        dict: 说话人分离结果
-    """
-    logger.info(f"[{stage_name}] 说话人分离使用非GPU模式")
-    # 直接执行说话人分离逻辑，无需GPU锁
-    return _execute_speaker_diarization(audio_path, transcribe_result, whisperx_config, stage_name)
-
-
-def _execute_speaker_diarization(audio_path: str, transcribe_result: dict, whisperx_config: dict, stage_name: str) -> dict:
-    """
-    执行说话人分离的核心逻辑（无GPU锁）
-    
-    Args:
-        audio_path: 音频文件路径
-        transcribe_result: 转录结果
-        whisperx_config: WhisperX配置
-        stage_name: 阶段名称（用于日志）
-    
-    Returns:
-        dict: 说话人分离结果
-    """
-    logger.info(f"[{stage_name}] 开始处理音频: {audio_path}")
-    logger.info(f"[{stage_name}] 转录片段数: {len(transcribe_result.get('segments', []))}")
-
-    # 验证音频文件是否存在
-    if not os.path.exists(audio_path):
-        error_msg = f"音频文件不存在: {audio_path}"
-        logger.error(f"[{stage_name}] {error_msg}")
-        # 抛出ValueError而不是FileNotFoundError，避免触发Celery重试机制
-        raise ValueError(error_msg)
-
-    # 检查说话人分离是否启用
-    enable_diarization = whisperx_config.get('enable_diarization', False)
-    
-    if not enable_diarization:
-        logger.info(f"[{stage_name}] 说话人分离功能已禁用，跳过处理")
-        return {
-            "segments": transcribe_result['segments'],
-            "audio_path": audio_path,
-            "audio_duration": transcribe_result.get('audio_duration', 0),
-            "language": transcribe_result.get('language', 'unknown'),
-            "diarization_enabled": False,
-            "speaker_enhanced_segments": None
-        }
-
-    logger.info(f"[{stage_name}] 开始说话人分离...")
-    diarization_start_time = time.time()
-
-    try:
-        # 导入说话人分离模块
-        from services.workers.faster_whisper_service.app.speaker_diarization import create_speaker_diarizer_v2
-
-        # 创建说话人分离器
-        diarizer = create_speaker_diarizer_v2(whisperx_config)
-
-        # 执行说话人分离
-        diarization_annotation = diarizer.diarize(audio_path)
-
-        # 使用新的转换函数处理pyannote Annotation
-        from services.workers.faster_whisper_service.app.speaker_word_matcher import convert_annotation_to_segments
-        diarization_segments = convert_annotation_to_segments(diarization_annotation)
-
-        # 使用词级时间戳进行精确匹配
-        speaker_enhanced_segments = None
-        if transcribe_result['segments']:
-            try:
-                # 导入词级匹配器
-                from services.workers.faster_whisper_service.app.speaker_word_matcher import create_speaker_word_matcher
-
-                logger.info(f"[{stage_name}] 使用词级时间戳进行精确说话人匹配")
-                word_matcher = create_speaker_word_matcher(diarization_segments, whisperx_config)
-
-                # 生成增强的字幕片段
-                speaker_enhanced_segments = word_matcher.generate_enhanced_subtitles(transcribe_result['segments'])
-
-                logger.info(f"[{stage_name}] 词级匹配完成，生成 {len(speaker_enhanced_segments)} 个精确片段")
-
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 词级匹配失败: {e}，回退到传统匹配方式")
-                # 回退到传统合并方式
-                speaker_enhanced_segments = diarizer.merge_transcript_with_diarization(
-                    transcript_segments=transcribe_result['segments'],
-                    diarization_segments=diarization_segments
-                )
-
-        # 清理资源
-        diarizer.cleanup()
-
-        diarization_duration = time.time() - diarization_start_time
-        logger.info(f"[{stage_name}] 说话人分离完成，耗时: {diarization_duration:.2f}秒")
-
-        # 统计说话人信息
-        speakers = set()
-        if speaker_enhanced_segments:
-            for segment in speaker_enhanced_segments:
-                if 'speaker' in segment:
-                    speakers.add(segment['speaker'])
-
-        logger.info(f"[{stage_name}] 检测到 {len(speakers)} 个说话人: {sorted(speakers)}")
-
-        # 构建返回数据
-        result = {
-            "segments": transcribe_result['segments'],
-            "audio_path": audio_path,
-            "audio_duration": transcribe_result.get('audio_duration', 0),
-            "language": transcribe_result.get('language', 'unknown'),
-            "diarization_enabled": True,
-            "speaker_enhanced_segments": speaker_enhanced_segments,
-            "diarization_segments": diarization_segments,
-            "diarization_duration": diarization_duration
-        }
-
-    except Exception as e:
-        logger.warning(f"[{stage_name}] 说话人分离失败: {e}")
-        logger.info(f"[{stage_name}] 将使用基础转录结果继续处理")
-        
-        # 分离失败时，返回原始转录结果
-        result = {
-            "segments": transcribe_result['segments'],
-            "audio_path": audio_path,
-            "audio_duration": transcribe_result.get('audio_duration', 0),
-            "language": transcribe_result.get('language', 'unknown'),
-            "diarization_enabled": False,
-            "speaker_enhanced_segments": None,
-            "diarization_error": str(e)
-        }
-
-    # 执行统一的GPU显存清理
-    _cleanup_gpu_memory(stage_name)
-
-    return result
 
 
 def _cleanup_gpu_memory(stage_name: str) -> None:
@@ -750,7 +573,7 @@ def _cleanup_gpu_memory(stage_name: str) -> None:
         logger.warning(f"[{stage_name}] GPU显存清理时出错: {e}", exc_info=True)
 
 
-def _should_use_gpu_lock_for_transcription(whisperx_config: dict) -> bool:
+def _should_use_gpu_lock_for_transcription(service_config: dict) -> bool:
     """
     判断语音转录是否应该使用GPU锁
     
@@ -759,499 +582,47 @@ def _should_use_gpu_lock_for_transcription(whisperx_config: dict) -> bool:
     - 不需要上gpu锁的任务: cpu模式下的`语音转录功能`
     
     Args:
-        whisperx_config: WhisperX配置
+        service_config: 服务配置
     
     Returns:
         bool: True表示应该使用GPU锁
     """
     try:
         # 获取设备配置
-        device = whisperx_config.get('device', 'cpu')
+        device = service_config.get('device', 'cpu')
         
         # 检查CUDA可用性
         if device == 'cuda':
             try:
                 import torch
                 if torch.cuda.is_available():
-                    logger.info("[whisperx] CUDA模式语音转录，需要GPU锁")
+                    logger.info("[faster-whisper] CUDA模式语音转录，需要GPU锁")
                     return True
                 else:
-                    logger.info("[whisperx] CUDA不可用，语音转录使用CPU模式，跳过GPU锁")
+                    logger.info("[faster-whisper] CUDA不可用，语音转录使用CPU模式，跳过GPU锁")
                     return False
             except ImportError:
-                logger.warning("[whisperx] PyTorch未安装，语音转录使用CPU模式，跳过GPU锁")
+                logger.warning("[faster-whisper] PyTorch未安装，语音转录使用CPU模式，跳过GPU锁")
                 return False
         else:
-            logger.info(f"[whisperx] {device}模式语音转录，跳过GPU锁")
+            logger.info(f"[faster-whisper] {device}模式语音转录，跳过GPU锁")
             return False
             
     except Exception as e:
-        logger.warning(f"[whisperx] 检查语音转录GPU锁需求时出错: {e}")
+        logger.warning(f"[faster-whisper] 检查语音转录GPU锁需求时出错: {e}")
         # 出错时默认不使用GPU锁，避免阻塞
         return False
-
-
-def _should_use_gpu_lock_for_diarization(whisperx_config: dict) -> bool:
-    """
-    判断说话人分离是否应该使用GPU锁
-    
-    根据需求：
-    - 需要上gpu锁任务: cuda模式下的: `语音转录功能`; 本地模型cuda模式下的`说话人分离功能`
-    - 不需要上gpu锁的任务: 付费接口模式下的`说话人分离功能`; cpu模式下的`说话人分离功能`
-    
-    Args:
-        whisperx_config: WhisperX配置
-    
-    Returns:
-        bool: True表示应该使用GPU锁
-    """
-    try:
-        # 导入说话人分离模块
-        from services.workers.faster_whisper_service.app.speaker_diarization import SpeakerDiarizerV2
-        
-        # 创建临时实例来检查配置
-        temp_diarizer = SpeakerDiarizerV2(whisperx_config)
-        
-        # 检查是否使用付费模式
-        if temp_diarizer._use_premium_mode():
-            logger.info("[whisperx] 付费模式说话人分离，跳过GPU锁")
-            return False
-        
-        # 检查设备类型
-        device = temp_diarizer.device
-        if device == 'cuda':
-            logger.info("[whisperx] 本地CUDA模式说话人分离，需要GPU锁")
-            return True
-        else:
-            logger.info(f"[whisperx] {device}模式说话人分离，跳过GPU锁")
-            return False
-            
-    except Exception as e:
-        logger.warning(f"[whisperx] 检查说话人分离GPU锁需求时出错: {e}")
-        # 出错时默认不使用GPU锁，避免阻塞
-        return False
-
-
-def generate_subtitles(self, context: dict) -> dict:
-    """
-    WhisperX 字幕生成任务，支持GPU锁管理。
-    
-    此任务作为唯一入口，内部调用带GPU锁的函数来执行GPU操作：
-    1. 调用 _transcribe_audio_with_lock 进行语音转录（CUDA模式下使用GPU锁）
-    2. 根据配置调用 _diarize_speakers_with_lock 进行说话人分离（本地CUDA模式下使用GPU锁）
-    3. 生成最终的字幕文件
-    
-    GPU锁说明：
-    - CUDA模式下的语音转录功能会自动获取GPU锁
-    - 本地模型CUDA模式下的说话人分离功能会自动获取GPU锁
-    - CPU模式和付费接口模式下直接执行，无需等待锁
-    """
-    start_time = time.time()
-    workflow_context = WorkflowContext(**context)
-    stage_name = self.name
-    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-    state_manager.update_workflow_state(workflow_context)
-
-    try:
-        # 从前一个任务的输出中获取音频文件路径
-        audio_path = None
-        audio_source = ""
-
-        logger.info(f"[{stage_name}] 开始音频源选择逻辑")
-        logger.info(f"[{stage_name}] 当前工作流阶段数量: {len(workflow_context.stages)}")
-        logger.info(f"[{stage_name}] 可用阶段列表: {list(workflow_context.stages.keys())}")
-
-        # 优先检查 audio_separator.separate_vocals 阶段的人声音频输出
-        audio_separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
-        logger.debug(f"[{stage_name}] 检查 audio_separator.separate_vocals 阶段: 状态={audio_separator_stage.status if audio_separator_stage else 'None'}")
-
-        if audio_separator_stage and audio_separator_stage.status in ['SUCCESS', 'COMPLETED']:
-            logger.debug(f"[{stage_name}] audio_separator 阶段输出类型: {type(audio_separator_stage.output)}")
-            logger.debug(f"[{stage_name}] audio_separator 输出内容: {audio_separator_stage.output}")
-
-            # 直接检查 vocal_audio 字段
-            if (audio_separator_stage.output and
-                isinstance(audio_separator_stage.output, dict) and
-                audio_separator_stage.output.get('vocal_audio')):
-                audio_path = audio_separator_stage.output['vocal_audio']
-                audio_source = "人声音频 (audio_separator)"
-                logger.info(f"[{stage_name}] 成功获取人声音频: {audio_path}")
-
-        # 如果没有人声音频，回退到 ffmpeg.extract_audio 的默认音频
-        if not audio_path:
-            ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
-            logger.debug(f"[{stage_name}] 检查 ffmpeg.extract_audio 阶段: 状态={ffmpeg_stage.status if ffmpeg_stage else 'None'}")
-
-            if ffmpeg_stage and ffmpeg_stage.status in ['SUCCESS', 'COMPLETED']:
-                logger.debug(f"[{stage_name}] ffmpeg 阶段输出类型: {type(ffmpeg_stage.output)}")
-                logger.debug(f"[{stage_name}] ffmpeg 输出内容: {ffmpeg_stage.output}")
-
-                # 尝试从字典中获取 audio_path
-                if (ffmpeg_stage.output and
-                    isinstance(ffmpeg_stage.output, dict) and
-                    ffmpeg_stage.output.get('audio_path')):
-                    audio_path = ffmpeg_stage.output['audio_path']
-                    audio_source = "默认音频 (ffmpeg)"
-                    logger.info(f"[{stage_name}] 成功获取默认音频: {audio_path}")
-                else:
-                    logger.warning(f"[{stage_name}] ffmpeg 输出中未找到 audio_path 字段")
-
-        if not audio_path:
-            # 提供更详细的错误信息帮助调试
-            logger.error(f"[{stage_name}] 无法获取音频文件路径")
-            logger.error(f"[{stage_name}] 检查的工作流阶段:")
-
-            # 检查ffmpeg阶段
-            ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
-            if ffmpeg_stage:
-                logger.error(f"[{stage_name}] - ffmpeg.extract_audio: 状态={ffmpeg_stage.status}")
-                if hasattr(ffmpeg_stage, 'output') and ffmpeg_stage.output:
-                    logger.error(f"[{stage_name}] - ffmpeg.extract_audio.output: {ffmpeg_stage.output}")
-                elif isinstance(ffmpeg_stage.output, dict):
-                    logger.error(f"[{stage_name}] - ffmpeg.extract_audio.output (dict): {ffmpeg_stage.output}")
-            else:
-                logger.error(f"[{stage_name}] - ffmpeg.extract_audio: 未找到阶段信息")
-
-            # 检查audio_separator阶段
-            audio_separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
-            if audio_separator_stage:
-                logger.error(f"[{stage_name}] - audio_separator.separate_vocals: 状态={audio_separator_stage.status}")
-                if hasattr(audio_separator_stage, 'output') and audio_separator_stage.output:
-                    logger.error(f"[{stage_name}] - audio_separator.separate_vocals.output: {audio_separator_stage.output}")
-                    if isinstance(audio_separator_stage.output, dict):
-                        logger.error(f"[{stage_name}] - vocal_audio: {'存在' if audio_separator_stage.output.get('vocal_audio') else '不存在'}")
-                        logger.error(f"[{stage_name}] - audio_list: {'存在' if audio_separator_stage.output.get('audio_list') else '不存在'}")
-                elif isinstance(audio_separator_stage.output, dict):
-                    logger.error(f"[{stage_name}] - audio_separator.separate_vocals.output (dict): {audio_separator_stage.output}")
-                    logger.error(f"[{stage_name}] - vocal_audio: {'存在' if audio_separator_stage.output.get('vocal_audio') else '不存在'}")
-                    logger.error(f"[{stage_name}] - audio_list: {'存在' if audio_separator_stage.output.get('audio_list') else '不存在'}")
-            else:
-                logger.error(f"[{stage_name}] - audio_separator.separate_vocals: 未找到阶段信息")
-
-            # 检查context中的音频路径（仅显示是否存在，不显示完整路径）
-            logger.error(f"[{stage_name}] context中的音频路径:")
-            logger.error(f"[{stage_name}] - audio_path: {'存在' if context.get('audio_path') else '不存在'}")
-
-            # 检查输入参数中的文件名（不显示完整路径）
-            input_params = workflow_context.input_params
-            if input_params:
-                video_path = input_params.get('video_path', '')
-                if video_path:
-                    video_name = os.path.basename(video_path)
-                    logger.error(f"[{stage_name}] 原始视频文件: {video_name}")
-
-            raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 或 audio_separator.separate_vocals 任务已成功完成")
-
-        logger.info(f"[{stage_name}] ========== 音频源选择结果 ==========")
-        logger.info(f"[{stage_name}] 选择的音频源: {audio_source}")
-        logger.info(f"[{stage_name}] 音频文件路径: {audio_path}")
-        logger.info(f"[{stage_name}] =================================")
-
-        # 加载配置
-        whisperx_config = CONFIG.get('faster_whisper_service', {})
-        enable_diarization = whisperx_config.get('enable_diarization', False)
-        show_speaker_labels = whisperx_config.get('show_speaker_labels', True)
-        enable_word_timestamps = whisperx_config.get('enable_word_timestamps', True)
-
-        logger.info(f"[{stage_name}] 开始字幕生成流程")
-        logger.info(f"[{stage_name}] 说话人分离: {'启用' if enable_diarization else '禁用'}")
-        logger.info(f"[{stage_name}] 词级时间戳: {'启用' if enable_word_timestamps else '禁用'}")
-
-        # 第一步：调用带GPU锁的转录函数
-        logger.info(f"[{stage_name}] 步骤1: 执行语音转录")
-        transcribe_result = _transcribe_audio_with_lock(audio_path, whisperx_config, stage_name)
-        logger.info(f"[{stage_name}] 转录完成，获得 {len(transcribe_result.get('segments', []))} 个片段")
-
-        # 第二步：如果启用说话人分离，调用带GPU锁的说话人分离函数
-        speaker_enhanced_segments = None
-        diarization_segments = None
-        
-        if enable_diarization:
-            logger.info(f"[{stage_name}] 步骤2: 执行说话人分离")
-            diarize_result = _diarize_speakers_with_lock(audio_path, transcribe_result, whisperx_config, stage_name)
-            
-            speaker_enhanced_segments = diarize_result.get('speaker_enhanced_segments')
-            diarization_segments = diarize_result.get('diarization_segments')
-            
-            if speaker_enhanced_segments:
-                logger.info(f"[{stage_name}] 说话人分离完成，获得 {len(speaker_enhanced_segments)} 个增强片段")
-            else:
-                logger.warning(f"[{stage_name}] 说话人分离未返回增强片段")
-
-        # 第三步：生成字幕文件
-        logger.info(f"[{stage_name}] 步骤3: 生成字幕文件")
-        
-        # 获取基本信息
-        audio_duration = transcribe_result.get('audio_duration', 0)
-        language = transcribe_result.get('language', 'unknown')
-        segments = transcribe_result.get('segments', [])
-        
-        # 创建字幕目录
-        subtitles_dir = os.path.join(workflow_context.shared_storage_path, "subtitles")
-        os.makedirs(subtitles_dir, exist_ok=True)
-
-        # 生成基础SRT字幕文件
-        subtitle_filename = os.path.splitext(os.path.basename(audio_path))[0] + ".srt"
-        subtitle_path = os.path.join(subtitles_dir, subtitle_filename)
-
-        # 转换为SRT格式
-        with open(subtitle_path, "w", encoding="utf-8") as f:
-            for i, segment in enumerate(segments):
-                segment_start = segment["start"]
-                segment_end = segment["end"]
-                text = segment["text"].strip()
-
-                # 格式化为SRT时间格式
-                start_str = f"{int(segment_start//3600):02d}:{int((segment_start%3600)//60):02d}:{int(segment_start%60):02d},{int((segment_start%1)*1000):03d}"
-                end_str = f"{int(segment_end//3600):02d}:{int((segment_end%3600)//60):02d}:{int(segment_end%60):02d},{int((segment_end%1)*1000):03d}"
-
-                f.write(f"{i+1}\n")
-                f.write(f"{start_str} --> {end_str}\n")
-                f.write(f"{text}\n\n")
-
-        logger.info(f"[{stage_name}] 基础SRT字幕生成完成: {subtitle_path} (共{len(segments)}条字幕)")
-
-        # 初始化输出数据
-        output_data = {"subtitle_path": subtitle_path}
-
-        # 如果启用说话人分离且成功，生成带说话人信息的字幕文件
-        speaker_srt_path = None
-        speaker_json_path = None
-
-        if enable_diarization and speaker_enhanced_segments and show_speaker_labels:
-            try:
-                # 生成带说话人信息的SRT字幕文件
-                speaker_srt_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_with_speakers.srt"
-                speaker_srt_path = os.path.join(subtitles_dir, speaker_srt_filename)
-
-                with open(speaker_srt_path, "w", encoding="utf-8") as f:
-                    for i, segment in enumerate(speaker_enhanced_segments):
-                        segment_start = segment["start"]
-                        segment_end = segment["end"]
-                        text = segment["text"].strip()
-                        speaker = segment.get("speaker", "UNKNOWN")
-                        confidence = segment.get("speaker_confidence", 0.0)
-
-                        # 格式化为SRT时间格式
-                        start_str = f"{int(segment_start//3600):02d}:{int((segment_start%3600)//60):02d}:{int(segment_start%60):02d},{int((segment_start%1)*1000):03d}"
-                        end_str = f"{int(segment_end//3600):02d}:{int((segment_end%3600)//60):02d}:{int(segment_end%60):02d},{int((segment_end%1)*1000):03d}"
-
-                        f.write(f"{i+1}\n")
-                        f.write(f"{start_str} --> {end_str}\n")
-                        f.write(f"[{speaker}] {text}\n\n")
-
-                logger.info(f"[{stage_name}] 带说话人信息的SRT字幕生成完成: {speaker_srt_path} (共{len(speaker_enhanced_segments)}条字幕)")
-
-                # 生成带说话人信息的JSON文件
-                speaker_json_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_with_speakers.json"
-                speaker_json_path = os.path.join(subtitles_dir, speaker_json_filename)
-
-                # 构建带说话人信息的JSON数据
-                import json
-                speaker_json_data = {
-                    "metadata": {
-                        "audio_file": os.path.basename(audio_path),
-                        "total_duration": audio_duration,
-                        "language": language,
-                        "word_timestamps_enabled": enable_word_timestamps,
-                        "diarization_enabled": enable_diarization,
-                        "speakers": sorted(set(seg.get("speaker", "UNKNOWN") for seg in speaker_enhanced_segments)) if speaker_enhanced_segments else [],
-                        "total_segments": len(speaker_enhanced_segments),
-                        "transcribe_method": "gpu-lock-v2"  # 标识使用GPU锁版本
-                    },
-                    "segments": []
-                }
-
-                for i, segment in enumerate(speaker_enhanced_segments):
-                    segment_data = {
-                        "id": i + 1,
-                        "start": segment["start"],
-                        "end": segment["end"],
-                        "duration": segment["end"] - segment["start"],
-                        "text": segment["text"].strip(),
-                        "speaker": segment.get("speaker", "UNKNOWN"),
-                        "speaker_confidence": segment.get("speaker_confidence", 0.0)
-                    }
-
-                    # 如果有词级时间戳，添加到JSON中
-                    if "words" in segment and segment["words"]:
-                        segment_data["words"] = segment["words"]
-
-                    speaker_json_data["segments"].append(segment_data)
-
-                # 写入JSON文件
-                with open(speaker_json_path, "w", encoding="utf-8") as f:
-                    json.dump(speaker_json_data, f, ensure_ascii=False, indent=2)
-
-                logger.info(f"[{stage_name}] 带说话人信息的JSON文件生成完成: {speaker_json_path}")
-
-                # 生成说话人统计信息
-                speaker_stats = {}
-                if speaker_enhanced_segments:
-                    for segment in speaker_enhanced_segments:
-                        speaker = segment.get("speaker", "UNKNOWN")
-                        duration = segment["end"] - segment["start"]
-                        if speaker not in speaker_stats:
-                            speaker_stats[speaker] = {"duration": 0.0, "segments": 0, "words": 0}
-                        speaker_stats[speaker]["duration"] += duration
-                        speaker_stats[speaker]["segments"] += 1
-                        if "words" in segment:
-                            speaker_stats[speaker]["words"] += len(segment["words"])
-
-                logger.info(f"[{stage_name}] 说话人统计信息:")
-                for speaker in sorted(speaker_stats.keys()):
-                    stats = speaker_stats[speaker]
-                    duration_percentage = (stats["duration"] / audio_duration) * 100 if audio_duration > 0 else 0
-                    logger.info(f"  {speaker}: {stats['segments']}段, {stats['duration']:.2f}秒 ({duration_percentage:.1f}%), {stats['words']}词")
-
-                # 添加到输出数据
-                output_data["speaker_srt_path"] = speaker_srt_path
-                output_data["speaker_json_path"] = speaker_json_path
-
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 生成带说话人信息的字幕文件失败: {e}")
-
-        # 如果启用词级时间戳，生成JSON文件
-        json_subtitle_path = None
-        if enable_word_timestamps and segments:
-            try:
-                # 导入JSON生成函数
-                # 本地函数，无需导入
-
-                # 生成JSON字幕文件
-                json_subtitle_filename = os.path.splitext(os.path.basename(audio_path))[0] + "_word_timestamps.json"
-                json_subtitle_path = os.path.join(subtitles_dir, json_subtitle_filename)
-
-                # 检查词级时间戳质量
-                word_count = 0
-                char_count = 0
-                for segment in segments:
-                    if "words" in segment and segment["words"]:
-                        word_count += len(segment["words"])
-                        for word_info in segment["words"]:
-                            char_count += len(word_info["word"])
-
-                # 计算平均词长，判断是否为字符级对齐
-                avg_word_length = char_count / word_count if word_count > 0 else 0
-
-                logger.info(f"[{stage_name}] 词级时间戳质量检查:")
-                logger.info(f"   - 总词数: {word_count}")
-                logger.info(f"   - 平均词长: {avg_word_length:.2f}")
-
-                if avg_word_length <= 1.5:
-                    logger.warning(f"   ⚠️  检测到可能的字符级对齐（平均词长: {avg_word_length:.2f}）")
-                    logger.warning(f"   ⚠️  词级时间戳质量可能不佳")
-                else:
-                    logger.info(f"   ✅ 检测到词级对齐（平均词长: {avg_word_length:.2f}）")
-
-                # 生成词级时间戳JSON内容
-                json_content = segments_to_word_timestamp_json(segments, include_segment_info=True)
-
-                # 写入JSON文件
-                with open(json_subtitle_path, "w", encoding="utf-8") as f:
-                    f.write(json_content)
-
-                logger.info(f"[{stage_name}] 词级时间戳JSON文件生成完成: {json_subtitle_path}")
-                
-                # 添加到输出数据
-                output_data["word_timestamps_json_path"] = json_subtitle_path
-
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 生成词级时间戳JSON文件失败: {e}")
-
-        # === 字幕校正功能集成 ===
-        # 检查是否启用字幕校正
-        enable_correction = workflow_context.input_params.get('enable_subtitle_correction', False)
-        correction_provider = workflow_context.input_params.get('correction_provider', None)
-
-        if enable_correction and subtitle_path:
-            logger.info(f"[{stage_name}] ========== 启用AI字幕校正 ==========")
-            logger.info(f"[{stage_name}] 校正提供商: {correction_provider or '使用默认配置'}")
-
-            try:
-                # 导入字幕校正模块
-                from services.common.subtitle import SubtitleCorrector
-
-                # 创建字幕校正器
-                corrector = SubtitleCorrector(provider=correction_provider)
-
-                # 执行字幕校正
-                logger.info(f"[{stage_name}] 开始AI字幕校正...")
-                import asyncio
-
-                # 在同步函数中运行异步校正
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    correction_result = loop.run_until_complete(
-                        corrector.correct_subtitle_file(subtitle_path=subtitle_path)
-                    )
-                finally:
-                    loop.close()
-
-                if correction_result.success:
-                    # 将校正结果添加到输出数据
-                    output_data["corrected_subtitle_path"] = correction_result.corrected_subtitle_path
-                    output_data["correction_statistics"] = correction_result.statistics
-                    output_data["correction_provider_used"] = correction_result.provider_used
-
-                    logger.info(f"[{stage_name}] ✅ 字幕校正完成!")
-                    logger.info(f"[{stage_name}] 校正后字幕: {correction_result.corrected_subtitle_path}")
-                    logger.info(f"[{stage_name}] 使用提供商: {correction_result.provider_used}")
-                    logger.info(f"[{stage_name}] 处理时间: {correction_result.processing_time:.2f}秒")
-                    logger.info(f"[{stage_name}] 统计信息: {correction_result.statistics}")
-
-                    # 如果启用备份，备份原始字幕
-                    if corrector.config.backup_original:
-                        import shutil
-                        backup_path = subtitle_path.replace('.srt', '_original.srt')
-                        shutil.copy2(subtitle_path, backup_path)
-                        output_data["original_subtitle_backup"] = backup_path
-                        logger.info(f"[{stage_name}] 原始字幕已备份: {backup_path}")
-
-                else:
-                    logger.error(f"[{stage_name}] ❌ 字幕校正失败: {correction_result.error_message}")
-                    output_data["correction_error"] = correction_result.error_message
-
-            except ImportError as e:
-                logger.error(f"[{stage_name}] 字幕校正模块导入失败: {e}")
-                logger.error(f"[{stage_name}] 请确保字幕校正模块已正确安装")
-                output_data["correction_error"] = f"模块导入失败: {str(e)}"
-
-            except Exception as e:
-                logger.error(f"[{stage_name}] 字幕校正过程中发生错误: {e}", exc_info=True)
-                output_data["correction_error"] = f"校正过程错误: {str(e)}"
-        else:
-            logger.debug(f"[{stage_name}] 字幕校正功能未启用")
-
-        # 标记任务成功
-        workflow_context.stages[stage_name].status = 'SUCCESS'
-        workflow_context.stages[stage_name].output = output_data
-
-        logger.info(f"[{stage_name}] 字幕生成任务完成")
-
-    except Exception as e:
-        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
-        workflow_context.stages[stage_name].status = 'FAILED'
-        workflow_context.stages[stage_name].error = str(e)
-        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
-    finally:
-        workflow_context.stages[stage_name].duration = time.time() - start_time
-        state_manager.update_workflow_state(workflow_context)
-
-    return workflow_context.model_dump()
-
 
 # ============================================================================
-# WhisperX 功能拆分 - 独立任务节点
+# faster-whisper 功能拆分 - 独立任务节点
 # ============================================================================
 
 @celery_app.task(bind=True, name='faster_whisper.transcribe_audio')
 def transcribe_audio(self, context: dict) -> dict:
     """
-    WhisperX 独立转录任务节点
+    faster-whisper 独立转录任务节点
 
-    此任务专门负责音频文件的语音转录功能，是WhisperX功能拆分的第一步。
+    此任务专门负责音频文件的语音转录功能。
     使用GPU锁装饰器保护GPU资源，支持CUDA和CPU模式。
 
     输入：音频文件路径（通过工作流上下文获取）
@@ -1321,16 +692,16 @@ def transcribe_audio(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 音频文件路径: {audio_path}")
         logger.info(f"[{stage_name}] =================================")
 
-        # 加载WhisperX配置
-        whisperx_config = CONFIG.get('faster_whisper_service', {})
-        enable_word_timestamps = whisperx_config.get('enable_word_timestamps', True)
+        # 加载服务配置
+        service_config = CONFIG.get('faster_whisper_service', {})
+        enable_word_timestamps = service_config.get('enable_word_timestamps', True)
 
         logger.info(f"[{stage_name}] 开始语音转录流程")
         logger.info(f"[{stage_name}] 词级时间戳: {'启用' if enable_word_timestamps else '禁用'}")
 
         # 执行语音转录
         logger.info(f"[{stage_name}] 执行语音转录...")
-        transcribe_result = _transcribe_audio_with_lock(audio_path, whisperx_config, stage_name)
+        transcribe_result = _transcribe_audio_with_lock(audio_path, service_config, stage_name)
 
         logger.info(f"[{stage_name}] 转录完成，获得 {len(transcribe_result.get('segments', []))} 个片段")
 
@@ -1428,254 +799,17 @@ def transcribe_audio(self, context: dict) -> dict:
     return workflow_context.model_dump()
 
 
-def diarize_speakers(self, context: dict) -> dict:
-    """
-    WhisperX 独立说话人分离任务节点
-
-    此任务专门负责对转录结果进行说话人分离功能，是WhisperX功能拆分的第二步。
-    接收转录任务的输出作为输入，为转录片段添加说话人信息。
-
-    输入：转录结果（通过工作流上下文从 whisperx.transcribe_audio 获取）
-    输出：带有说话人信息的增强片段和统计信息
-
-    GPU锁说明：
-    - 本地CUDA模式：自动获取GPU锁
-    - 付费接口模式：跳过GPU锁，直接执行
-    - CPU模式：跳过GPU锁，直接执行
-    """
-    import json
-
-    start_time = time.time()
-    workflow_context = WorkflowContext(**context)
-    stage_name = self.name
-    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-    state_manager.update_workflow_state(workflow_context)
-
-    try:
-        # 从前一个任务的输出中获取转录结果
-        transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
-        if not transcribe_stage or transcribe_stage.status not in ['SUCCESS', 'COMPLETED']:
-            error_msg = "无法获取转录结果：请确保 faster_whisper.transcribe_audio 任务已成功完成"
-            logger.error(f"[{stage_name}] {error_msg}")
-            raise ValueError(error_msg)
-
-        # 获取转录结果数据
-        transcribe_output = transcribe_stage.output
-        if not transcribe_output or not isinstance(transcribe_output, dict):
-            error_msg = "转录结果数据格式错误"
-            logger.error(f"[{stage_name}] {error_msg}")
-            raise ValueError(error_msg)
-
-        # Redis优化：使用统一的数据获取接口，支持新旧格式
-        segments = get_segments_data(transcribe_output, 'segments')
-        audio_path = transcribe_output.get('audio_path')
-        transcribe_data_file = transcribe_output.get('transcribe_data_file')
-
-        if not segments or not audio_path:
-            error_msg = "转录结果中缺少必要的数据（segments 或 audio_path）"
-            logger.error(f"[{stage_name}] {error_msg}")
-            raise ValueError(error_msg)
-
-        # 记录数据来源
-        if 'segments_file' in transcribe_output:
-            logger.info(f"[{stage_name}] 从优化文件加载segments: {transcribe_output['segments_file']}")
-        else:
-            logger.info(f"[{stage_name}] 从Redis内存加载segments (旧格式)")
-
-        logger.info(f"[{stage_name}] ========== 输入数据验证 ==========")
-        logger.info(f"[{stage_name}] 转录片段数: {len(segments)}")
-        logger.info(f"[{stage_name}] 音频文件: {audio_path}")
-        logger.info(f"[{stage_name}] 转录数据文件: {transcribe_data_file}")
-        logger.info(f"[{stage_name}] 语言: {transcribe_output.get('language', 'unknown')}")
-        logger.info(f"[{stage_name}] 音频时长: {transcribe_output.get('audio_duration', 0):.2f}秒")
-        logger.info(f"[{stage_name}] =================================")
-
-        # 验证音频文件是否存在
-        if not os.path.exists(audio_path):
-            error_msg = f"音频文件不存在: {audio_path}"
-            logger.error(f"[{stage_name}] {error_msg}")
-            raise ValueError(error_msg)
-
-        # 验证转录数据文件是否存在
-        if transcribe_data_file and os.path.exists(transcribe_data_file):
-            try:
-                with open(transcribe_data_file, 'r', encoding='utf-8') as f:
-                    transcribe_data = json.load(f)
-                logger.info(f"[{stage_name}] 成功读取转录数据文件: {transcribe_data_file}")
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 读取转录数据文件失败: {e}，将使用内存中的数据")
-                transcribe_data = None
-        else:
-            logger.info(f"[{stage_name}] 转录数据文件不存在或未指定，使用内存中的数据")
-            transcribe_data = None
-
-        # 加载WhisperX配置
-        whisperx_config = CONFIG.get('faster_whisper_service', {})
-        enable_diarization = whisperx_config.get('enable_diarization', False)
-
-        logger.info(f"[{stage_name}] 开始说话人分离流程")
-        logger.info(f"[{stage_name}] 说话人分离: {'启用' if enable_diarization else '禁用'}")
-
-        # 构建转录结果字典格式
-        transcribe_result = {
-            'segments': segments,
-            'audio_path': audio_path,
-            'audio_duration': transcribe_output.get('audio_duration', 0),
-            'language': transcribe_output.get('language', 'unknown'),
-            'transcribe_duration': transcribe_output.get('transcribe_duration', 0),
-            'model_name': transcribe_output.get('model_name', 'unknown'),
-            'device': transcribe_output.get('device', 'unknown'),
-            'enable_word_timestamps': transcribe_output.get('enable_word_timestamps', True)
-        }
-
-        # 执行说话人分离
-        speaker_enhanced_segments = None
-        diarization_segments = None
-        diarization_enabled = False
-
-        if enable_diarization:
-            logger.info(f"[{stage_name}] 执行说话人分离...")
-            diarize_result = _diarize_speakers_with_lock(audio_path, transcribe_result, whisperx_config, stage_name)
-
-            speaker_enhanced_segments = diarize_result.get('speaker_enhanced_segments')
-            diarization_segments = diarize_result.get('diarization_segments')
-            diarization_enabled = diarize_result.get('diarization_enabled', False)
-
-            if speaker_enhanced_segments:
-                logger.info(f"[{stage_name}] 说话人分离完成，获得 {len(speaker_enhanced_segments)} 个增强片段")
-            else:
-                logger.warning(f"[{stage_name}] 说话人分离未返回增强片段")
-        else:
-            logger.info(f"[{stage_name}] 说话人分离功能已禁用，跳过处理")
-
-        # 优化：使用工作流ID的前8位作为文件标识，避免冗余的UUID
-        workflow_short_id = workflow_context.workflow_id[:8]  # 取工作流ID前8位
-
-        # 创建说话人分离数据文件
-        diarization_data_file = os.path.join(
-            workflow_context.shared_storage_path,
-            f"diarization_data_{workflow_short_id}.json"
-        )
-
-        # 准备说话人分离数据文件内容
-        diarization_data_content = {
-            "metadata": {
-                "task_name": stage_name,
-                "workflow_id": workflow_context.workflow_id,
-                "audio_file": os.path.basename(audio_path),
-                "total_duration": transcribe_result.get('audio_duration', 0),
-                "language": transcribe_result.get('language', 'unknown'),
-                "diarization_enabled": diarization_enabled,
-                "diarization_method": "gpu-lock-v3-split",
-                "created_at": time.time(),
-                "source_transcribe_file": transcribe_data_file
-            },
-            "original_segments": transcribe_result['segments'],
-            "speaker_enhanced_segments": speaker_enhanced_segments,
-            "diarization_segments": diarization_segments,
-            "statistics": {
-                "total_original_segments": len(transcribe_result['segments']),
-                "total_enhanced_segments": len(speaker_enhanced_segments) if speaker_enhanced_segments else 0,
-                "total_diarization_segments": len(diarization_segments) if diarization_segments else 0,
-                "diarization_duration": 0,
-                "detected_speakers": [],
-                "speaker_statistics": {}
-            }
-        }
-
-        # 如果启用了说话人分离且成功，添加统计信息
-        if diarization_enabled and speaker_enhanced_segments:
-            # 获取说话人分离耗时
-            diarization_duration = diarize_result.get('diarization_duration', 0)
-            diarization_data_content["statistics"]["diarization_duration"] = diarization_duration
-
-            # 统计说话人信息
-            speakers = set()
-            speaker_stats = {}
-
-            for segment in speaker_enhanced_segments:
-                speaker = segment.get("speaker", "UNKNOWN")
-                duration = segment["end"] - segment["start"]
-
-                speakers.add(speaker)
-
-                if speaker not in speaker_stats:
-                    speaker_stats[speaker] = {
-                        "duration": 0.0,
-                        "segments": 0,
-                        "words": 0
-                    }
-
-                speaker_stats[speaker]["duration"] += duration
-                speaker_stats[speaker]["segments"] += 1
-
-                # 统计词数
-                if "words" in segment and segment["words"]:
-                    speaker_stats[speaker]["words"] += len(segment["words"])
-
-            diarization_data_content["statistics"]["detected_speakers"] = sorted(speakers)
-            diarization_data_content["statistics"]["speaker_statistics"] = speaker_stats
-
-            logger.info(f"[{stage_name}] 检测到 {len(speakers)} 个说话人: {sorted(speakers)}")
-            for speaker in sorted(speakers):
-                stats = speaker_stats[speaker]
-                audio_duration = transcribe_result.get('audio_duration', 0)
-                duration_percentage = (stats["duration"] / audio_duration) * 100 if audio_duration > 0 else 0
-                logger.info(f"  {speaker}: {stats['segments']}段, {stats['duration']:.2f}秒 ({duration_percentage:.1f}%), {stats['words']}词")
-
-        # 写入说话人分离数据文件
-        with open(diarization_data_file, "w", encoding="utf-8") as f:
-            json.dump(diarization_data_content, f, ensure_ascii=False, indent=2)
-
-        logger.info(f"[{stage_name}] 说话人分离数据文件生成完成: {diarization_data_file}")
-
-        # 构建输出数据 - Redis优化版本：精简segments数据，仅存储文件路径，消除重复字段
-        output_data = {
-            # 优化：将3组segments数据替换为文件路径，大幅减少Redis内存占用
-            "segments_file": transcribe_data_file,           # 替代 "original_segments": transcribe_result['segments']
-            "diarization_file": diarization_data_file,      # 替代 "speaker_enhanced_segments" 和 "diarization_segments"
-            "audio_path": transcribe_result.get('audio_path', audio_path),
-            "audio_duration": transcribe_result.get('audio_duration', 0),
-            "language": transcribe_result.get('language', 'unknown'),
-            "diarization_enabled": diarization_enabled,
-            # 精简：统一统计信息到statistics对象中，消除重复字段
-            "statistics": diarization_data_content["statistics"],
-
-            # 兼容性：保留segments计数用于快速统计
-            "original_segments_count": len(transcribe_result['segments']),
-            "enhanced_segments_count": len(speaker_enhanced_segments) if speaker_enhanced_segments else 0,
-            "diarization_segments_count": len(diarization_segments) if diarization_segments else 0
-        }
-
-        # 标记任务成功
-        workflow_context.stages[stage_name].status = 'SUCCESS'
-        workflow_context.stages[stage_name].output = output_data
-
-        logger.info(f"[{stage_name}] 说话人分离任务完成")
-
-    except Exception as e:
-        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
-        workflow_context.stages[stage_name].status = 'FAILED'
-        workflow_context.stages[stage_name].error = str(e)
-        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
-    finally:
-        workflow_context.stages[stage_name].duration = time.time() - start_time
-        state_manager.update_workflow_state(workflow_context)
-
-    return workflow_context.model_dump()
-
-
 @celery_app.task(bind=True, name='faster_whisper.generate_subtitle_files')
 def generate_subtitle_files(self, context: dict) -> dict:
     """
-    WhisperX 独立字幕文件生成任务节点
+    faster-whisper 独立字幕文件生成任务节点
 
     此任务专门负责将转录结果（和可选的说话人分离结果）转换为各种格式的字幕文件。
-    支持多种输入模式和输出格式，是WhisperX功能拆分的第三步。
+    支持多种输入模式和输出格式。
 
     输入模式：
-    - 仅转录结果（来自 whisperx.transcribe_audio）
-    - 转录结果 + 说话人分离结果（来自 whisperx.diarize_speakers）
+    - 仅转录结果（来自 faster_whisper.transcribe_audio）
+    - 转录结果 + 说话人分离结果（来自 pyannote_audio.diarize_speakers）
 
     输出格式：
     - 基础SRT字幕文件
@@ -1727,8 +861,8 @@ def generate_subtitle_files(self, context: dict) -> dict:
         else:
             logger.info(f"[{stage_name}] 从Redis内存加载segments (旧格式)")
 
-        # 加载WhisperX配置（提前定义以便在说话人匹配中使用）
-        whisperx_config = CONFIG.get('faster_whisper_service', {})
+        # 加载服务配置（提前定义以便在说话人匹配中使用）
+        service_config = CONFIG.get('faster_whisper_service', {})
 
         # 检查是否有说话人分离结果
         speaker_segments = None
@@ -1748,14 +882,16 @@ def generate_subtitle_files(self, context: dict) -> dict:
                 # 如果有说话人信息和转录片段，进行合并
                 if speaker_segments and segments and enable_word_timestamps:
                     try:
-                        # 导入词级匹配器
-                        from services.workers.faster_whisper_service.app.speaker_word_matcher import create_speaker_word_matcher
-
+                        # 使用新的词级合并器（subtitle_merger模块）
                         logger.info(f"[{stage_name}] 使用词级时间戳进行精确说话人匹配")
-                        word_matcher = create_speaker_word_matcher(speaker_segments, whisperx_config)
 
-                        # 生成增强的字幕片段（合并转录文本和说话人信息）
-                        speaker_enhanced_segments = word_matcher.generate_enhanced_subtitles(segments)
+                        # 获取合并配置
+                        service_config = CONFIG.get('faster_whisper_service', {})
+                        merge_config = service_config.get('subtitle_merge', {})
+
+                        # 创建词级合并器并执行合并
+                        merger = create_word_level_merger(speaker_segments, merge_config)
+                        speaker_enhanced_segments = merger.merge(segments)
                         has_speaker_info = True
 
                         logger.info(f"[{stage_name}] 成功合并 {len(segments)} 个转录片段与 {len(speaker_segments)} 个说话人片段")
@@ -1788,7 +924,7 @@ def generate_subtitle_files(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] =================================")
 
         # 获取配置参数
-        show_speaker_labels = whisperx_config.get('show_speaker_labels', True)
+        show_speaker_labels = service_config.get('show_speaker_labels', True)
 
         logger.info(f"[{stage_name}] 开始字幕文件生成流程")
 
@@ -1995,6 +1131,374 @@ def generate_subtitle_files(self, context: dict) -> dict:
         workflow_context.stages[stage_name].output = output_data
 
         logger.info(f"[{stage_name}] 字幕文件生成任务完成")
+
+    except Exception as e:
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        workflow_context.stages[stage_name].status = 'FAILED'
+        workflow_context.stages[stage_name].error = str(e)
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    finally:
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
+
+    return workflow_context.model_dump()
+
+
+# ============================================================================
+# 字幕合并任务 - 新增功能
+# ============================================================================
+
+@celery_app.task(name='faster_whisper.merge_speaker_segments', bind=True)
+def merge_speaker_segments(self, context: dict) -> dict:
+    """
+    合并转录字幕与说话人时间段(片段级)
+
+    这是一个独立的工作流节点,用于将转录结果与说话人分离结果进行合并。
+    使用片段中心时间匹配算法,适用于没有词级时间戳的场景。
+
+    输入要求:
+    - context['stages']['transcribe']['output']['segments']: 转录片段列表
+    - context['stages']['diarize_speakers']['output']['speaker_segments']: 说话人时间段列表
+
+    输出:
+    - merged_segments: 包含说话人信息的字幕片段列表
+    - metadata: 合并过程的统计信息
+
+    Args:
+        context: 工作流上下文字典
+
+    Returns:
+        dict: 更新后的工作流上下文
+    """
+    workflow_context = WorkflowContext(**context)
+    stage_name = workflow_context.current_stage
+
+    logger.info(f"[{stage_name}] ========== 开始片段级字幕合并任务 ==========")
+
+    try:
+        # 标记任务开始
+        start_time = time.time()
+        workflow_context.stages[stage_name].status = 'IN_PROGRESS'
+        workflow_context.stages[stage_name].metadata = {'task_type': 'subtitle_merge_segment_level'}
+        state_manager.update_workflow_state(workflow_context)
+
+        # 1. 获取输入数据
+        logger.info(f"[{stage_name}] 正在获取输入数据...")
+
+        # 获取转录结果
+        transcribe_stage = workflow_context.get_stage_by_type('transcribe')
+        if not transcribe_stage or not transcribe_stage.output:
+            raise ValueError("未找到转录结果阶段或输出数据")
+
+        transcript_segments = transcribe_stage.output.get('segments', [])
+        if not transcript_segments:
+            raise ValueError("转录结果为空")
+
+        logger.info(f"[{stage_name}] 获取到转录片段: {len(transcript_segments)} 个")
+
+        # 获取说话人分离结果
+        diarize_stage = workflow_context.get_stage_by_type('diarize_speakers')
+        if not diarize_stage or not diarize_stage.output:
+            raise ValueError("未找到说话人分离结果阶段或输出数据")
+
+        speaker_segments = diarize_stage.output.get('speaker_segments', [])
+        if not speaker_segments:
+            raise ValueError("说话人分离结果为空")
+
+        logger.info(f"[{stage_name}] 获取到说话人时间段: {len(speaker_segments)} 个")
+
+        # 2. 验证说话人时间段数据
+        if not validate_speaker_segments(speaker_segments):
+            raise ValueError("说话人时间段数据格式无效")
+
+        # 3. 从配置获取合并参数
+        service_config = CONFIG.get('faster_whisper_service', {})
+        merge_config = service_config.get('subtitle_merge', {})
+
+        logger.info(f"[{stage_name}] 合并配置: {merge_config}")
+
+        # 4. 创建合并器并执行合并
+        logger.info(f"[{stage_name}] 开始执行片段级合并...")
+        merger = create_subtitle_merger(merge_config)
+        merged_segments = merger.merge(transcript_segments, speaker_segments)
+
+        logger.info(f"[{stage_name}] 合并完成,生成 {len(merged_segments)} 个片段")
+
+        # 5. 准备输出数据
+        output_data = {
+            'merged_segments': merged_segments,
+            'metadata': {
+                'merge_method': 'segment_level',
+                'input_transcript_count': len(transcript_segments),
+                'input_speaker_count': len(speaker_segments),
+                'output_count': len(merged_segments),
+                'speaker_count': len(set(seg.get('speaker', 'UNKNOWN') for seg in merged_segments))
+            }
+        }
+
+        # 6. 统计信息
+        logger.info(f"[{stage_name}] ========== 合并统计 ==========")
+        logger.info(f"[{stage_name}] 输入转录片段: {len(transcript_segments)}")
+        logger.info(f"[{stage_name}] 输入说话人时间段: {len(speaker_segments)}")
+        logger.info(f"[{stage_name}] 输出合并片段: {len(merged_segments)}")
+        logger.info(f"[{stage_name}] 检测到说话人数: {output_data['metadata']['speaker_count']}")
+        logger.info(f"[{stage_name}] ===============================")
+
+        # 标记任务成功
+        workflow_context.stages[stage_name].status = 'SUCCESS'
+        workflow_context.stages[stage_name].output = output_data
+
+        logger.info(f"[{stage_name}] 片段级字幕合并任务完成")
+
+    except Exception as e:
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        workflow_context.stages[stage_name].status = 'FAILED'
+        workflow_context.stages[stage_name].error = str(e)
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    finally:
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
+
+    return workflow_context.model_dump()
+
+
+@celery_app.task(name='faster_whisper.merge_with_word_timestamps', bind=True)
+def merge_with_word_timestamps(self, context: dict) -> dict:
+    """
+    使用词级时间戳进行精确字幕合并
+
+    这是一个独立的工作流节点,用于利用词级时间戳信息将转录结果与说话人分离结果进行精确合并。
+    每个词都会被分配给最匹配的说话人,然后按说话人分组,准确度比片段级合并提升30-50%。
+
+    输入要求:
+    - context['stages']['transcribe']['output']['segments']: 转录片段列表(必须包含words字段)
+    - context['stages']['diarize_speakers']['output']['speaker_segments']: 说话人时间段列表
+
+    输出:
+    - merged_segments: 包含说话人信息和词级时间戳的字幕片段列表
+    - metadata: 合并过程的统计信息
+
+    Args:
+        context: 工作流上下文字典
+
+    Returns:
+        dict: 更新后的工作流上下文
+    """
+    workflow_context = WorkflowContext(**context)
+    stage_name = workflow_context.current_stage
+
+    logger.info(f"[{stage_name}] ========== 开始词级精确字幕合并任务 ==========")
+
+    try:
+        # 标记任务开始
+        start_time = time.time()
+        workflow_context.stages[stage_name].status = 'IN_PROGRESS'
+        workflow_context.stages[stage_name].metadata = {'task_type': 'subtitle_merge_word_level'}
+        state_manager.update_workflow_state(workflow_context)
+
+        # 1. 获取输入数据
+        logger.info(f"[{stage_name}] 正在获取输入数据...")
+
+        # 获取转录结果
+        transcribe_stage = workflow_context.get_stage_by_type('transcribe')
+        if not transcribe_stage or not transcribe_stage.output:
+            raise ValueError("未找到转录结果阶段或输出数据")
+
+        transcript_segments = transcribe_stage.output.get('segments', [])
+        if not transcript_segments:
+            raise ValueError("转录结果为空")
+
+        # 验证是否包含词级时间戳
+        has_word_timestamps = False
+        for seg in transcript_segments:
+            if 'words' in seg and seg['words']:
+                has_word_timestamps = True
+                break
+
+        if not has_word_timestamps:
+            raise ValueError("转录结果不包含词级时间戳,无法使用词级合并。请使用 merge_speaker_segments 任务或在转录时启用词级时间戳")
+
+        logger.info(f"[{stage_name}] 获取到转录片段: {len(transcript_segments)} 个 (包含词级时间戳)")
+
+        # 获取说话人分离结果
+        diarize_stage = workflow_context.get_stage_by_type('diarize_speakers')
+        if not diarize_stage or not diarize_stage.output:
+            raise ValueError("未找到说话人分离结果阶段或输出数据")
+
+        speaker_segments = diarize_stage.output.get('speaker_segments', [])
+        if not speaker_segments:
+            raise ValueError("说话人分离结果为空")
+
+        logger.info(f"[{stage_name}] 获取到说话人时间段: {len(speaker_segments)} 个")
+
+        # 2. 验证说话人时间段数据
+        if not validate_speaker_segments(speaker_segments):
+            raise ValueError("说话人时间段数据格式无效")
+
+        # 3. 从配置获取合并参数
+        service_config = CONFIG.get('faster_whisper_service', {})
+        merge_config = service_config.get('subtitle_merge', {})
+
+        logger.info(f"[{stage_name}] 合并配置: {merge_config}")
+
+        # 4. 创建词级合并器并执行合并
+        logger.info(f"[{stage_name}] 开始执行词级精确合并...")
+        merger = create_word_level_merger(speaker_segments, merge_config)
+        merged_segments = merger.merge(transcript_segments)
+
+        logger.info(f"[{stage_name}] 合并完成,生成 {len(merged_segments)} 个片段")
+
+        # 5. 统计词级匹配信息
+        total_words = 0
+        matched_words = 0
+        for seg in merged_segments:
+            if 'words' in seg:
+                total_words += len(seg['words'])
+                matched_words += sum(1 for w in seg['words'] if 'speaker' in w)
+
+        match_rate = (matched_words / total_words * 100) if total_words > 0 else 0
+
+        # 6. 准备输出数据
+        output_data = {
+            'merged_segments': merged_segments,
+            'metadata': {
+                'merge_method': 'word_level',
+                'input_transcript_count': len(transcript_segments),
+                'input_speaker_count': len(speaker_segments),
+                'output_count': len(merged_segments),
+                'total_words': total_words,
+                'matched_words': matched_words,
+                'match_rate': round(match_rate, 2),
+                'speaker_count': len(set(seg.get('speaker', 'UNKNOWN') for seg in merged_segments))
+            }
+        }
+
+        # 7. 统计信息
+        logger.info(f"[{stage_name}] ========== 合并统计 ==========")
+        logger.info(f"[{stage_name}] 输入转录片段: {len(transcript_segments)}")
+        logger.info(f"[{stage_name}] 输入说话人时间段: {len(speaker_segments)}")
+        logger.info(f"[{stage_name}] 输出合并片段: {len(merged_segments)}")
+        logger.info(f"[{stage_name}] 总词数: {total_words}")
+        logger.info(f"[{stage_name}] 匹配词数: {matched_words}")
+        logger.info(f"[{stage_name}] 匹配率: {match_rate:.2f}%")
+        logger.info(f"[{stage_name}] 检测到说话人数: {output_data['metadata']['speaker_count']}")
+        logger.info(f"[{stage_name}] ===============================")
+
+        # 标记任务成功
+        workflow_context.stages[stage_name].status = 'SUCCESS'
+        workflow_context.stages[stage_name].output = output_data
+
+        logger.info(f"[{stage_name}] 词级精确字幕合并任务完成")
+
+    except Exception as e:
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        workflow_context.stages[stage_name].status = 'FAILED'
+        workflow_context.stages[stage_name].error = str(e)
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    finally:
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
+
+    return workflow_context.model_dump()
+# ============================================================================
+# 字幕AI校正任务 - 新增功能
+# ============================================================================
+
+@celery_app.task(bind=True, name='faster_whisper.correct_subtitles')
+def correct_subtitles(self, context: dict) -> dict:
+    """
+    字幕AI校正任务节点
+
+    此任务负责对已生成的字幕文件进行AI校正、润色和优化。
+    它会智能选择最佳的字幕文件作为输入，并根据工作流配置调用相应的AI服务。
+
+    输入：
+    - 来自 `generate_subtitle_files` 阶段的输出，包含字幕文件路径。
+
+    输出：
+    - 校正后的字幕文件路径及相关统计信息。
+    """
+    import asyncio
+
+    start_time = time.time()
+    workflow_context = WorkflowContext(**context)
+    stage_name = self.name
+    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+    state_manager.update_workflow_state(workflow_context)
+
+    try:
+        # 1. 从工作流参数中获取校正配置
+        # 检查 params 中是否有 subtitle_correction 配置
+        correction_params = workflow_context.input_params.get('params', {}).get('subtitle_correction', {})
+        is_enabled = correction_params.get('enabled', False)
+        provider = correction_params.get('provider', None) # 使用工作流指定的provider或配置文件的默认值
+
+        if not is_enabled:
+            logger.info(f"[{stage_name}] 字幕AI校正未在工作流配置中启用，跳过此阶段。")
+            workflow_context.stages[stage_name].status = 'SKIPPED'
+            workflow_context.stages[stage_name].output = {"message": "Correction skipped as per workflow configuration."}
+            return workflow_context.model_dump()
+
+        logger.info(f"[{stage_name}] ========== 开始字幕AI校正任务 ==========")
+        logger.info(f"[{stage_name}] 使用的AI提供商: {provider or '默认'}")
+
+        # 2. 获取前一阶段生成的字幕文件
+        generate_stage = workflow_context.stages.get('faster_whisper.generate_subtitle_files')
+        if not generate_stage or generate_stage.status not in ['SUCCESS', 'COMPLETED']:
+            raise ValueError("无法获取字幕生成结果：请确保 faster_whisper.generate_subtitle_files 任务已成功完成")
+
+        generate_output = generate_stage.output
+        if not isinstance(generate_output, dict):
+            raise ValueError("字幕生成阶段的输出格式不正确")
+
+        # 智能选择最佳字幕文件进行校正
+        # 优先使用带说话人信息的SRT，其次是基础SRT
+        subtitle_to_correct = generate_output.get('speaker_srt_path') or generate_output.get('subtitle_path')
+
+        if not subtitle_to_correct or not os.path.exists(subtitle_to_correct):
+            raise FileNotFoundError(f"未找到可供校正的字幕文件，路径: {subtitle_to_correct}")
+
+        logger.info(f"[{stage_name}] 选择用于校正的字幕文件: {subtitle_to_correct}")
+
+        # 3. 执行校正
+        # SubtitleCorrector 的方法是 async 的，所以我们需要在同步的Celery任务中运行它
+        corrector = SubtitleCorrector(provider=provider)
+        
+        # 定义输出路径
+        corrected_filename = os.path.basename(subtitle_to_correct).replace('.srt', '_corrected_by_ai.srt')
+        corrected_path = os.path.join(os.path.dirname(subtitle_to_correct), corrected_filename)
+
+        logger.info(f"[{stage_name}] 开始调用AI进行校正，输出路径: {corrected_path}")
+        
+        # 在同步函数中运行异步代码
+        correction_result = asyncio.run(
+            corrector.correct_subtitle_file(
+                subtitle_path=subtitle_to_correct,
+                output_path=corrected_path
+            )
+        )
+
+        # 4. 处理校正结果
+        if not correction_result.success:
+            raise RuntimeError(f"AI字幕校正失败: {correction_result.error_message}")
+
+        logger.info(f"[{stage_name}] AI字幕校正成功，耗时: {correction_result.processing_time:.2f}秒")
+        logger.info(f"[{stage_name}] 校正后的文件保存在: {correction_result.corrected_subtitle_path}")
+
+        # 5. 准备输出数据
+        output_data = {
+            "corrected_subtitle_path": correction_result.corrected_subtitle_path,
+            "original_subtitle_path": correction_result.original_subtitle_path,
+            "provider_used": correction_result.provider_used,
+            "statistics": correction_result.statistics,
+            "message": "Subtitle correction completed successfully."
+        }
+
+        # 标记任务成功
+        workflow_context.stages[stage_name].status = 'SUCCESS'
+        workflow_context.stages[stage_name].output = output_data
+
+        logger.info(f"[{stage_name}] 字幕AI校正任务完成")
 
     except Exception as e:
         logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)

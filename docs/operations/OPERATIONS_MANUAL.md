@@ -19,7 +19,8 @@
 
 ### 架构组件
 - **API 网关** (`api_gateway`): 系统入口，基于 FastAPI
-- **WhisperX 服务** (`whisperx_service`): 核心语音识别服务
+- **Faster Whisper 服务** (`faster_whisper_service`): 核心语音识别服务
+- **Pyannote Audio 服务** (`pyannote_audio_service`): 说话人分离服务
 - **Redis**: 消息队列和状态存储
 - **监控系统**: 性能指标收集和告警
 - **GPU 资源管理**: 智能锁和心跳机制
@@ -43,7 +44,8 @@ docker-compose ps
 
 # 检查服务日志
 docker-compose logs --tail=50 api_gateway
-docker-compose logs --tail=50 whisperx_service
+docker-compose logs --tail=50 faster_whisper_service
+docker-compose logs --tail=50 pyannote_audio_service
 
 # 检查系统健康状态
 curl http://localhost:8788/health
@@ -72,7 +74,8 @@ curl http://localhost:6379/ping
 
 ```bash
 # 查看错误日志
-docker-compose logs whisperx_service | grep ERROR
+docker-compose logs faster_whisper_service | grep ERROR
+docker-compose logs pyannote_audio_service | grep ERROR
 
 # 日志轮转
 logrotate -f /etc/logrotate.d/yivideo
@@ -84,14 +87,14 @@ find logs/ -name "*.log" -mtime +30 -delete
 ### 4. 性能检查
 
 ```bash
-# 检查性能指标
-curl http://localhost:8788/api/v1/performance/summary
+# 检查服务响应时间
+curl -w "Response time: %{time_total}s\n" http://localhost:8788/health
 
-# 检查系统健康状态
-curl http://localhost:8788/api/v1/performance/system-health
+# 检查GPU使用情况
+nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv
 
-# 获取性能洞察
-curl http://localhost:8788/api/v1/performance/insights
+# 检查系统资源使用
+docker stats --no-stream
 ```
 
 ---
@@ -152,14 +155,14 @@ curl -X POST http://localhost:8788/api/v1/monitoring/alerts/acknowledge \
 ### 1. 定期性能检查
 
 ```bash
-# 运行性能基准测试
-python scripts/whisperx_performance_benchmark.py
+# 运行性能基准测试 (示例)
+# python scripts/performance_benchmark.py --service faster_whisper
 
 # 检查模型性能
 curl http://localhost:8788/api/v1/model/info
 
-# 检查配置优化建议
-curl http://localhost:8788/api/v1/performance/insights
+# 检查系统负载
+top -p $(pgrep -f "faster_whisper")
 ```
 
 ### 2. 配置优化
@@ -168,7 +171,7 @@ curl http://localhost:8788/api/v1/performance/insights
 
 #### 高性能配置 (RTX 3060+)
 ```yaml
-whisperx_service:
+faster_whisper_service:
   batch_size: 8
   faster_whisper_threads: 8
   compute_type: "float16"
@@ -176,7 +179,7 @@ whisperx_service:
 
 #### 内存受限配置
 ```yaml
-whisperx_service:
+faster_whisper_service:
   batch_size: 2
   compute_type: "int8"
   faster_whisper_threads: 4
@@ -184,7 +187,7 @@ whisperx_service:
 
 #### CPU 配置
 ```yaml
-whisperx_service:
+faster_whisper_service:
   device: "cpu"
   batch_size: 1
   use_faster_whisper: false
@@ -193,17 +196,15 @@ whisperx_service:
 ### 3. 清理和维护
 
 ```bash
-# 清理临时文件
-find /tmp -name "whisperx_*" -mtime +1 -delete
-
 # 清理模型缓存
-rm -rf /app/.cache/whisperx/*
+# 注意: 模型缓存路径已在 `config.yml` 中定义
+# rm -rf /path/to/your/model/cache/*
 
 # 清理日志文件
 find logs/ -name "*.log" -size +100M -delete
 
 # 重启服务释放内存
-docker-compose restart whisperx_service
+docker-compose restart faster_whisper_service pyannote_audio_service
 ```
 
 ---
@@ -233,10 +234,10 @@ nvidia-smi
 curl http://localhost:8788/api/v1/model/info
 
 # 重启服务
-docker-compose restart whisperx_service
+docker-compose restart faster_whisper_service pyannote_audio_service
 
 # 检查日志
-docker-compose logs --tail=100 whisperx_service
+docker-compose logs --tail=100 faster_whisper_service
 ```
 
 ### 2. 资源问题
@@ -251,7 +252,7 @@ curl -X POST http://localhost:8788/api/v1/monitoring/release-lock \
   -d '{"lock_key": "gpu_lock:0"}'
 
 # 重启相关服务
-docker-compose restart whisperx_service
+docker-compose restart faster_whisper_service pyannote_audio_service
 ```
 
 #### 内存不足
@@ -331,10 +332,8 @@ fsck /dev/sdX
 
 ## 相关文档
 
-- **完整指南**: `../whisperx/WHISPERX_COMPLETE_GUIDE.md`
 - **部署指南**: `../deployment/DEPLOYMENT_GUIDE.md`
 - **故障排除**: `./TROUBLESHOOTING_GUIDE.md`
-- **技术规格**: `../whisperx/WHISPERX_TECHNICAL_SPEC.md`
 
 ---
 

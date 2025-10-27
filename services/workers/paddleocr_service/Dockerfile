@@ -1,68 +1,97 @@
-# services/workers/paddleocr_service/Dockerfile
+# Dockerfile
 
-# 1. 使用 PaddlePaddle 官方镜像作为基础镜像
-# 基于 Ubuntu 22.04 + CUDA 12.9 + Python 3.10
-# FROM ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddle:3.2.0-gpu-cuda12.9-cudnn9.9
-FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04
+# =========================================================================
+# 第一阶段：构建器 (Builder)
+# 这个阶段用于安装所有开发工具和编译Python依赖。
+# =========================================================================
+FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04 AS builder
 
-# 2. 设置环境变量
+# 设置环境变量，避免交互式提示
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONPATH=/app
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# 3. 安装系统依赖 (特别是 OpenCV 需要的和基础工具)
+# 安装编译时所必需的系统依赖
+# 包括：Python开发头文件、编译工具链、git等
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Python 3.12 和 pip
     python3.12 \
     python3-pip \
     python3.12-dev \
     python3.12-venv \
-    # OpenCV需要的图形库
-    libgl1  \
-    # 基础构建工具
     build-essential \
-    wget \
-    curl \
     git \
-    # FFmpeg (使用预编译版本，如需GPU加速需重新编译)
-    ffmpeg \
-    # 清理缓存
     && rm -rf /var/lib/apt/lists/* \
-    # 创建 Python 和 pip 的符号链接
     && ln -sf /usr/bin/python3.12 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip
 
-# 4. 设置工作目录为项目根目录
+# 设置工作目录
 WORKDIR /app
 
-# 5. 优化Docker缓存：先复制并安装Python依赖
-# 注意：现在路径需要从项目根目录开始
-COPY ./services/workers/paddleocr_service/requirements.txt /tmp/requirements.txt
+# 仅复制 requirements.txt 文件，以利用Docker的层缓存机制
+# 当 requirements.txt 没有变化时，下面安装依赖的步骤不会重新执行
+COPY ./services/workers/paddleocr_service/requirements.txt /app/requirements.txt
 
-# # 5.1 安装与CUDA 12.9兼容的PyTorch版本
-# RUN pip install --no-cache-dir --upgrade pip && \
-#     pip install --no-cache-dir \
-#     torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 \
-#     --index-url https://download.pytorch.org/whl/cu124
+# 安装所有Python依赖到一个独立的虚拟环境中
+# 使用虚拟环境可以方便地将所有依赖项复制到下一阶段
+# --no-cache-dir 避免缓存，减小此阶段的体积
+# 合并所有 pip install 命令到一个 RUN 指令中，减少镜像层数
+RUN python -m venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir paddlepaddle-gpu==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu129/ && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --no-cache-dir -r requirements.txt -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
 
-# 5.2 安装其他Python依赖
-RUN python -m pip install paddlepaddle-gpu==3.2.0 --break-system-packages -i https://www.paddlepaddle.org.cn/packages/stable/cu129/
-RUN pip install --no-cache-dir --break-system-packages -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r /tmp/requirements.txt
+# =========================================================================
+# 第二阶段：最终镜像 (Final Image)
+# 这个阶段只包含运行应用所必需的环境和文件。
+# =========================================================================
+FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04
 
-# 5.3 安装 PyTorch (使用官方 PyTorch 索引，选择与 CUDA 12.x 兼容的版本)
-# 注意：PyTorch 官方可能没有专门为 CUDA 12.9 编译的包，但为 12.1 编译的包通常可以兼容
-RUN python -m pip install torch --break-system-packages --index-url https://download.pytorch.org/whl/cu129
+# 再次设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+# 将虚拟环境的 bin 目录加入 PATH，这样可以直接执行 python, pip 等命令
+ENV PATH="/opt/venv/bin:$PATH"
+# 设置 PYTHONPATH，让 Python 能找到我们的模块
+ENV PYTHONPATH=/app
 
-# 6. 复制所有服务相关的源代码到工作目录
-# 这是解决 ModuleNotFoundError 的核心步骤
-COPY ./services /app/services
+# 安装运行时所必需的系统依赖
+# 注意：这里不再需要 build-essential, python-dev, git 等编译工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    libgl1 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
-# 7. 确保正确的PYTHONPATH配置
-# 注意：ENV PYTHONPATH=/app 已经在上面设置过了，这里不需要重复设置
+# 创建一个非 root 用户和组，并创建应用目录
+# 出于安全考虑，不使用 root 用户运行应用
+RUN groupadd --gid 1001 appuser && \
+    useradd --uid 1001 --gid 1001 --shell /bin/bash --create-home appuser && \
+    mkdir -p /app && \
+    chown -R appuser:appuser /app
 
-# 8. 为 CMD 设置正确的工作目录
+# 切换到非 root 用户
+USER appuser
+
+# 设置工作目录
+WORKDIR /app
+
+# 从构建器阶段复制已安装好的Python虚拟环境
+# 这是多阶段构建的核心优势：只引入纯净的依赖，不引入编译工具
+COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
+
+# 修复虚拟环境中的符号链接，使其指向 final 阶段的正确解释器
+RUN ln -sf /usr/bin/python3.12 /opt/venv/bin/python && \
+    ln -sf /usr/bin/pip3 /opt/venv/bin/pip
+
+# 复制应用程序源代码
+COPY --chown=appuser:appuser ./services /app/services
+
+# 切换工作目录到服务所在的目录
 WORKDIR /app/services/workers/paddleocr_service
 
-# 9. 定义容器启动时执行的默认命令
-CMD ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "paddleocr_queue"]
+# 定义容器启动时执行的默认命令
+# 使用虚拟环境中的 celery（绝对路径）
+CMD ["/opt/venv/bin/celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "paddleocr_queue"]

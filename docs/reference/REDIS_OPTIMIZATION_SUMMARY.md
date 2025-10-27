@@ -56,7 +56,7 @@
 
 ## 🔧 实施的修改
 
-### 1. whisperx.transcribe_audio 任务优化
+### 1. faster_whisper.generate_subtitles 任务优化
 ```python
 # 优化前
 output_data = {
@@ -72,7 +72,7 @@ output_data = {
 }
 ```
 
-### 2. whisperx.diarize_speakers 任务优化
+### 2. pyannote_audio.diarize_speakers 任务优化
 ```python
 # 优化前
 output_data = {
@@ -92,7 +92,7 @@ output_data = {
 }
 ```
 
-### 3. whisperx.generate_subtitle_files 任务适配
+### 3. (已合并) 任务适配
 ```python
 # 新增统一数据获取接口
 segments = get_segments_data(transcribe_output, 'segments')
@@ -113,7 +113,7 @@ else:
 ```json
 {
   "metadata": {
-    "task_name": "whisperx.transcribe_audio",
+    "task_name": "faster_whisper.generate_subtitles",
     "workflow_id": "uuid-string",
     "audio_file": "video.mp4",
     "total_duration": 392.05,
@@ -136,7 +136,7 @@ else:
 ```json
 {
   "metadata": {
-    "task_name": "whisperx.diarize_speakers",
+    "task_name": "pyannote_audio.diarize_speakers",
     "workflow_id": "uuid-string",
     "diarization_enabled": true,
     "created_at": 1640995200.0
@@ -226,9 +226,8 @@ curl --request POST \
     "workflow_config": {
       "workflow_chain": [
         "ffmpeg.extract_audio",
-        "whisperx.transcribe_audio",
-        "whisperx.diarize_speakers",
-        "whisperx.generate_subtitle_files"
+        "faster_whisper.generate_subtitles",
+        "pyannote_audio.diarize_speakers"
       ]
     }
   }'

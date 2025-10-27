@@ -76,8 +76,8 @@ celery_app = Celery('indextts_service')
 
 # 从配置文件中读取 Redis 连接信息
 redis_config = config.get('redis', {})
-broker_url = f"redis://redis:{redis_config.get('port', 6379)}/{redis_config.get('broker_db', 0)}"
-backend_url = f"redis://redis:{redis_config.get('port', 6379)}/{redis_config.get('backend_db', 1)}"
+broker_url = f"redis://{redis_config.get('host', 'redis')}:{redis_config.get('port', 6379)}/{redis_config.get('broker_db', 0)}"
+backend_url = f"redis://{redis_config.get('host', 'redis')}:{redis_config.get('port', 6379)}/{redis_config.get('backend_db', 1)}"
 
 # Celery 配置
 celery_app.conf.update(

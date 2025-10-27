@@ -3,7 +3,7 @@
 > **版本**: faster-whisper 1.2.0
 > **模型**: Systran/faster-whisper-large-v3
 > **基础**: OpenAI Whisper Large-V3 (CTranslate2优化版)
-> **验证环境**: Docker whisperx_service
+> **验证环境**: Docker faster_whisper_service
 > **最后更新**: 2025-10-05
 
 ## 目录
@@ -1235,4 +1235,4 @@ class VadOptions:
 
 ---
 
-*本文档基于 Docker 容器 whisperx_service 内的实际验证结果编写，确保所有参数的可用性和准确性。*
+*本文档基于 Docker 容器 faster_whisper_service 内的实际验证结果编写，确保所有参数的可用性和准确性。*

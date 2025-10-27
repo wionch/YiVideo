@@ -130,7 +130,7 @@ def extract_audio(self: Task, context: dict) -> dict:
             "-i", video_path,  # 输入视频文件
             "-vn",            # 不包含视频
             "-acodec", "pcm_s16le",  # 16-bit PCM 编码
-            "-ar", "16000",   # 采样率 16kHz (WhisperX 推荐的采样率)
+            "-ar", "16000",   # 采样率 16kHz (ASR 模型推荐的采样率)
             "-ac", "1",       # 单声道
             "-y",             # 覆盖输出文件
             audio_path
@@ -367,7 +367,7 @@ def split_audio_segments(self: Task, context: dict) -> dict:
             priority_order = subtitle_config.get('priority_order', ["speaker_srt_path", "subtitle_path", "speaker_json_path"])
 
             for source_type in priority_order:
-                subtitle_stage = workflow_context.stages.get('whisperx.generate_subtitle_files')
+                subtitle_stage = workflow_context.stages.get('faster_whisper.generate_subtitle_files')
                 if subtitle_stage and subtitle_stage.status in ['SUCCESS', 'COMPLETED'] and subtitle_stage.output:
                     if source_type == "speaker_srt_path" and subtitle_stage.output.get('speaker_srt_path'):
                         subtitle_path = subtitle_stage.output['speaker_srt_path']
@@ -384,7 +384,7 @@ def split_audio_segments(self: Task, context: dict) -> dict:
 
         # 验证字幕文件
         if not subtitle_path or not os.path.exists(subtitle_path):
-            error_msg = "无法获取字幕文件路径：请确保 whisperx.generate_subtitle_files 任务已成功完成，或通过参数传入字幕文件"
+            error_msg = "无法获取字幕文件路径：请确保 faster_whisper.generate_subtitle_files 任务已成功完成，或通过参数传入字幕文件"
             logger.error(f"[{stage_name}] {error_msg}")
             raise ValueError(error_msg)
 

@@ -69,14 +69,28 @@ def get_tts_engine() -> MultiProcessTTSEngine:
     """
     global _tts_engine
     if _tts_engine is None:
-        # 从环境变量获取配置
-        model_dir = os.getenv('INDEX_TTS_MODEL_DIR', '/models/indextts')
-        use_fp16 = os.getenv('INDEX_TTS_USE_FP16', 'true').lower() == 'true'
-        use_deepspeed = os.getenv('INDEX_TTS_USE_DEEPSPEED', 'false').lower() == 'true'
-        use_cuda_kernel = os.getenv('INDEX_TTS_USE_CUDA_KERNEL', 'false').lower() == 'true'
-        num_workers = int(os.getenv('INDEX_TTS_NUM_WORKERS', '1'))
+        # 优先从config.yml获取配置，回退到环境变量
+        indextts_config = config.get('indextts_service', {})
+
+        # 模型配置
+        model_dir = indextts_config.get('model_dir',
+                    os.getenv('INDEX_TTS_MODEL_DIR', '/models/indextts'))
+
+        # 性能配置
+        use_fp16 = indextts_config.get('use_fp16',
+                     os.getenv('INDEX_TTS_USE_FP16', 'true').lower() == 'true')
+        use_deepspeed = indextts_config.get('use_deepspeed',
+                         os.getenv('INDEX_TTS_USE_DEEPSPEED', 'false').lower() == 'true')
+        use_cuda_kernel = indextts_config.get('use_cuda_kernel',
+                           os.getenv('INDEX_TTS_USE_CUDA_KERNEL', 'false').lower() == 'true')
+        num_workers = indextts_config.get('num_workers',
+                         int(os.getenv('INDEX_TTS_NUM_WORKERS', '1')))
 
         logger.info("创建 IndexTTS 引擎实例（懒加载模式）")
+        logger.info(f"配置来源: config.yml indextts_service 配置")
+        logger.info(f"模型目录: {model_dir}")
+        logger.info(f"FP16: {use_fp16}, DeepSpeed: {use_deepspeed}, CUDA Kernel: {use_cuda_kernel}")
+
         _tts_engine = MultiProcessTTSEngine({
             'model_dir': model_dir,
             'use_fp16': use_fp16,
@@ -111,16 +125,35 @@ def generate_speech(
     start_time = time.time()
     task_id = self.request.id
 
-    # 提取参数
+    # 提取参数（兼容多种参数名称）
     text = context.get('text', '')
     output_path = context.get('output_path', '')
-    reference_audio = context.get('reference_audio')  # 音色参考音频
-    emotion_reference = context.get('emotion_reference')  # 情感参考音频
-    emotion_alpha = float(context.get('emotion_alpha', 0.65))  # 情感强度
-    emotion_vector = context.get('emotion_vector')  # 情感向量
-    emotion_text = context.get('emotion_text')  # 情感描述文本
-    use_random = bool(context.get('use_random', False))  # 随机采样
+
+    # 音色参考音频 - 支持多种参数名
+    reference_audio = (
+        context.get('spk_audio_prompt') or  # 优先使用IndexTTS2官方参数名
+        context.get('reference_audio') or   # 兼容旧参数名
+        context.get('speaker_audio') or     # 兼容其他可能参数名
+        None
+    )
+
+    # 情感参考音频
+    emotion_reference = (
+        context.get('emo_audio_prompt') or  # 优先使用IndexTTS2官方参数名
+        context.get('emotion_reference') or # 兼容旧参数名
+        None
+    )
+
+    # 情感相关参数
+    emotion_alpha = float(context.get('emotion_alpha', 1.0))  # 修正默认值为1.0
+    emotion_vector = context.get('emotion_vector')
+    emotion_text = context.get('emotion_text')
+    use_emo_text = bool(context.get('use_emo_text', False))
+    use_random = bool(context.get('use_random', False))
+
+    # 技术参数
     max_text_tokens_per_segment = int(context.get('max_text_tokens_per_segment', 120))
+    verbose = bool(context.get('verbose', False))
 
     workflow_id = context.get('workflow_id', 'unknown')
     stage_name = context.get('stage_name', 'indextts.generate_speech')
@@ -153,6 +186,45 @@ def generate_speech(
             'task_id': task_id,
             'workflow_id': workflow_id
         }
+
+    # IndexTTS2需要参考音频参数（必需参数）
+    if not reference_audio:
+        error_msg = "缺少必需参数: spk_audio_prompt (说话人参考音频)"
+        logger.error(error_msg)
+        return {
+            'status': 'error',
+            'error': error_msg,
+            'task_id': task_id,
+            'workflow_id': workflow_id,
+            'hint': 'IndexTTS2是基于参考音频的语音合成系统，必须提供说话人参考音频'
+        }
+
+    # 验证参考音频文件是否存在
+    if not os.path.exists(reference_audio):
+        error_msg = f"参考音频文件不存在: {reference_audio}"
+        logger.error(error_msg)
+        return {
+            'status': 'error',
+            'error': error_msg,
+            'task_id': task_id,
+            'workflow_id': workflow_id
+        }
+
+    # 验证输出目录是否存在，不存在则创建
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            logger.info(f"创建输出目录: {output_dir}")
+        except Exception as e:
+            error_msg = f"无法创建输出目录 {output_dir}: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'status': 'error',
+                'error': error_msg,
+                'task_id': task_id,
+                'workflow_id': workflow_id
+            }
 
     try:
         # 获取 TTS 引擎（懒加载 + 子进程隔离）

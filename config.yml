@@ -12,7 +12,7 @@ core:
 
 # 1. Redis 配置 (新增)
 redis:
-  host: 'redis' # Docker Compose中的服务名
+  host: ${REDIS_HOST:redis} # 优先使用环境变量，否则使用默认值
   port: 6379
   # 用于Celery Broker
   db_broker: 0
@@ -198,6 +198,18 @@ faster_whisper_service:
   max_subtitle_duration: 10.0
   # 是否启用智能断句（在保持说话人边界的前提下）
   enable_smart_breaking: true
+
+  # === 字幕合并配置 ===
+  # 新增：用于合并转录字幕与说话人时间段的配置
+  subtitle_merge:
+    # 说话人边界检测阈值（0-1），较低值会更积极地检测边界
+    speaker_boundary_threshold: 0.5
+    # 置信度阈值（0-1），低于此值的说话人匹配会被标记
+    confidence_threshold: 0.6
+    # 词级匹配容差（秒），用于词级时间戳匹配
+    word_matching_tolerance: 0.1
+    # 最小词置信度（0-1），用于过滤低质量的词级时间戳
+    min_word_confidence: 0.5
 
   # === 音频配置 ===
   # 音频采样率
@@ -461,7 +473,7 @@ pyannote_audio_service:
   use_paid_api: false
 
   # === 处理配置 ===
-  # 音频采样率 (与whisperx_service保持一致)
+  # 音频采样率 (与faster_whisper_service保持一致)
   audio_sample_rate: 16000
   # 最小片段时长（秒），小于此值的片段将被合并
   min_segment_duration: 0.5
@@ -638,3 +650,29 @@ subtitle_correction:
   verbose_processing: false
   # 是否记录API调用统计
   log_api_stats: true
+
+# 14. IndexTTS2 文本转语音服务配置 (基于官方源码验证)
+indextts_service:
+  # === 模型配置 ===
+  model_dir: "/models/indextts"
+  checkpoints_dir: "/models/indextts/checkpoints"
+  config_file: "/models/indextts/checkpoints/config.yaml"
+
+  # === 性能配置 ===
+  use_fp16: true                      # 启用FP16推理以节省显存
+  use_deepspeed: false                # DeepSpeed加速（稳定性优先）
+  use_cuda_kernel: false              # CUDA内核（稳定性优先）
+  num_workers: 1                      # 单工作进程避免GPU冲突
+
+  # === 默认参数配置 ===
+  default_emotion_alpha: 1.0         # 默认情感强度
+  default_max_text_tokens: 120        # 默认每段最大token数
+  default_verbose: false              # 默认不启用详细日志
+
+  # === 基础TTS参数 ===
+  default_interval_silence: 200       # 默认间隔静音时长(ms)
+
+  # === 监控配置 ===
+  enable_monitoring: true             # 启用基础监控
+  log_processing_time: true           # 记录处理时间
+  log_gpu_usage: true                 # 记录GPU使用情况

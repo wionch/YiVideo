@@ -125,7 +125,6 @@
 - `services/api_gateway/app/monitoring/heartbeat_manager.py:1~200+` (心跳管理): 管理任务心跳，检测任务存活状态
 - `services/api_gateway/app/monitoring/timeout_manager.py:1~200+` (超时管理): 分级超时处理（警告/软超时/硬超时）
 - `services/api_gateway/app/monitoring/api_endpoints.py:1~100+` (监控API): 提供RESTful API查询监控信息
-- `services/api_gateway/app/monitoring/whisperx_monitor.py:18~19` (使用config_loader): 导入CONFIG和logger
 
 ---
 
@@ -290,7 +289,7 @@ config_loader.py
 - `context.py`: 创建WorkflowContext（main.py）
 
 **监控模块使用**:
-- `config_loader.py`: 读取配置（monitoring/whisperx_monitor.py, gpu_lock_monitor.py等）
+- `config_loader.py`: 读取配置（monitoring/gpu_lock_monitor.py等）
 - `locks.py`: GPU锁状态查询和管理（monitoring/gpu_lock_monitor.py, timeout_manager.py, api_endpoints.py）
 
 **未使用**: state_manager.py（由worker负责状态更新）, GPU相关模块（api_gateway不执行GPU任务）, 字幕处理模块

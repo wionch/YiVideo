@@ -47,11 +47,11 @@ cd YiVideo
 ### 2. 配置环境
 
 ```bash
-# 复制 IndexTTS2 项目源码到指定目录
-# 确保 services/workers/indextts_service/src/index-tts 目录存在
-
 # 创建模型目录
 mkdir -p ./models/indextts
+
+# IndexTTS2 源码会在构建 Docker 镜像时通过 git clone 自动获取
+# 无需手动复制，详见 Dockerfile 中的配置
 ```
 
 ### 3. 构建和启动服务

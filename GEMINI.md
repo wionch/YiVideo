@@ -16,7 +16,8 @@ The system is designed as a **dynamic, configurable AI video processing workflow
     *   `api_gateway`: The "brain" of the system. It receives user requests, interprets the `workflow_config`, and dynamically constructs and dispatches the Celery task chain.
     *   `ffmpeg_service`: Handles fundamental video operations like decoding and frame extraction.
     *   `paddleocr_service`: Performs Optical Character Recognition (OCR) to extract hardcoded subtitles from video frames.
-    *   `whisperx_service`: Provides Automatic Speech Recognition (ASR) to transcribe audio into subtitles.
+    *   `faster_whisper_service`: Provides Automatic Speech Recognition (ASR) to transcribe audio into subtitles.
+    *   `pyannote_audio_service`: Performs speaker diarization to identify who is speaking and when.
     *   `llm_service`: Interacts with Large Language Models (e.g., Gemini, DeepSeek) for translation and subtitle refinement.
     *   `inpainting_service`: (Future) Removes original hardcoded subtitles from the video.
     *   `indextts_service` / `gptsovits_service`: (Future) Text-to-Speech (TTS) engines for generating dubbed audio.

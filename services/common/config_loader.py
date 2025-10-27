@@ -329,7 +329,7 @@ class CONFIG:
         获取配置项，支持嵌套键访问。
 
         Args:
-            key: 配置键，支持点分隔的嵌套键（如 'whisperx_service.device'）
+            key: 配置键，支持点分隔的嵌套键（如 'faster_whisper_service.device'）
             default: 默认值
 
         Returns:

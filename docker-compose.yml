@@ -1,11 +1,13 @@
 services:
   # --- Message Broker ---
-  redis:
-    image: "redis"
-    container_name: redis
-    restart: always
-    ports:
-      - "6379:6379"
+  # redis:
+  #   image: "redis"
+  #   container_name: redis
+  #   restart: always
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - wionch
 
   # --- API Gateway (The Brain) ---
   api_gateway:
@@ -23,16 +25,19 @@ services:
       - ./share:/share
       - ./config.yml:/app/config.yml
       - ./config:/app/config
+      - ./scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
     user: "0:0"
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
-    depends_on:
-      - redis
+      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+    networks:
+      - wionch
 
   # --- AI Worker Services ---
 
@@ -49,6 +54,7 @@ services:
       - ./share:/share
       - ./config.yml:/app/config.yml
       - ./config:/app/config
+      - ./scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
@@ -58,6 +64,8 @@ services:
     environment:
       - PYTHONPATH=/app
       - NVIDIA_VISIBLE_DEVICES=all
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
     deploy:
       resources:
         reservations:
@@ -65,8 +73,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    depends_on:
-      - redis
+    networks:
+      - wionch
 
   paddleocr_service:
     container_name: paddleocr_service
@@ -81,16 +89,19 @@ services:
       - ./share:/share
       - ./config.yml:/app/config.yml
       - ./config:/app/config
+      - ./scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - paddle_models_volume:/root/.paddlex/official_models
     restart: always
     user: "0:0"
     entrypoint: ""
-    command: ["celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "paddleocr_queue"]
+    command: ["/opt/venv/bin/celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-Q", "paddleocr_queue"]
     environment:
       - PYTHONPATH=/app
       - NVIDIA_VISIBLE_DEVICES=all
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
     deploy:
       resources:
         reservations:
@@ -98,8 +109,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    depends_on:
-      - redis
+    networks:
+      - wionch
 
 
   # --- Faster Whisper Service (WhisperX拆分) ---
@@ -117,6 +128,7 @@ services:
       - ./share:/share
       - ./config.yml:/app/config.yml
       - ./config:/app/config
+      - ./scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -127,8 +139,10 @@ services:
     command: ["celery", "-A", "services.workers.faster_whisper_service.app.celery_app", "worker", "-l", "info", "-Q", "faster_whisper_queue"]
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
       - HF_TOKEN=${HF_TOKEN}
       - HF_HOME=/app/.cache/huggingface
       - HF_HUB_ENABLE_HF_TRANSFER=0
@@ -146,8 +160,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    depends_on:
-      - redis
+    networks:
+      - wionch
 
   # --- Pyannote Audio Service (WhisperX拆分) ---
   pyannote_audio_service:
@@ -164,6 +178,7 @@ services:
       - ./share:/share
       - ./config.yml:/app/config.yml
       - ./config:/app/config
+      - ./scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -171,11 +186,13 @@ services:
     restart: unless-stopped
     user: "0:0"
     entrypoint: ""
-    # command: ["celery", "-A", "services.workers.pyannote_audio_service.app.celery_app", "worker", "-l", "info", "-Q", "pyannote_audio_queue"]
+    command: ["celery", "-A", "services.workers.pyannote_audio_service.app.celery_app", "worker", "-l", "info", "-Q", "pyannote_audio_queue"]
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
       - HF_TOKEN=${HF_TOKEN}
       - HF_HOME=/app/.cache/huggingface
       - HF_HUB_ENABLE_HF_TRANSFER=0
@@ -193,8 +210,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    depends_on:
-      - redis
+    networks:
+      - wionch
 
   # --- Audio Separator Service ---
   audio_separator_service:
@@ -212,6 +229,7 @@ services:
       - audio_separator_models_volume:/models
       - ./config.yml:/app/config.yml
       - ./config:/app/config
+      - ./scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -222,8 +240,10 @@ services:
     command: ["celery", "-A", "services.workers.audio_separator_service.app.celery_app", "worker", "-l", "info", "-Q", "audio_separator_queue"]
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_VISIBLE_DEVICES=0
     deploy:
@@ -233,8 +253,8 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    depends_on:
-      - redis
+    networks:
+      - wionch
 
   # --- IndexTTS Service (IndexTTS2 文本转语音服务) ---
   indextts_service:
@@ -251,24 +271,27 @@ services:
       - ./locks:/app/locks
       - ./tmp:/app/tmp
       - ./share:/share
-      - indextts_models_volume:/models/indextts
       - ./config.yml:/app/config.yml
       - ./config:/app/config
+      - ./scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
+      - indextts_models_volume:/models/indextts
       - huggingface_cache_volume:/app/.cache/huggingface
       - transformers_cache_volume:/app/.cache/transformers
       - indextts_cache_volume:/app/.cache/indextts
       - torch_cache_volume:/app/.cache/torch
     restart: always
     user: "0:0"
-    entrypoint: ["/app/entrypoint.sh"]
+    entrypoint: ""
     command: ["celery", "-A", "services.workers.indextts_service.app.celery_app", "worker", "-l", "info", "-Q", "indextts_queue", "--concurrency=1"]
     environment:
       # 基础环境变量
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
+      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
 
       # GPU 配置
       - NVIDIA_VISIBLE_DEVICES=all
@@ -300,24 +323,28 @@ services:
           memory: 4G
         limits:
           memory: 8G
-    depends_on:
-      - redis
     healthcheck:
       test: ["CMD", "python", "-c", "import torch; print('GPU Available:' if torch.cuda.is_available() else 'GPU Not Available')"]
       interval: 60s
       timeout: 30s
       retries: 3
       start_period: 180s
+    networks:
+      - wionch
 
 
 # 定义所有卷
 volumes:
-  npm_cache:
-  paddle_models_volume:
-  huggingface_cache_volume:
-  transformers_cache_volume:
-  audio_separator_models_volume:
-  indextts_models_volume:
-  indextts_cache_volume:
-  torch_cache_volume:
-  serena_cache_volume:
+  npm_cache: {}
+  paddle_models_volume: {}
+  huggingface_cache_volume: {}
+  transformers_cache_volume: {}
+  audio_separator_models_volume: {}
+  indextts_models_volume: {}
+  indextts_cache_volume: {}
+  torch_cache_volume: {}
+  serena_cache_volume: {}
+
+networks:
+  wionch:
+    external: true
