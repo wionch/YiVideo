@@ -36,13 +36,19 @@ class TaskHeartbeat:
     def _init_redis_client(self) -> Optional[Redis]:
         """初始化Redis客户端"""
         try:
-            redis_host = os.environ.get('REDIS_HOST', 'redis')
-            redis_port = int(os.environ.get('REDIS_PORT', 6379))
+            from services.common.config_loader import get_redis_config
+            
+            redis_config = get_redis_config()
+            redis_host = redis_config['host']
+            redis_port = redis_config['port']
             redis_db = int(os.environ.get('REDIS_LOCK_DB', 2))
 
             client = Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
             client.ping()
             return client
+        except ValueError as e:
+            logger.error(f"Redis配置错误: {e}")
+            return None
         except Exception as e:
             logger.error(f"任务 {self.task_id} 无法连接到Redis: {e}")
             return None
@@ -188,14 +194,20 @@ class TaskHeartbeatManager:
     def _init_redis_client(self) -> Optional[Redis]:
         """初始化Redis客户端"""
         try:
-            redis_host = os.environ.get('REDIS_HOST', 'redis')
-            redis_port = int(os.environ.get('REDIS_PORT', 6379))
+            from services.common.config_loader import get_redis_config
+            
+            redis_config = get_redis_config()
+            redis_host = redis_config['host']
+            redis_port = redis_config['port']
             redis_db = int(os.environ.get('REDIS_LOCK_DB', 2))
 
             client = Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
             client.ping()
             logger.info("任务心跳管理器成功连接到Redis")
             return client
+        except ValueError as e:
+            logger.error(f"Redis配置错误: {e}")
+            return None
         except Exception as e:
             logger.error(f"任务心跳管理器无法连接到Redis: {e}")
             return None

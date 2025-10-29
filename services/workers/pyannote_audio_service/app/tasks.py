@@ -24,12 +24,13 @@ from pyannote.core import Annotation, Segment
 
 # 导入Celery应用和工作流模型
 from services.workers.pyannote_audio_service.app.celery_app import celery_app
-from services.common.context import WorkflowContext, StageExecution
 
 # 导入共享模块
 from services.common.config_loader import get_config
 from services.common.logger import get_logger
 from services.common.locks import gpu_lock
+from services.common import state_manager
+from services.common.context import StageExecution, WorkflowContext
 
 config = get_config()
 logger = get_logger(__name__)
@@ -87,15 +88,18 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         dict: 包含说话人分离结果的字典
     """
+    start_time = time.time()
+    workflow_context = WorkflowContext(**context)
+    stage_name = self.name
+    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+    state_manager.update_workflow_state(workflow_context)
+
     try:
         # 验证输入上下文
         if not isinstance(context, dict):
             raise ValueError("工作流上下文必须为字典格式")
 
-        # 转换为WorkflowContext对象以便更好地访问上下文信息
-        workflow_context = WorkflowContext(**context)
         workflow_id = workflow_context.workflow_id
-
         logger.info(f"[{workflow_id}] 开始说话人分离任务 (subprocess模式)")
 
         # 步骤1: 获取音频文件路径（与其他服务保持一致）
@@ -263,37 +267,12 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
                 'words': 0  # 将在后续处理中填充
             }
 
-        # 将 speaker_segments 转换为 speaker_enhanced_segments 格式
-        # 这里我们暂时使用相同的格式，后续可以在 faster_whisper 中进行转换
-        speaker_enhanced_segments = speaker_segments
-
-        # 创建精简版的输出数据，将详细片段信息保存到文件中但不包含在API响应中
+        # 创建精简版的输出数据
         stage_name = "pyannote_audio.diarize_speakers"
 
-        # 保存详细的说话人片段数据到文件（供后续使用）
-        detailed_data_file = workflow_output_dir / "speaker_segments_detailed.json"
-        with open(detailed_data_file, 'w', encoding='utf-8') as f:
-            json.dump({
-                "speaker_segments": speaker_segments,
-                "speaker_enhanced_segments": speaker_enhanced_segments,
-                "detected_speakers": detected_speakers,
-                "speaker_statistics": speaker_statistics,
-                "metadata": {
-                    "total_speakers": total_speakers,
-                    "total_segments": len(speaker_segments),
-                    "api_type": api_type,
-                    "model_name": model_name,
-                    "execution_time": execution_time
-                }
-            }, f, ensure_ascii=False, indent=2)
-
-        logger.info(f"[{workflow_id}] 详细说话人数据已保存到: {detailed_data_file}")
-
-        # 精简的API响应数据，移除冗长的 speaker_segments 数组
+        # 精简的API响应数据，移除冗长的 speaker_segments 数组和 speaker_enhanced_segments
         output_data = {
             "diarization_file": str(output_file),
-            "detailed_data_file": str(detailed_data_file),  # 新增：指向详细数据的文件
-            "speaker_enhanced_segments": speaker_enhanced_segments,  # 保留供 faster_whisper 使用
             "detected_speakers": detected_speakers,  # 保留供 faster_whisper 使用
             "speaker_statistics": speaker_statistics,  # 保留供 faster_whisper 使用
             "total_speakers": total_speakers,
@@ -307,39 +286,29 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
             "use_paid_api": use_paid_api
         }
 
-        # 初始化或更新阶段状态
-        if stage_name not in workflow_context.stages:
-            workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-
-        # 更新阶段状态
+        # 更新阶段状态 - 成功
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
-        workflow_context.stages[stage_name].duration = execution_time
 
         api_type_text = "付费" if use_paid_api else "免费"
         logger.info(f"[{workflow_id}] 说话人分离完成 (subprocess模式, {api_type_text}接口): {total_speakers} 个说话人，{len(speaker_segments)} 个片段，耗时: {execution_time:.3f}s")
 
-        # 返回标准工作流上下文格式
-        return workflow_context.model_dump()
-
     except Exception as e:
         # 获取workflow_id用于错误日志
         workflow_id = context.get('workflow_id', 'unknown')
-        stage_name = "pyannote_audio.diarize_speakers"
         error_msg = f"[{workflow_id}] 说话人分离失败: {str(e)}"
         logger.error(error_msg)
-
-        # 初始化或更新阶段状态
-        if stage_name not in workflow_context.stages:
-            workflow_context.stages[stage_name] = StageExecution(status="FAILED")
 
         # 更新工作流上下文 - 错误格式
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
-        workflow_context.error = f"pyannote_audio.diarize_speakers failed: {str(e)}"
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    finally:
+        # 无论如何都要更新状态
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
 
-        # 返回标准工作流上下文格式
-        return workflow_context.model_dump()
+    return workflow_context.model_dump()
 
 @celery_app.task(bind=True, name='pyannote_audio.get_speaker_segments')
 def get_speaker_segments(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:

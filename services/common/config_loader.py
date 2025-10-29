@@ -316,6 +316,34 @@ def _validate_gpu_lock_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return validated_config
 
 
+def get_redis_config() -> Dict[str, Any]:
+    """
+    安全地从环境变量加载Redis配置。
+
+    如果REDIS_HOST或REDIS_PORT环境变量缺失，将引发ValueError。
+
+    Returns:
+        Dict[str, Any]: 包含 'host' 和 'port' 的字典。
+
+    Raises:
+        ValueError: 如果缺少必要的环境变量。
+    """
+    redis_host = os.environ.get('REDIS_HOST')
+    redis_port_str = os.environ.get('REDIS_PORT')
+
+    if not redis_host:
+        raise ValueError("环境变量 'REDIS_HOST' 未设置。请在 .env 文件中定义。")
+    
+    if not redis_port_str:
+        raise ValueError("环境变量 'REDIS_PORT' 未设置。请在 .env 文件中定义。")
+
+    try:
+        redis_port = int(redis_port_str)
+    except (ValueError, TypeError):
+        raise ValueError(f"环境变量 'REDIS_PORT' 的值 '{redis_port_str}' 不是一个有效的整数。")
+
+    return {"host": redis_host, "port": redis_port}
+
 class CONFIG:
     """
     兼容性配置接口，提供与原有缓存机制相同的API。

@@ -1,62 +1,119 @@
 # services/common/state_manager.py
-import json
+# -*- coding: utf-8 -*-
+
+"""
+管理工作流状态的模块。
+
+提供与Redis交互的函数，用于创建、更新、查询和删除工作流的持久化状态。
+"""
+
 import os
-from datetime import datetime
-from datetime import timezone
 
-import redis
+from services.common.logger import get_logger
 
-# 确保可以从公共模块导入
+logger = get_logger('state_manager')
+import json
+import logging
+from typing import Any
+from typing import Dict
+
+from redis import Redis
+
+# 导入在Stage 1中创建的标准化上下文
 from services.common.context import WorkflowContext
 
-# --- Redis Connection ---
-REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
-REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
-DB_STATE_STORE = int(os.environ.get('DB_STATE_STORE', 3))
+# --- 日志和Redis连接配置 ---
+# 日志已统一管理，使用 services.common.logger
+
+# 使用统一的配置加载器，确保与环境变量配置一致
+from services.common.config_loader import get_redis_config
+
+# 使用config.yml中为状态存储定义的DB
+REDIS_STATE_DB = int(os.environ.get('REDIS_STATE_DB', 3))
+# TODO: 从config.yml动态加载TTL
 WORKFLOW_TTL_DAYS = int(os.environ.get('WORKFLOW_TTL_DAYS', 7))
+WORKFLOW_TTL_SECONDS = WORKFLOW_TTL_DAYS * 24 * 60 * 60
 
 try:
-    redis_conn = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=DB_STATE_STORE)
-    redis_conn.ping()
-    print(f"成功连接到 Redis (for state store): {REDIS_HOST}:{REDIS_PORT}")
-except redis.exceptions.ConnectionError as e:
-    print(f"错误：无法连接到 Redis (for state store)。请检查 Redis 服务。错误: {e}")
-    redis_conn = None
+    redis_config = get_redis_config()
+    REDIS_HOST = redis_config['host']
+    REDIS_PORT = redis_config['port']
+    
+    redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_STATE_DB)
+    redis_client.ping()
+    logger.info(f"状态管理器成功连接到Redis at {REDIS_HOST}:{REDIS_PORT}/{REDIS_STATE_DB}")
+except ValueError as e:
+    logger.error(f"Redis配置错误: {e}")
+    redis_client = None
+except Exception as e:
+    logger.error(f"状态管理器无法连接到Redis. 错误: {e}")
+    redis_client = None
 
-def get_workflow_key(workflow_id: str) -> str:
+# --- 核心功能 ---
+
+def _get_key(workflow_id: str) -> str:
+    """生成用于Redis的标准化键。"""
     return f"workflow_state:{workflow_id}"
 
-def create_workflow_state(context: WorkflowContext):
-    if not redis_conn:
-        raise ConnectionError("Redis not connected.")
-    key = get_workflow_key(context.workflow_id)
-    value = json.dumps(context.dict(), indent=4)
-    pipe = redis_conn.pipeline()
-    pipe.set(key, value)
-    pipe.expire(key, WORKFLOW_TTL_DAYS * 24 * 60 * 60)
-    pipe.execute()
-    print(f"为工作流 {context.workflow_id} 创建了状态记录。")
+def create_workflow_state(context: WorkflowContext) -> None:
+    """
+    在Redis中创建一个新的工作流状态记录。
 
-def update_workflow_state(context: WorkflowContext):
-    """原子性地更新（覆盖）Redis中的工作流状态记录。"""
-    if not redis_conn:
-        # 在worker中，如果redis连不上，可以选择仅打印警告而不是抛出异常，以避免任务重试
-        print("警告: Redis 未连接，无法更新工作流状态。")
+    Args:
+        context (WorkflowContext): 要持久化的工作流上下文对象。
+    """
+    if not redis_client:
+        logger.error("Redis未连接，无法创建工作流状态。")
         return
-    try:
-        key = get_workflow_key(context.workflow_id)
-        value = json.dumps(context.dict(), indent=4)
-        # 直接使用SET覆盖旧值，TTL会保持不变
-        redis_conn.set(key, value)
-        print(f"更新了工作流 {context.workflow_id} 的状态记录。")
-    except Exception as e:
-        print(f"警告: 更新工作流 {context.workflow_id} 状态时发生错误: {e}")
 
-def get_workflow_state(workflow_id: str) -> dict:
-    if not redis_conn:
-        raise ConnectionError("Redis not connected.")
-    key = get_workflow_key(workflow_id)
-    value = redis_conn.get(key)
-    if value:
-        return json.loads(value)
-    return None
+    key = _get_key(context.workflow_id)
+    # 将Pydantic模型序列化为JSON字符串
+    state_json = context.model_dump_json()
+    
+    # 使用setex原子地设置键、值和过期时间
+    redis_client.setex(key, WORKFLOW_TTL_SECONDS, state_json)
+    logger.info(f"已为 workflow_id='{context.workflow_id}' 创建初始状态，TTL为 {WORKFLOW_TTL_DAYS} 天。")
+
+def update_workflow_state(context: WorkflowContext) -> None:
+    """
+    更新Redis中已存在的工作流状态记录。
+
+    这通常由Celery任务在执行前后调用。
+    它会保留现有的TTL。
+
+    Args:
+        context (WorkflowContext): 包含最新状态的上下文对象。
+    """
+    if not redis_client:
+        logger.error("Redis未连接，无法更新工作流状态。")
+        return
+
+    key = _get_key(context.workflow_id)
+    state_json = context.model_dump_json()
+    
+    # 使用set并保留TTL
+    redis_client.set(key, state_json, keepttl=True)
+    logger.info(f"已更新 workflow_id='{context.workflow_id}' 的状态。")
+
+def get_workflow_state(workflow_id: str) -> Dict[str, Any]:
+    """
+    从Redis中检索一个工作流的状态。
+
+    Args:
+        workflow_id (str): 要查询的工作流ID。
+
+    Returns:
+        Dict[str, Any]: 代表工作流状态的字典。如果找不到，则返回一个错误信息。
+    """
+    if not redis_client:
+        logger.error("Redis未连接，无法获取工作流状态。")
+        return {"error": "State manager could not connect to Redis."}
+
+    key = _get_key(workflow_id)
+    state_json = redis_client.get(key)
+
+    if not state_json:
+        logger.warning(f"尝试获取一个不存在的工作流状态: workflow_id='{workflow_id}'")
+        return {"error": f"Workflow with id '{workflow_id}' not found."}
+
+    return json.loads(state_json)

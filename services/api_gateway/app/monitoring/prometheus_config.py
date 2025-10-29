@@ -7,11 +7,21 @@ Prometheus 监控配置
 import os
 import yaml
 from typing import Dict, Any
+from services.common.config_loader import get_redis_config
 
 class PrometheusConfig:
     """Prometheus 配置生成器"""
 
     def __init__(self):
+        try:
+            redis_config = get_redis_config()
+            self.redis_host = redis_config['host']
+            self.redis_port = redis_config['port']
+        except (ValueError, KeyError) as e:
+            print(f"警告: 无法从环境变量加载 Redis 配置 ({e})。将使用默认值 'redis:6379'。")
+            self.redis_host = 'redis'
+            self.redis_port = 6379
+        
         self.config = self._get_default_config()
 
     def _get_default_config(self) -> Dict[str, Any]:
@@ -31,7 +41,7 @@ class PrometheusConfig:
                 {
                     'job_name': 'redis',
                     'static_configs': [
-                        {'targets': [f"${os.environ.get('REDIS_HOST', 'redis')}:{os.environ.get('REDIS_PORT', '6379')}"]}
+                        {'targets': [f"{self.redis_host}:{self.redis_port}"]}
                     ]
                 },
                 {
@@ -100,6 +110,15 @@ class GrafanaConfig:
     """Grafana 配置生成器"""
 
     def __init__(self):
+        try:
+            redis_config = get_redis_config()
+            self.redis_host = redis_config['host']
+            self.redis_port = redis_config['port']
+        except (ValueError, KeyError) as e:
+            print(f"警告: 无法从环境变量加载 Redis 配置 ({e})。将使用默认值 'redis:6379'。")
+            self.redis_host = 'redis'
+            self.redis_port = 6379
+
         self.datasource_config = self._get_datasource_config()
         self.dashboard_config = self._get_dashboard_config()
 
@@ -133,7 +152,7 @@ class GrafanaConfig:
                     'name': 'Redis',
                     'type': 'redis-datasource',
                     'access': 'proxy',
-                    'url': f"${os.environ.get('REDIS_HOST', 'redis')}:{os.environ.get('REDIS_PORT', '6379')}",
+                    'url': f"{self.redis_host}:{self.redis_port}",
                     'password': '',
                     'user': '',
                     'database': '',

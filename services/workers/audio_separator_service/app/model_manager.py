@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Audio Separator Service - 模型管理器
-功能：线程安全的 UVR-MDX 模型加载和管理
+功能：通过 subprocess 调用独立脚本执行模型推理
 """
 
 import os
@@ -11,7 +11,10 @@ import threading
 import logging
 from typing import Optional, Dict
 from pathlib import Path
-from audio_separator.separator import Separator
+import subprocess
+import sys
+import json
+import tempfile
 
 from .config import get_config, AudioSeparatorConfig
 
@@ -21,361 +24,177 @@ logger = logging.getLogger(__name__)
 
 class ModelManager:
     """
-    UVR-MDX 模型管理器
+    模型管理器 (Subprocess 模式)
 
     功能：
-    1. 线程安全的模型单例管理
-    2. 模型懒加载和缓存
-    3. 模型健康检查
-    4. 模型切换支持
+    1. 构造并执行对独立推理脚本的 subprocess 调用。
+    2. 解析子进程返回的结果。
+    3. 提供服务健康检查。
     """
-
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        """单例模式实现"""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
 
     def __init__(self):
         """初始化模型管理器"""
-        if self._initialized:
-            return
+        self.config: AudioSeparatorConfig = get_config()
+        logger.info("ModelManager (subprocess mode) 初始化完成")
 
-        with self._lock:
-            if not self._initialized:
-                self.config: AudioSeparatorConfig = get_config()
-                self._separators: Dict[str, Separator] = {}
-                self._current_model: Optional[str] = None
-                self._initialized = True
-
-                logger.info("ModelManager 初始化完成")
-
-    def _create_separator(self, model_name: str) -> Separator:
-        """
-        创建新的 Separator 实例（带重试机制）
-
-        Args:
-            model_name: 模型文件名
-
-        Returns:
-            Separator: 音频分离器实例
-
-        Raises:
-            RuntimeError: 模型加载失败
-            FileNotFoundError: 模型文件不存在
-        """
-        logger.info(f"创建新的 Separator 实例，模型: {model_name}")
-
-        # 验证模型文件是否存在
-        model_path = Path(self.config.models_dir) / model_name
-        if not model_path.exists():
-            raise FileNotFoundError(f"模型文件不存在: {model_path}")
-
-        # 确保参数不为None，防止出现 'NoneType' and 'int' 错误
-        segment_size = self.config.mdx_segment_size or 256
-        batch_size = self.config.mdx_batch_size or 1
-        normalization_threshold = self.config.normalization_threshold or 0.9
-
-        logger.info(f"使用参数: segment_size={segment_size}, batch_size={batch_size}, normalization_threshold={normalization_threshold}")
-
-        max_retries = 3
-        retry_delay = 5  # 秒
-
-        for attempt in range(max_retries):
-            try:
-                # 创建 Separator 实例
-                # 注意：audio-separator 会自动检测 CUDA 并启用 GPU 加速
-                separator = Separator(
-                    log_level=logging.getLevelName(self.config.log_level),
-                    model_file_dir=self.config.models_dir,
-                    output_dir=self.config.output_dir,
-                    output_format=self.config.output_format,
-                    normalization_threshold=normalization_threshold,
-                    # 使用完整的参数配置，确保所有参数都有明确的默认值
-                    mdx_params={
-                        "hop_length": 1024,           # 明确设置 hop_length
-                        "segment_size": segment_size,  # 使用配置的 segment_size，避免 None 错误
-                        "batch_size": batch_size,      # 使用配置的 batch_size，避免 None 错误
-                        "overlap": 0.25,               # 明确设置 overlap，避免 None 错误
-                        "enable_denoise": False,       # 明确设置降噪参数
-                        "chunk_size": 261120,          # UVR5 标准配置，避免 None 错误
-                        "dim_f": 6144,                 # UVR5 标准配置，避免 None 错误
-                        "n_fft": 12288,                # UVR5 标准配置，避免 None 错误
-                    },
-                )
-
-                # 加载模型
-                logger.info(f"加载模型: {model_name} (尝试 {attempt + 1}/{max_retries})")
-                separator.load_model(model_name)
-
-                logger.info(f"模型 {model_name} 加载成功")
-                return separator
-
-            except Exception as e:
-                logger.warning(f"模型 {model_name} 加载失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
-
-                if attempt < max_retries - 1:
-                    logger.info(f"等待 {retry_delay} 秒后重试...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # 指数退避
-                else:
-                    logger.error(f"模型 {model_name} 加载最终失败")
-                    raise RuntimeError(f"无法加载模型 {model_name}: {str(e)}")
-
-    def get_separator(self, model_name: Optional[str] = None) -> Separator:
-        """
-        获取 Separator 实例（线程安全）
-
-        Args:
-            model_name: 模型名称，默认使用配置文件中的默认模型
-
-        Returns:
-            Separator: 音频分离器实例
-        """
-        if model_name is None:
-            model_name = self.config.default_model
-
-        with self._lock:
-            # 如果模型已缓存，直接返回
-            if model_name in self._separators:
-                logger.debug(f"使用缓存的模型: {model_name}")
-                return self._separators[model_name]
-
-            # 创建新的 Separator 并缓存
-            separator = self._create_separator(model_name)
-            self._separators[model_name] = separator
-            self._current_model = model_name
-
-            return separator
-
-    def separate_audio(
+    def separate_audio_subprocess(
         self,
         audio_path: str,
-        model_name: Optional[str] = None,
-        output_dir: Optional[str] = None,
-        model_type: Optional[str] = None
+        model_name: str,
+        output_dir: str,
+        model_type: str,
+        use_vocal_optimization: bool = False,
+        vocal_optimization_level: Optional[str] = None
     ) -> Dict[str, str]:
         """
-        分离音频文件（支持MDX和Demucs模型）
-
-        Args:
-            audio_path: 输入音频文件路径
-            model_name: 使用的模型名称
-            output_dir: 输出目录（可选）
-            model_type: 模型类型（mdx/demucs）
-
-        Returns:
-            Dict[str, str]: 分离结果，包含 vocals 和 instrumental 路径
+        使用 subprocess 调用独立脚本执行音频分离。
         """
-        # 验证输入文件
+        logger.info(f"开始处理音频 (subprocess模式): {audio_path}")
+
         if not Path(audio_path).exists():
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
-        # 确定模型类型
-        if model_type is None:
-            model_type = self.config.model_type
+        # 准备输出路径
+        # 使用临时文件来接收子进程的JSON输出
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as tmp:
+            output_file = tmp.name
         
-        # 根据模型类型选择分离方法
-        if model_type.lower() == "demucs":
-            return self._separate_audio_demucs(audio_path, model_name, output_dir)
-        else:  # 默认使用MDX
-            return self._separate_audio_mdx(audio_path, model_name, output_dir)
-    
-    def _separate_audio_mdx(
-        self,
-        audio_path: str,
-        model_name: Optional[str] = None,
-        output_dir: Optional[str] = None
-    ) -> Dict[str, str]:
-        """
-        使用MDX模型分离音频（原有逻辑）
-        
-        Args:
-            audio_path: 输入音频文件路径
-            model_name: 使用的模型名称
-            output_dir: 输出目录（可选）
-            
-        Returns:
-            Dict[str, str]: 分离结果，包含 vocals 和 instrumental 路径
-        """
-        # 确定模型名称
-        if model_name is None:
-            model_name = self.config.default_model
+        logger.info(f"子进程结果临时文件: {output_file}")
 
-        # 确定输出目录
-        if output_dir is None:
-            output_dir = self.config.output_dir
+        # 准备推理脚本路径
+        current_dir = Path(__file__).parent
+        infer_script = current_dir / "audio_separator_infer.py"
+        if not infer_script.exists():
+            raise FileNotFoundError(f"推理脚本不存在: {infer_script}")
 
-        # 创建输出目录
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        # 构建命令
+        cmd = [
+            sys.executable,
+            str(infer_script),
+            "--audio_path", str(audio_path),
+            "--output_file", str(output_file),
+            "--model_name", model_name,
+            "--model_type", model_type,
+            "--output_dir", output_dir,
+        ]
+        
+        if use_vocal_optimization and vocal_optimization_level:
+            cmd.extend(["--optimization_level", vocal_optimization_level])
 
-        # 为每个任务创建独立的 Separator 实例（避免并发问题）
-        logger.info(f"创建新的 Separator 实例用于本次分离任务")
-        
-        # 确保参数不为None，防止出现 'NoneType' and 'int' 错误
-        segment_size = self.config.mdx_segment_size or 256
-        batch_size = self.config.mdx_batch_size or 1
-        normalization_threshold = self.config.normalization_threshold or 0.9
-        
-        logger.info(f"使用参数: segment_size={segment_size}, batch_size={batch_size}, normalization_threshold={normalization_threshold}")
-        
-        separator = Separator(
-            log_level=logging.getLevelName(self.config.log_level),
-            model_file_dir=self.config.models_dir,
-            output_dir=output_dir,  # 直接使用指定的输出目录
-            output_format=self.config.output_format,
-            normalization_threshold=normalization_threshold,
-            # 使用完整的参数配置，确保所有参数都有明确的默认值
-            mdx_params={
-                "hop_length": 1024,           # 明确设置 hop_length
-                "segment_size": segment_size,  # 使用配置的 segment_size，避免 None 错误
-                "batch_size": batch_size,      # 使用配置的 batch_size，避免 None 错误
-                "overlap": 0.25,               # 明确设置 overlap，避免 None 错误
-                "enable_denoise": False,       # 明确设置降噪参数
-                "chunk_size": 261120,          # UVR5 标准配置，避免 None 错误
-                "dim_f": 6144,                 # UVR5 标准配置，避免 None 错误
-                "n_fft": 12288,                # UVR5 标准配置，避免 None 错误
-            },
-        )
+        logger.info(f"执行命令: {' '.join(cmd)}")
 
+        # 执行 subprocess
         try:
-            logger.info(f"开始分离音频: {audio_path}")
-            logger.info(f"使用模型: {model_name}")
-            logger.info(f"输出目录: {output_dir}")
-            logger.info(f"使用的MDX参数: segment_size={segment_size}, batch_size={batch_size}, overlap=0.25")
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=1800,  # 30分钟超时
+                cwd=str(current_dir),
+                env=os.environ.copy(),
+                encoding='utf-8'
+            )
 
-            # 加载模型
-            logger.info(f"正在加载模型: {model_name}")
-            separator.load_model(model_name)
-            logger.info(f"模型加载成功: {model_name}")
+            if result.returncode != 0:
+                error_msg = f"Subprocess 执行失败，返回码: {result.returncode}"
+                logger.error(f"{error_msg}\nstdout: {result.stdout}\nstderr: {result.stderr}")
+                raise RuntimeError(f"{error_msg}\nstderr: {result.stderr}")
 
-            # 执行分离
-            logger.info(f"开始执行音频分离...")
-            output_files = separator.separate(audio_path)
-            logger.info(f"音频分离完成，输出文件: {output_files}")
+            logger.info("Subprocess 执行成功")
+            if result.stderr:
+                logger.debug(f"Subprocess stderr:\n{result.stderr}")
 
-            # 检查输出结果
-            if not output_files or len(output_files) == 0:
-                raise RuntimeError(
-                    f"音频分离失败：未生成任何输出文件。"
-                    f"请检查日志以获取详细错误信息。"
-                )
-
-            # 解析输出文件（传递 output_dir 用于构建绝对路径）
-            result = self._parse_output_files(output_files, output_dir)
-
-            # 验证结果包含必需的文件
-            if not result['vocals'] or not result['instrumental']:
-                raise RuntimeError(
-                    f"音频分离结果不完整：vocals={result['vocals']}, "
-                    f"instrumental={result['instrumental']}"
-                )
-
-            return result
-
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError("Subprocess 执行超时 (30分钟)") from e
         except Exception as e:
-            logger.error(f"音频分离失败: {str(e)}", exc_info=True)
-            raise
+            raise RuntimeError(f"Subprocess 执行异常: {e}") from e
 
-    def _parse_output_files(self, output_files: list, output_dir: str = None) -> Dict[str, str]:
+        # 读取结果文件
+        if not Path(output_file).exists():
+            raise RuntimeError(f"推理结果文件不存在: {output_file}")
+
+        with open(output_file, 'r', encoding='utf-8') as f:
+            result_data = json.load(f)
+
+        # 清理临时文件
+        try:
+            Path(output_file).unlink()
+        except Exception as e:
+            logger.warning(f"清理临时文件失败: {e}")
+
+        if not result_data.get('success', False):
+            error_info = result_data.get('error', {})
+            raise RuntimeError(f"推理失败: {error_info.get('message', '未知错误')}")
+
+        # 解析输出文件
+        output_files = result_data.get('output_files', [])
+        return self._parse_output_files(output_files, output_dir)
+
+    def _parse_output_files(self, output_files: list, output_dir: str) -> Dict[str, str]:
         """
-        解析输出文件列表，将相对路径转换为绝对路径
-
-        Args:
-            output_files: Separator 返回的输出文件列表（可能是相对路径）
-            output_dir: 输出目录（用于构建绝对路径）
-
-        Returns:
-            Dict[str, str]: 包含 vocals 和 instrumental 的绝对路径字典
+        解析输出文件列表，识别 vocals 和 instrumental。
         """
-        result = {
-            'vocals': None,
-            'instrumental': None
-        }
+        result = {'vocals': None, 'instrumental': None, 'all_tracks': {}}
+        
+        # audio_separator 返回的是完整路径
+        absolute_files = output_files
 
-        for file_path in output_files:
-            # 如果是相对路径，转换为绝对路径
-            if not Path(file_path).is_absolute() and output_dir:
-                file_path = str(Path(output_dir) / file_path)
+        for file_path in absolute_files:
             file_name = Path(file_path).name.lower()
+            track_name = Path(file_path).stem.lower()
+            result['all_tracks'][track_name] = file_path
 
-            if 'vocal' in file_name or 'voice' in file_name:
-                logger.info(f"✅ 匹配人声文件: '{file_name}' -> {file_path}")
+            if 'vocals' in file_name:
                 result['vocals'] = file_path
             elif 'instrumental' in file_name or 'inst' in file_name or 'no_vocal' in file_name:
-                logger.info(f"✅ 匹配伴奏文件: '{file_name}' -> {file_path}")
                 result['instrumental'] = file_path
-            else:
-                logger.info(f"❌ 未匹配文件: '{file_name}' (vocal: {'vocal' in file_name}, voice: {'voice' in file_name})")
+            elif 'drums' in file_name:
+                if not result.get('drums'): result['drums'] = file_path
+            elif 'bass' in file_name:
+                if not result.get('bass'): result['bass'] = file_path
+            elif 'other' in file_name:
+                if not result.get('other'): result['other'] = file_path
 
-        # 验证结果
-        if result['vocals'] is None or result['instrumental'] is None:
-            logger.warning(f"无法识别输出文件类型: {output_files}")
-            # 改进的备用逻辑：智能选择人声文件
-            if len(output_files) >= 2:
-                # 智能查找包含'vocal'的文件
-                vocals_files = []
-                instrumental_files = []
-                other_files = []
+        # 如果标准解析失败，使用备用逻辑
+        if not result['vocals'] or not result['instrumental']:
+            logger.warning(f"无法通过标准名称匹配识别人声和伴奏: {output_files}")
+            if not result['vocals'] and 'vocals' in result['all_tracks']:
+                 result['vocals'] = result['all_tracks']['vocals']
 
-                for f in output_files:
-                    f_lower = f.lower()
-                    abs_f = f if Path(f).is_absolute() else str(Path(output_dir) / f)
+            # 伴奏的备用逻辑
+            if not result['instrumental']:
+                if 'instrumental' in result['all_tracks']:
+                    result['instrumental'] = result['all_tracks']['instrumental']
+                elif 'no_vocals' in result['all_tracks']:
+                    result['instrumental'] = result['all_tracks']['no_vocals']
+                elif 'other' in result['all_tracks']:
+                     result['instrumental'] = result['all_tracks']['other']
+                elif len(absolute_files) >= 2:
+                    # 选择第一个不是人声的文件
+                    for f in absolute_files:
+                        if f != result['vocals']:
+                            result['instrumental'] = f
+                            break
+        
+        if not result['vocals'] and len(absolute_files) > 0:
+            result['vocals'] = absolute_files[0]
+            logger.warning(f"最终备用：选择第一个文件作为人声: {result['vocals']}")
 
-                    if 'vocal' in f_lower:
-                        vocals_files.append(abs_f)
-                        logger.info(f"备用逻辑找到人声文件: {f}")
-                    elif 'instrumental' in f_lower or 'inst' in f_lower or 'no_vocal' in f_lower:
-                        instrumental_files.append(abs_f)
-                        logger.info(f"备用逻辑找到伴奏文件: {f}")
-                    else:
-                        other_files.append(abs_f)
-                        logger.info(f"备用逻辑其他文件: {f}")
-
-                # 设置人声文件（优先查找结果，否则使用第一个其他文件）
-                if vocals_files:
-                    result['vocals'] = vocals_files[0]
-                    logger.info(f"备用逻辑选择人声文件: {Path(vocals_files[0]).name}")
-                elif other_files:
-                    result['vocals'] = other_files[0]
-                    logger.warning(f"备用逻辑使用第一个其他文件当人声: {Path(other_files[0]).name}")
-
-                # 设置伴奏文件（优先查找结果，否则使用第一个非人声文件）
-                if instrumental_files:
-                    result['instrumental'] = instrumental_files[0]
-                    logger.info(f"备用逻辑选择伴奏文件: {Path(instrumental_files[0]).name}")
-                else:
-                    # 选择非人声的第一个文件作为伴奏
-                    for f in [f for f in output_files if 'vocal' not in f.lower()]:
-                        abs_f = f if Path(f).is_absolute() else str(Path(output_dir) / f)
-                        result['instrumental'] = abs_f
-                        logger.info(f"备用逻辑选择第一个非人声文件当伴奏: {Path(abs_f).name}")
-                        break
-
-                # 最后的备用方案
-                if not result['vocals'] or not result['instrumental']:
-                    logger.warning(f"智能备用逻辑失败，使用原始备用逻辑")
-                    file1 = output_files[0] if Path(output_files[0]).is_absolute() else str(Path(output_dir) / output_files[0])
-                    file2 = output_files[1] if Path(output_files[1]).is_absolute() else str(Path(output_dir) / output_files[1])
-                    if not result['vocals']:
-                        result['vocals'] = file1
-                    if not result['instrumental']:
-                        result['instrumental'] = file2
+        if not result['instrumental'] and len(absolute_files) > 1:
+            # 确保不与人声文件重复
+            for f in absolute_files:
+                if f != result['vocals']:
+                    result['instrumental'] = f
+                    break
+            if not result['instrumental']: # 如果只有一个文件
+                 result['instrumental'] = result['vocals']
+            logger.warning(f"最终备用：选择另一个文件作为伴奏: {result['instrumental']}")
 
         return result
 
     def list_available_models(self) -> list:
         """
         列出所有可用的模型
-
-        Returns:
-            list: 可用模型列表
         """
         models_dir = Path(self.config.models_dir)
 
@@ -385,17 +204,14 @@ class ModelManager:
 
         # 查找所有 .onnx 和 .pth 文件
         model_files = []
-        for ext in ['*.onnx', '*.pth', '*.ckpt']:
+        for ext in ['*.onnx', '*.pth', '*.ckpt', '*.yaml']:
             model_files.extend(models_dir.glob(ext))
 
         return [f.name for f in model_files]
 
     def health_check(self) -> Dict[str, any]:
         """
-        全面的健康检查
-
-        Returns:
-            Dict: 健康状态信息
+        简化的健康检查 (Subprocess 模式)
         """
         import psutil
         import datetime
@@ -403,16 +219,11 @@ class ModelManager:
         health_status = {
             'status': 'healthy',
             'timestamp': datetime.datetime.now().isoformat(),
-            'models_loaded': len(self._separators),
-            'current_model': self._current_model,
+            'mode': 'subprocess',
             'available_models': self.list_available_models(),
             'config': {
-                'use_gpu': self.config.use_gpu,
-                'gpu_id': self.config.gpu_id,
                 'models_dir': self.config.models_dir,
                 'output_format': self.config.output_format,
-                'mdx_segment_size': self.config.mdx_segment_size,
-                'mdx_batch_size': self.config.mdx_batch_size
             },
             'system_info': {},
             'checks': {}
@@ -422,35 +233,9 @@ class ModelManager:
         models_dir = Path(self.config.models_dir)
         models_dir_check = {
             'exists': models_dir.exists(),
-            'readable': False,
-            'writable': False,
-            'size_mb': 0
+            'readable': os.access(models_dir, os.R_OK) if models_dir.exists() else False,
         }
-
-        if models_dir.exists():
-            models_dir_check['readable'] = os.access(models_dir, os.R_OK)
-            models_dir_check['writable'] = os.access(models_dir, os.W_OK)
-
-            # 计算目录大小
-            total_size = 0
-            for file_path in models_dir.rglob('*'):
-                if file_path.is_file():
-                    total_size += file_path.stat().st_size
-            models_dir_check['size_mb'] = round(total_size / (1024 * 1024), 2)
-
         health_status['checks']['models_directory'] = models_dir_check
-
-        # 检查输出目录
-        output_dir = Path(self.config.output_dir)
-        output_dir_check = {
-            'exists': output_dir.exists(),
-            'writable': False
-        }
-
-        if output_dir.exists():
-            output_dir_check['writable'] = os.access(output_dir, os.W_OK)
-
-        health_status['checks']['output_directory'] = output_dir_check
 
         # 检查系统资源
         try:
@@ -463,510 +248,39 @@ class ModelManager:
         except Exception as e:
             health_status['system_info'] = {'error': str(e)}
 
-        # 检查GPU状态（如果启用GPU）
-        if self.config.use_gpu:
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    gpu_info = {
-                        'available': True,
-                        'device_count': torch.cuda.device_count(),
-                        'current_device': torch.cuda.current_device(),
-                        'device_name': torch.cuda.get_device_name(),
-                        'memory_allocated_mb': round(torch.cuda.memory_allocated() / (1024**2), 2),
-                        'memory_reserved_mb': round(torch.cuda.memory_reserved() / (1024**2), 2)
-                    }
-                else:
-                    gpu_info = {
-                        'available': False,
-                        'error': 'CUDA not available'
-                    }
-                health_status['system_info']['gpu'] = gpu_info
-            except ImportError:
-                health_status['system_info']['gpu'] = {
-                    'available': False,
-                    'error': 'PyTorch not installed'
-                }
-            except Exception as e:
-                health_status['system_info']['gpu'] = {
-                    'available': False,
-                    'error': str(e)
-                }
-
-        # 检查关键模型文件
-        critical_models = [
-            self.config.default_model,
-            self.config.high_quality_model,
-            self.config.vocal_optimization_model
-        ]
-
-        model_files_check = {}
-        for model_name in critical_models:
-            model_path = models_dir / model_name
-            model_files_check[model_name] = {
-                'exists': model_path.exists(),
-                'size_mb': round(model_path.stat().st_size / (1024*1024), 2) if model_path.exists() else 0
-            }
-
-        health_status['checks']['critical_models'] = model_files_check
+        # 检查GPU状态
+        try:
+            import torch
+            gpu_info = {'available': torch.cuda.is_available()}
+            if gpu_info['available']:
+                gpu_info['device_count'] = torch.cuda.device_count()
+            health_status['system_info']['gpu'] = gpu_info
+        except ImportError:
+            health_status['system_info']['gpu'] = {'available': False, 'error': 'PyTorch not installed'}
+        except Exception as e:
+            health_status['system_info']['gpu'] = {'available': False, 'error': str(e)}
 
         # 确定整体健康状态
-        issues = []
-
-        if not models_dir_check['exists']:
-            issues.append('models_directory_not_found')
-        elif not models_dir_check['readable']:
-            issues.append('models_directory_not_readable')
-        elif not models_dir_check['writable']:
-            issues.append('models_directory_not_writable')
-
-        if not output_dir_check['exists']:
-            issues.append('output_directory_not_found')
-        elif not output_dir_check['writable']:
-            issues.append('output_directory_not_writable')
-
-        # 检查关键模型
-        missing_critical_models = [
-            model for model, info in model_files_check.items()
-            if not info['exists']
-        ]
-        if missing_critical_models:
-            issues.append('missing_critical_models')
-            health_status['missing_models'] = missing_critical_models
-
-        # 检查内存使用
-        if memory.percent > 90:
-            issues.append('high_memory_usage')
-
-        # 检查GPU状态
-        if self.config.use_gpu:
-            gpu_info = health_status['system_info'].get('gpu', {})
-            if not gpu_info.get('available', False):
-                issues.append('gpu_not_available')
-
-        # 更新整体状态
-        if issues:
+        if not models_dir_check['exists'] or not models_dir_check['readable']:
             health_status['status'] = 'unhealthy'
-            health_status['issues'] = issues
+            health_status['issues'] = ['models_directory_issue']
 
         return health_status
-
-    def clear_cache(self):
-        """清除所有缓存的模型"""
-        with self._lock:
-            logger.info("清除模型缓存")
-            self._separators.clear()
-            self._current_model = None
-    
-    def separate_vocals_optimized(
-        self,
-        audio_path: str,
-        model_name: Optional[str] = None,
-        output_dir: Optional[str] = None,
-        optimization_level: str = "balanced"
-    ) -> Dict[str, str]:
-        """
-        使用优化参数分离人声
-        
-        Args:
-            audio_path: 输入音频文件路径
-            model_name: 使用的模型名称
-            output_dir: 输出目录（可选）
-            optimization_level: 优化级别 ("fast", "balanced", "quality")
-        
-        Returns:
-            Dict[str, str]: 分离结果，包含 vocals 和 instrumental 路径
-        """
-        # 验证输入文件
-        if not Path(audio_path).exists():
-            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
-
-        # 确定模型名称
-        if model_name is None:
-            model_name = self.config.default_model
-
-        # 确定输出目录
-        if output_dir is None:
-            output_dir = self.config.output_dir
-
-        # 创建输出目录
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-        # 根据优化级别设置参数
-        if optimization_level == "fast":
-            # 快速模式：使用配置中的快速参数，并确保所有参数都有默认值
-            mdx_params = {
-                "hop_length": self.config.vocal_fast_params.get("hop_length", 1024),
-                "segment_size": self.config.vocal_fast_params.get("segment_size", 256),
-                "batch_size": self.config.vocal_fast_params.get("batch_size", 1),
-                "overlap": self.config.vocal_fast_params.get("overlap", 0.25),
-                "enable_denoise": self.config.vocal_fast_params.get("enable_denoise", False),
-                "chunk_size": 261120,          # UVR5 标准配置，避免 None 错误
-                "dim_f": 6144,                 # UVR5 标准配置，避免 None 错误
-                "n_fft": 12288,                # UVR5 标准配置，避免 None 错误
-            }
-        elif optimization_level == "quality":
-            # 质量模式：使用配置中的质量参数，并确保所有参数都有默认值
-            mdx_params = {
-                "hop_length": self.config.vocal_quality_params.get("hop_length", 256),
-                "segment_size": self.config.vocal_quality_params.get("segment_size", 64),
-                "batch_size": self.config.vocal_quality_params.get("batch_size", 1),
-                "overlap": self.config.vocal_quality_params.get("overlap", 0.5),
-                "enable_denoise": self.config.vocal_quality_params.get("enable_denoise", True),
-                "chunk_size": 261120,          # UVR5 标准配置，避免 None 错误
-                "dim_f": 6144,                 # UVR5 标准配置，避免 None 错误
-                "n_fft": 12288,                # UVR5 标准配置，避免 None 错误
-            }
-        else:  # balanced
-            # 平衡模式：使用配置中的平衡参数，并确保所有参数都有默认值
-            mdx_params = {
-                "hop_length": self.config.vocal_balanced_params.get("hop_length", 512),
-                "segment_size": self.config.vocal_balanced_params.get("segment_size", 128),
-                "batch_size": self.config.vocal_balanced_params.get("batch_size", 1),
-                "overlap": self.config.vocal_balanced_params.get("overlap", 0.25),
-                "enable_denoise": self.config.vocal_balanced_params.get("enable_denoise", True),
-                "chunk_size": 261120,          # UVR5 标准配置，避免 None 错误
-                "dim_f": 6144,                 # UVR5 标准配置，避免 None 错误
-                "n_fft": 12288,                # UVR5 标准配置，避免 None 错误
-            }
-
-        # 为每个任务创建独立的 Separator 实例（避免并发问题）
-        logger.info(f"创建优化参数的 Separator 实例，优化级别: {optimization_level}")
-        
-        # 确保参数不为None，防止出现 'NoneType' and 'int' 错误
-        normalization_threshold = self.config.normalization_threshold or 0.9
-        
-        logger.info(f"使用优化参数: {mdx_params}")
-        
-        separator = Separator(
-            log_level=logging.getLevelName(self.config.log_level),
-            model_file_dir=self.config.models_dir,
-            output_dir=output_dir,  # 直接使用指定的输出目录
-            output_format=self.config.output_format,
-            normalization_threshold=normalization_threshold,
-            mdx_params=mdx_params,
-        )
-
-        try:
-            logger.info(f"开始优化人声分离: {audio_path}")
-            logger.info(f"使用模型: {model_name}")
-            logger.info(f"输出目录: {output_dir}")
-            logger.info(f"优化级别: {optimization_level}")
-            logger.info(f"使用的MDX参数: {mdx_params}")
-
-            # 加载模型
-            logger.info(f"正在加载模型: {model_name}")
-            separator.load_model(model_name)
-            logger.info(f"模型加载成功: {model_name}")
-
-            # 执行分离
-            logger.info(f"开始执行优化人声分离...")
-            output_files = separator.separate(audio_path)
-            logger.info(f"优化人声分离完成，输出文件: {output_files}")
-
-            # 检查输出结果
-            if not output_files or len(output_files) == 0:
-                raise RuntimeError(
-                    f"音频分离失败：未生成任何输出文件。"
-                    f"请检查日志以获取详细错误信息。"
-                )
-
-            # 解析输出文件（传递 output_dir 用于构建绝对路径）
-            result = self._parse_output_files(output_files, output_dir)
-
-            # 验证结果包含必需的文件
-            if not result['vocals'] or not result['instrumental']:
-                raise RuntimeError(
-                    f"音频分离结果不完整：vocals={result['vocals']}, "
-                    f"instrumental={result['instrumental']}"
-                )
-
-            return result
-
-        except Exception as e:
-            logger.error(f"优化人声分离失败: {str(e)}", exc_info=True)
-            raise
-    
-    def _separate_audio_demucs(
-        self,
-        audio_path: str,
-        model_name: Optional[str] = None,
-        output_dir: Optional[str] = None
-    ) -> Dict[str, str]:
-        """
-        使用Demucs模型分离音频（使用audio-separator高级API）
-        
-        Args:
-            audio_path: 输入音频文件路径
-            model_name: 使用的模型名称
-            output_dir: 输出目录（可选）
-            
-        Returns:
-            Dict[str, str]: 分离结果，包含 vocals 和 instrumental 路径
-        """
-        try:
-            # 确定模型名称
-            if model_name is None:
-                model_name = self.config.demucs_default_model
-            
-            # 验证模型名称是否是有效的Demucs模型
-            # 注意：audio-separator库需要模型文件名带.yaml扩展名
-            valid_demucs_models = [
-                'htdemucs.yaml', 'htdemucs_ft.yaml', 'htdemucs_6s.yaml',
-                'mdx.yaml', 'mdx_q.yaml', 'mdx_extra_q.yaml', 'mdx_extra.yaml'
-            ]
-            
-            # 如果模型名不带.yaml扩展名，添加扩展名
-            if not model_name.endswith('.yaml'):
-                model_name = f"{model_name}.yaml"
-            
-            if model_name not in valid_demucs_models:
-                logger.warning(f"模型名称 '{model_name}' 可能不是有效的Demucs模型，尝试使用默认模型")
-                default_model = self.config.demucs_default_model
-                if not default_model.endswith('.yaml'):
-                    default_model = f"{default_model}.yaml"
-                model_name = default_model
-            
-            # 确定输出目录
-            if output_dir is None:
-                output_dir = self.config.output_dir
-            
-            # 创建输出目录
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
-            
-            logger.info(f"开始使用Demucs分离音频: {audio_path}")
-            logger.info(f"使用模型: {model_name}")
-            logger.info(f"输出目录: {output_dir}")
-            
-            # 处理 segment 参数 - 确保类型正确
-            segment = self.config.demucs_segment
-            
-            # 将字符串 "default" 转换为 None，这样 audio-separator 会使用默认值
-            if segment == "default":
-                segment = None
-                logger.info(f"将字符串 'default' 转换为 None，使用 audio-separator 默认分段大小")
-            elif isinstance(segment, str):
-                try:
-                    # 尝试将字符串转换为浮点数
-                    segment = float(segment)
-                    logger.info(f"将字符串 '{self.config.demucs_segment}' 转换为数值: {segment}")
-                except ValueError:
-                    # 如果转换失败，使用 None
-                    logger.warning(f"无法解析 segment 参数 '{segment}'，使用默认值")
-                    segment = None
-            elif segment is not None:
-                logger.info(f"使用配置的 segment 值: {segment}")
-            else:
-                logger.info(f"使用默认 segment 值 (None)")
-            
-            # 创建 Separator 实例（与独立脚本一致）
-            separator = Separator(
-                log_level=logging.getLevelName(self.config.log_level),
-                model_file_dir=self.config.models_dir,
-                output_dir=output_dir,
-                output_format=self.config.output_format,
-                normalization_threshold=self.config.normalization_threshold or 0.9,
-                # 对于Demucs模型，也使用mdx_params参数传递
-                mdx_params={
-                    "hop_length": 1024,
-                    "segment_size": segment if segment is not None else "default",  # audio-separator支持字符串"default"
-                    "batch_size": 1,
-                    "overlap": 0.25,
-                    "enable_denoise": False,
-                    "chunk_size": 261120,
-                    "dim_f": 6144,
-                    "n_fft": 12288,
-                },
-            )
-            
-            # 加载模型
-            logger.info(f"正在加载Demucs模型: {model_name}")
-            separator.load_model(model_name)
-            logger.info(f"模型加载成功: {model_name}")
-            
-            # 执行分离
-            logger.info(f"开始执行Demucs音频分离...")
-            output_files = separator.separate(audio_path)
-            logger.info(f"Demucs音频分离完成，输出文件: {output_files}")
-            # 检查输出结果
-            if not output_files or len(output_files) == 0:
-                raise RuntimeError(
-                    f"音频分离失败：未生成任何输出文件。"
-                    f"请检查日志以获取详细错误信息。"
-                )
-            # 对于Demucs模型，直接使用专用解析方法
-            result = self._parse_demucs_output_files(output_files, output_dir)
-            
-            # 验证结果
-            if not result['vocals'] or not result['instrumental']:
-                raise RuntimeError(
-                    f"音频分离结果不完整：vocals={result['vocals']}, "
-                    f"instrumental={result['instrumental']}"
-                )
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Demucs音频分离失败: {str(e)}", exc_info=True)
-            raise
-
-    def _parse_demucs_output_files(self, output_files: list, output_dir: str = None) -> Dict[str, str]:
-        """
-        解析Demucs模型的输出文件列表，处理多轨道输出
-
-        Args:
-            output_files: Separator 返回的输出文件列表（可能是相对路径）
-            output_dir: 输出目录（用于构建绝对路径）
-
-        Returns:
-            Dict[str, str]: 包含 vocals 和 instrumental 的绝对路径字典
-        """
-        result = {
-            'vocals': None,
-            'instrumental': None,
-            'all_tracks': {}  # 新增：存储所有轨道信息
-        }
-
-        # 转换所有文件路径为绝对路径
-        absolute_files = []
-        for file_path in output_files:
-            if not Path(file_path).is_absolute() and output_dir:
-                absolute_file = str(Path(output_dir) / file_path)
-            else:
-                absolute_file = file_path
-            absolute_files.append(absolute_file)
-
-        logger.info(f"Demucs输出文件解析，输入文件: {absolute_files}")
-
-        # 首先尝试标准解析
-        for file_path in absolute_files:
-            file_name = Path(file_path).name.lower()
-
-            if 'vocals' in file_name:  # 修复：检查'vocals'而不是'vocal'
-                result['vocals'] = file_path
-            elif 'instrumental' in file_name or 'inst' in file_name or 'no_vocal' in file_name:
-                result['instrumental'] = file_path
-
-        # 如果标准解析失败或需要更完整的解析，尝试Demucs特殊解析
-        if not result['vocals'] or not result['instrumental']:
-            logger.info(f"执行Demucs特殊解析，输出文件: {absolute_files}")
-
-            # 收集所有轨道
-            tracks = {}
-            for file_path in absolute_files:
-                file_name = Path(file_path).name.lower()
-
-                # 识别不同轨道（优先级从高到低）
-                if 'vocals' in file_name:
-                    tracks['vocals'] = file_path
-                elif 'drums' in file_name:
-                    tracks['drums'] = file_path
-                elif 'bass' in file_name:
-                    tracks['bass'] = file_path
-                elif 'other' in file_name:
-                    tracks['other'] = file_path
-                elif 'piano' in file_name:
-                    tracks['piano'] = file_path
-                elif 'guitar' in file_name:
-                    tracks['guitar'] = file_path
-                else:
-                    # 未识别的轨道，使用文件名作为键
-                    track_name = Path(file_path).stem
-                    tracks[track_name] = file_path
-
-            # 设置人声轨道（最高优先级）
-            if 'vocals' in tracks:
-                result['vocals'] = tracks['vocals']
-                logger.info(f"识别人声轨道: {tracks['vocals']}")
-
-            # 设置伴奏轨道选择策略
-            if 'instrumental' in tracks:
-                result['instrumental'] = tracks['instrumental']
-            else:
-                # 选择最合适的伴奏轨道（优先级：other > drums > bass > 其他）
-                preferred_instrumental_tracks = ['other', 'drums', 'bass']
-                selected_instrumental = None
-
-                for track_name in preferred_instrumental_tracks:
-                    if track_name in tracks:
-                        selected_instrumental = tracks[track_name]
-                        logger.info(f"选择伴奏轨道 ({track_name}): {selected_instrumental}")
-                        break
-
-                if selected_instrumental:
-                    result['instrumental'] = selected_instrumental
-                elif len(tracks) >= 2:
-                    # 备用逻辑：选择非人声的第一个轨道
-                    for track_name, file_path in tracks.items():
-                        if track_name != 'vocals':
-                            result['instrumental'] = file_path
-                            logger.info(f"备用选择伴奏轨道 ({track_name}): {file_path}")
-                            break
-
-            # 存储所有轨道信息供后续使用
-            result['all_tracks'] = tracks
-
-        # 验证结果并提供详细信息
-        if result['vocals']:
-            logger.info(f"✅ 人声文件识别成功: {Path(result['vocals']).name}")
-        else:
-            logger.warning(f"❌ 人声文件识别失败")
-
-        if result['instrumental']:
-            logger.info(f"✅ 伴奏文件识别成功: {Path(result['instrumental']).name}")
-        else:
-            logger.warning(f"❌ 伴奏文件识别失败")
-
-        # 如果仍然缺少关键文件，使用最后的备用逻辑
-        if result['vocals'] is None or result['instrumental'] is None:
-            logger.warning(f"Demucs解析不完全，使用备用逻辑")
-            if len(absolute_files) >= 2:
-                # 根据文件名进行最后尝试
-                vocals_files = [f for f in absolute_files if 'vocals' in Path(f).name.lower()]
-                if vocals_files:
-                    result['vocals'] = vocals_files[0]
-                    logger.info(f"备用识别人声: {Path(vocals_files[0]).name}")
-
-                # 选择第一个非人声文件作为伴奏
-                for file_path in absolute_files:
-                    if file_path != result['vocals']:
-                        result['instrumental'] = file_path
-                        logger.info(f"备用识别伴奏: {Path(file_path).name}")
-                        break
-
-        # 移除临时字段，只返回标准格式
-        final_result = {
-            'vocals': result['vocals'],
-            'instrumental': result['instrumental']
-        }
-
-        # 如果有额外的轨道信息，也包含在结果中
-        if result['all_tracks'] and len(result['all_tracks']) > 2:
-            final_result['all_tracks'] = result['all_tracks']
-            logger.info(f"检测到 {len(result['all_tracks'])} 个音频轨道: {list(result['all_tracks'].keys())}")
-
-        return final_result
-
 
 # ========================================
 # 全局模型管理器实例
 # ========================================
-_model_manager = ModelManager()
-
 
 def get_model_manager() -> ModelManager:
     """
     获取全局模型管理器实例
-
-    Returns:
-        ModelManager: 模型管理器
     """
-    return _model_manager
+    # 在subprocess模式下，ModelManager是无状态的，每次都创建新实例是安全的
+    return ModelManager()
 
 
 if __name__ == "__main__":
     # 测试模型管理器
     logging.basicConfig(level=logging.INFO)
-
     manager = get_model_manager()
     print("健康检查:", manager.health_check())

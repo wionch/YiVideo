@@ -23,6 +23,7 @@ services:
       - ./locks:/app/locks
       - ./tmp:/app/tmp
       - ./share:/share
+      - ./tests:/app/tests
       - ./config.yml:/app/config.yml
       - ./config:/app/config
       - ./scripts:/app/scripts
@@ -32,8 +33,6 @@ services:
     user: "0:0"
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
-      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
     networks:
@@ -139,8 +138,6 @@ services:
     command: ["celery", "-A", "services.workers.faster_whisper_service.app.celery_app", "worker", "-l", "info", "-Q", "faster_whisper_queue"]
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
-      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
       - HF_TOKEN=${HF_TOKEN}
@@ -189,8 +186,6 @@ services:
     command: ["celery", "-A", "services.workers.pyannote_audio_service.app.celery_app", "worker", "-l", "info", "-Q", "pyannote_audio_queue"]
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
-      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
       - HF_TOKEN=${HF_TOKEN}
@@ -240,8 +235,6 @@ services:
     command: ["celery", "-A", "services.workers.audio_separator_service.app.celery_app", "worker", "-l", "info", "-Q", "audio_separator_queue"]
     environment:
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
-      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
       - NVIDIA_VISIBLE_DEVICES=all
@@ -288,8 +281,6 @@ services:
     environment:
       # 基础环境变量
       - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
-      - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/1
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
 

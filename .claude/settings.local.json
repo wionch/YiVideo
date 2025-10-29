@@ -66,7 +66,8 @@
       "Bash(rg:*)",
       "Read(//app/**)",
       "Read(///**)",
-      "mcp__serena__initial_instructions"
+      "mcp__serena__initial_instructions",
+      "mcp__web-search-prime__webSearchPrime"
     ],
     "deny": [
       "Bash(docker build:*)",

@@ -1,8 +1,12 @@
 """
-SRT字幕格式解析器
+SRT字幕格式解析器 - 专为字幕校正功能设计
 
 提供SRT字幕文件的解析、验证和生成功能。
 支持字幕条目的增删改查和时间戳处理。
+
+注意：此模块与 services/workers/ffmpeg_service/app/modules/subtitle_parser.py 功能类似但用途不同：
+- 本模块：主要用于字幕校正和文本处理，专注于SRT格式，包含高级文本处理功能
+- ffmpeg_service模块：主要用于音频分割，支持多种格式（SRT、JSON），包含说话人信息处理
 """
 
 import re

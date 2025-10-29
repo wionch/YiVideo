@@ -17,10 +17,15 @@ from typing import Any
 from typing import Dict
 from typing import List
 
-from celery import chain
-from celery import signature
+from celery import Celery, chain, signature
+from services.common.celery_config import BROKER_URL, BACKEND_URL
 
 # 日志已统一管理，使用 services.common.logger
+
+# 创建一个Celery实例，专门用于在API Gateway中创建任务签名
+# 这确保了任务创建时使用的broker和backend配置与worker一致
+celery_app = Celery('api_gateway_tasks', broker=BROKER_URL, backend=BACKEND_URL)
+
 
 def build_workflow_chain(workflow_config: Dict[str, Any], initial_context: Dict[str, Any]) -> chain:
     """
@@ -59,10 +64,10 @@ def build_workflow_chain(workflow_config: Dict[str, Any], initial_context: Dict[
         # 这是Celery实现服务解耦的标准方式
         if i == 0:
             # 第一个任务，需要传入初始上下文。
-            task_sig = signature(task_name, kwargs={'context': initial_context}, options=task_options, immutable=True)
+            task_sig = celery_app.signature(task_name, kwargs={'context': initial_context}, options=task_options, immutable=True)
         else:
             # 后续任务，它们将自动接收前一个任务的返回值作为输入。
-            task_sig = signature(task_name, options=task_options)
+            task_sig = celery_app.signature(task_name, options=task_options)
         
         task_signatures.append(task_sig)
 

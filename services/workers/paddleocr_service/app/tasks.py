@@ -45,8 +45,7 @@ from services.common.locks import gpu_lock
 # 日志已统一管理，使用 services.common.logger
 
 # --- Celery App 初始化 ---
-BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
-BACKEND_URL = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/1')
+from services.common.celery_config import BROKER_URL, BACKEND_URL
 
 celery_app = Celery(
     'paddleocr_tasks',

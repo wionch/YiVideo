@@ -19,15 +19,25 @@ from enum import Enum
 from redis import Redis
 
 # 导入配置加载器以支持运行时配置
-from services.common.config_loader import get_gpu_lock_config
+from services.common.config_loader import get_gpu_lock_config, get_redis_config
 from services.common.logger import get_logger
 
 logger = get_logger('locks')
 
 # --- Redis 连接 ---
-REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
-REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
-REDIS_LOCK_DB = int(os.environ.get('REDIS_LOCK_DB', 2))
+redis_client = None
+try:
+    redis_config = get_redis_config()
+    REDIS_HOST = redis_config['host']
+    REDIS_PORT = redis_config['port']
+    REDIS_LOCK_DB = int(os.environ.get('REDIS_LOCK_DB', 2))
+    
+    redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_LOCK_DB, decode_responses=True)
+    redis_client.ping()
+    logger.info(f"成功连接到Redis锁数据库 at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}")
+except (ValueError, Exception) as e:
+    logger.error(f"无法连接到Redis. GPU锁将无法工作. 错误: {e}")
+    # redis_client 保持为 None
 
 # --- 枚举定义 ---
 class LockMechanism(Enum):
@@ -35,14 +45,6 @@ class LockMechanism(Enum):
     POLLING = "polling"  # 轮询机制
     EVENT_DRIVEN = "event_driven"  # 事件驱动
     HYBRID = "hybrid"  # 混合机制
-
-try:
-    redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_LOCK_DB, decode_responses=True)
-    redis_client.ping()
-    logger.info(f"成功连接到Redis锁数据库 at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}")
-except Exception as e:
-    logger.error(f"无法连接到Redis at {REDIS_HOST}:{REDIS_PORT}/{REDIS_LOCK_DB}. GPU锁将无法工作. 错误: {e}")
-    redis_client = None
 
 # --- 全局Pub/Sub管理器 ---
 class PubSubManager:

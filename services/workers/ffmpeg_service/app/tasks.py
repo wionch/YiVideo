@@ -16,9 +16,10 @@ import subprocess
 import sys
 import time
 
-from celery import Celery
 from celery import Task
 
+# 从 .celery_app 模块导入已配置的 celery 实例
+from .celery_app import celery_app
 from services.common import state_manager
 
 # 导入项目定义的标准上下文、状态管理和分布式锁
@@ -32,26 +33,6 @@ from .modules.video_decoder import extract_random_frames
 # 导入音频分割相关模块
 from .modules.subtitle_parser import parse_subtitle_segments
 from .modules.audio_splitter import AudioSplitter, split_audio_segments as split_audio_by_segments
-
-# --- Celery App 初始化与配置 ---
-
-BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
-BACKEND_URL = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/1')
-
-celery_app = Celery(
-    'ffmpeg_tasks',
-    broker=BROKER_URL,
-    backend=BACKEND_URL,
-    include=['app.tasks']
-)
-
-celery_app.conf.update(
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-)
 
 # --- Celery 任务定义 ---
 

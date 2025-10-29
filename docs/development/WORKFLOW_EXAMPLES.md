@@ -102,6 +102,223 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
     }
   }'
 ```
+
+## 高级工作流：参数化输入
+
+通过参数化输入，您可以精确控制任务之间的数据流，覆盖默认的行为。这对于创建自定义或非标准的工作流非常有用。
+
+占位符语法为：`${{ stages.<stage_name>.output.<field_name> }}`
+
+### 示例：强制使用原始音频进行转录
+
+在标准工作流中，如果 `audio_separator.separate_vocals` 存在，`faster_whisper.transcribe_audio` 会自动使用其输出的人声音频。以下示例演示了如何**强制** `faster_whisper` 使用 `ffmpeg.extract_audio` 输出的原始音频，即使工作流中包含了人声分离步骤。
+
+```bash
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_path": "'${VIDEO_PATH}'",
+    "workflow_config": {
+      "workflow_chain": [
+        "ffmpeg.extract_audio",
+        "audio_separator.separate_vocals",
+        "faster_whisper.transcribe_audio",
+        "faster_whisper.generate_subtitle_files"
+      ]
+    },
+    "faster_whisper.transcribe_audio": {
+      "audio_path": "${{ stages.ffmpeg.extract_audio.output.audio_path }}"
+    }
+  }'
+```
+
+在这个请求中，我们为 `faster_whisper.transcribe_audio` 任务明确指定了 `audio_path` 参数，其值指向 `ffmpeg.extract_audio` 阶段的输出。这将覆盖 `faster_whisper` 内部的默认音频查找逻辑。
+
+
+## 增量执行与调试工作流
+
+增量执行功能允许您在现有工作流的基础上继续执行、重试失败的任务或追加新任务，是调试复杂工作流和进行参数实验的强大工具。
+
+**关键参数**:
+- `workflow_id`: 要操作的现有工作流的ID。
+- `execution_mode`:
+  - `incremental`: 在已成功完成的工作流末尾追加新任务。
+  - `retry`: 从第一个失败或未执行的任务开始，重新执行后续所有任务。
+- `param_merge_strategy`:
+  - `merge`: 合并新旧参数，新参数覆盖旧参数（默认）。
+  - `override`: 完全使用新请求中定义的节点参数，忽略所有旧参数。
+  - `strict`: 如果新旧参数存在冲突，则报错。
+
+### 场景1：增量追加任务
+
+假设我们已经完成了一个只包含音频提取的工作流，现在希望在这个基础上追加人声分离和语音转录任务。
+
+**步骤1：创建初始工作流**
+
+首先，创建一个只提取音频的简单工作流。执行后，记下返回的 `workflow_id`。
+
+```bash
+# 假设返回的 workflow_id 为 "abc-123"
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_path": "'${VIDEO_PATH}'",
+    "workflow_config": {
+      "workflow_chain": [
+        "ffmpeg.extract_audio"
+      ]
+    }
+  }'
+```
+
+**步骤2：追加新任务**
+
+使用上一步获得的 `workflow_id`，设置 `execution_mode` 为 `incremental`，并提供一个更长的新任务链。
+
+```bash
+# 替换为上一步获得的真实 WORKFLOW_ID
+export WORKFLOW_ID="abc-123"
+
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow_id": "'${WORKFLOW_ID}'",
+    "execution_mode": "incremental",
+    "workflow_config": {
+      "workflow_chain": [
+        "ffmpeg.extract_audio",
+        "audio_separator.separate_vocals",
+        "faster_whisper.transcribe_audio"
+      ]
+    }
+  }'
+```
+
+**系统行为**:
+- 系统会检测到 `ffmpeg.extract_audio` 任务已经成功完成，因此会跳过它。
+- 只会执行新增的 `audio_separator.separate_vocals` 和 `faster_whisper.transcribe_audio` 任务，从而节省了时间和计算资源。
+
+### 场景2：从失败点重试
+
+假设一个工作流在 `pyannote_audio.diarize_speakers` 步骤因为配置错误而失败。我们可以修复参数并从失败点继续。
+
+**步骤1：模拟一个失败的工作流**
+
+我们故意提供一个错误的参数（例如，无效的 `hf_token`）来使任务失败。
+
+```bash
+# 这个请求可能会失败，记下返回的 workflow_id，例如 "def-456"
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_path": "'${VIDEO_PATH}'",
+    "workflow_config": {
+      "workflow_chain": [
+        "ffmpeg.extract_audio",
+        "pyannote_audio.diarize_speakers"
+      ]
+    },
+    "pyannote_audio.diarize_speakers": {
+      "hf_token": "a-bad-token" 
+    }
+  }'
+```
+
+**步骤2：使用 `retry` 模式修复并继续**
+
+现在，我们提供正确的参数，并使用 `retry` 模式重新提交请求。
+
+```bash
+# 替换为上一步获得的真实 WORKFLOW_ID
+export WORKFLOW_ID="def-456"
+# 替换为你的 Hugging Face Token
+export HF_TOKEN="your-real-huggingface-token"
+
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow_id": "'${WORKFLOW_ID}'",
+    "execution_mode": "retry",
+    "workflow_config": {
+      "workflow_chain": [
+        "ffmpeg.extract_audio",
+        "pyannote_audio.diarize_speakers"
+      ]
+    },
+    "pyannote_audio.diarize_speakers": {
+      "hf_token": "'${HF_TOKEN}'"
+    }
+  }'
+```
+
+**系统行为**:
+- 系统会跳过已成功的 `ffmpeg.extract_audio` 任务。
+- 它会从失败的 `pyannote_audio.diarize_speakers` 任务开始，使用我们提供的新参数重新执行。
+
+### 场景3：参数调优实验
+
+`retry` 模式结合 `override` 策略是进行参数调优的利器。假设你想实验 `faster_whisper` 的不同 `beam_size` 对转录结果的影响，而无需每次都重新提取和分离音频。
+
+**步骤1：运行一次完整的工作流**
+
+首先，运行一个完整的工作流并记下 `workflow_id`。
+
+```bash
+# 假设返回的 workflow_id 为 "ghi-789"
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_path": "'${VIDEO_PATH}'",
+    "workflow_config": {
+      "workflow_chain": [
+        "ffmpeg.extract_audio",
+        "audio_separator.separate_vocals",
+        "faster_whisper.transcribe_audio"
+      ]
+    },
+    "faster_whisper.transcribe_audio": {
+      "beam_size": 5
+    }
+  }'
+```
+
+**步骤2：使用 `retry` 和 `override` 策略调整参数**
+
+现在，我们假装 `faster_whisper.transcribe_audio` 任务“未完成”（即使它成功了），并通过 `retry` 模式重新运行它，同时使用 `override` 策略来确保只有新参数生效。
+
+为了让 `retry` 模式重新运行最后一个任务，我们需要手动将 Redis 中该任务的状态修改为 "PENDING" 或 "FAILED"。但更简单的方法是，**在 `retry` 模式下，系统会从第一个非 `SUCCESS` 或 `COMPLETED` 状态的任务开始执行**。如果我们想重新运行一个已成功的任务，可以先将工作流链缩短，然后用 `retry` 模式和新参数重新运行。
+
+一个更直接的方法是，如果最后一个任务是我们要调优的，我们可以直接用 `retry` 模式提交，并提供新参数。系统会跳过之前所有成功的任务，然后用新参数重新运行最后一个任务。
+
+```bash
+# 替换为上一步获得的真实 WORKFLOW_ID
+export WORKFLOW_ID="ghi-789"
+
+# 实验新的 beam_size
+curl -X POST "${API_BASE_URL}/v1/workflows" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflow_id": "'${WORKFLOW_ID}'",
+    "execution_mode": "retry",
+    "param_merge_strategy": "override",
+    "workflow_config": {
+      "workflow_chain": [
+        "ffmpeg.extract_audio",
+        "audio_separator.separate_vocals",
+        "faster_whisper.transcribe_audio"
+      ]
+    },
+    "faster_whisper.transcribe_audio": {
+      "beam_size": 10,
+      "language": "zh"
+    }
+  }'
+```
+
+**系统行为**:
+- 系统会检测到 `ffmpeg.extract_audio` 和 `audio_separator.separate_vocals` 已成功，并跳过它们。
+- 它会从 `faster_whisper.transcribe_audio` 开始重新执行。
+- 由于 `param_merge_strategy` 是 `override`，它会完全忽略旧的 `beam_size: 5`，只使用新的 `{ "beam_size": 10, "language": "zh" }` 参数。这确保了实验的纯粹性。
 ## 语音合成工作流
 
 ### 1. 基础语音合成

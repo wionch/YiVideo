@@ -15,20 +15,19 @@ logger = get_logger('main')
 import logging
 import uuid
 from datetime import datetime
-from typing import Any
-from typing import Dict
+from typing import Any, Dict, Optional, Literal, List
+from pydantic import model_validator
 
-from fastapi import FastAPI
-from fastapi import HTTPException
-from pydantic import BaseModel
-from pydantic import Field
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
 # 导入共享的数据结构
-from services.common.context import WorkflowContext
+from services.common.context import WorkflowContext, StageExecution
 
 # 导入本服务的核心逻辑模块
-from . import state_manager
+from services.common import state_manager
 from . import workflow_factory
+from . import incremental_utils
 
 # 导入监控模块
 from .monitoring import monitoring_api
@@ -38,79 +37,242 @@ from .monitoring import monitoring_api
 app = FastAPI(
     title="YiVideo AI Workflow Engine API",
     description="一个用于动态编排AI视频处理工作流的引擎。",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 # 集成监控API路由
 monitoring_router = monitoring_api.get_router()
 app.include_router(monitoring_router)
 
-# 日志已统一管理，使用 services.common.logger
-
 # --- API 请求/响应 模型定义 ---
 
 class WorkflowRequest(BaseModel):
-    """定义创建工作流请求的Body模型。"""
-    video_path: str = Field(..., description="待处理视频在共享存储中的绝对路径，例如 '/share/videos/example.mp4'")
-    workflow_config: Dict[str, Any] = Field(..., description='定义工作流具体行为的配置字典，例如 {"workflow_chain": ["task1", "task2"]}')
+    """工作流请求模型"""
+    video_path: Optional[str] = Field(
+        None,
+        description="视频文件路径。创建新工作流时必需，增量执行时可选"
+    )
+    workflow_config: Dict[str, Any] = Field(
+        ...,
+        description="工作流配置字典，必须包含 'workflow_chain' 列表"
+    )
+    workflow_id: Optional[str] = Field(
+        None,
+        description="现有工作流的唯一ID。提供此字段时进入增量执行模式"
+    )
+    execution_mode: Literal["full", "incremental", "retry"] = Field(
+        "full",
+        description="""
+        执行模式：
+        - full: 创建全新工作流（默认）
+        - incremental: 追加新任务到现有工作流（仅允许尾部追加）
+        - retry: 从失败任务开始重新执行
+        """
+    )
+    param_merge_strategy: Literal["merge", "override", "strict"] = Field(
+        "merge",
+        description="""
+        参数合并策略：
+        - merge: 智能合并，新参数覆盖旧参数（默认）
+        - override: 完全使用新参数，忽略旧参数
+        - strict: 检测到参数冲突时报错
+        """
+    )
+
+    @model_validator(mode='after')
+    def validate_execution_mode(self):
+        """验证执行模式与参数的一致性"""
+        if self.execution_mode == "full":
+            if not self.video_path:
+                raise ValueError("创建新工作流时 'video_path' 字段为必需")
+            if self.workflow_id:
+                raise ValueError("创建新工作流时不应提供 'workflow_id'")
+        else:
+            if not self.workflow_id:
+                raise ValueError(f"执行模式 '{self.execution_mode}' 需要提供 'workflow_id'")
+        return self
+
+    class Config:
+        extra = "allow"
 
 class WorkflowResponse(BaseModel):
     """定义成功创建工作流后的响应模型。"""
     workflow_id: str
+    execution_mode: str
+    tasks_total: int
+    tasks_skipped: int
+    tasks_to_execute: int
+    message: str
 
 # --- API 端点定义 ---
 
 @app.post("/v1/workflows", response_model=WorkflowResponse, status_code=202)
-def create_workflow(request: WorkflowRequest) -> Dict[str, str]:
+def create_workflow(request: WorkflowRequest) -> Dict[str, Any]:
     """
-    创建并启动一个新的AI处理工作流。
+    创建或增量执行一个AI处理工作流。
     """
-    logger.info(f"接收到新的工作流请求: video_path='{request.video_path}', config='{request.workflow_config}'")
+    try:
+        if request.execution_mode == "full":
+            return _create_new_workflow(request)
+        else:
+            return _execute_incremental_workflow(request)
+    except HTTPException:
+        # HTTPException 应该直接向上传播，不做任何处理
+        # 这样可以保持原始的状态码（404, 409, 410 等）
+        raise
+    except ValueError as e:
+        # ValueError 通常是业务逻辑错误，返回 400
+        logger.error(f"工作流处理失败: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # 其他未预期的异常，返回 500
+        logger.error(f"处理工作流时发生未知错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
+
+def _create_new_workflow(request: WorkflowRequest) -> Dict[str, Any]:
+    """
+    处理创建全新工作流的逻辑。
+    """
+    logger.info(f"接收到新的工作流创建请求: video_path='{request.video_path}', config='{request.workflow_config}'")
     
     workflow_id = str(uuid.uuid4())
     shared_storage_path = f"/share/workflows/{workflow_id}"
 
+    os.makedirs(shared_storage_path, exist_ok=True)
+    os.chmod(shared_storage_path, 0o777)
+    logger.info(f"已为 workflow_id='{workflow_id}' 创建共享目录: {shared_storage_path}")
+
+    all_params = request.model_dump()
+    standard_keys = {"video_path", "workflow_config", "workflow_id", "execution_mode", "param_merge_strategy"}
+    node_params = {k: v for k, v in all_params.items() if k not in standard_keys}
+    
+    workflow_chain_list = request.workflow_config.get("workflow_chain", [])
+    if not workflow_chain_list:
+        raise ValueError("workflow_config 中的 'workflow_chain' 不能为空")
+
+    initial_context = WorkflowContext(
+        workflow_id=workflow_id,
+        create_at=datetime.now().isoformat(),
+        input_params={
+            "video_path": request.video_path,
+            "workflow_chain": workflow_chain_list,
+            "node_params": node_params
+        },
+        shared_storage_path=shared_storage_path,
+        stages={},
+        error=None
+    )
+
+    state_manager.create_workflow_state(initial_context)
+
+    workflow_chain = workflow_factory.build_workflow_chain(
+        workflow_config=request.workflow_config,
+        initial_context=initial_context.model_dump()
+    )
+
+    workflow_chain.apply_async()
+    logger.info(f"正在为 workflow_id='{workflow_id}' 启动任务链...")
+
+    return {
+        "workflow_id": workflow_id,
+        "execution_mode": "full",
+        "tasks_total": len(workflow_chain_list),
+        "tasks_skipped": 0,
+        "tasks_to_execute": len(workflow_chain_list),
+        "message": "New workflow created and started successfully."
+    }
+
+def _execute_incremental_workflow(request: WorkflowRequest) -> Dict[str, Any]:
+    """
+    处理增量执行或重试工作流的逻辑。
+    """
+    workflow_id = request.workflow_id
+    logger.info(f"接收到增量执行请求: workflow_id='{workflow_id}', mode='{request.execution_mode}'")
+
+    # 获取分布式锁，防止并发修改
+    lock_value = incremental_utils.acquire_workflow_lock(workflow_id)
+    if not lock_value:
+        raise HTTPException(status_code=409, detail="工作流正在被另一个请求修改，请稍后重试")
+
     try:
-        # 关键步骤：确保工作流的独立目录存在
-        os.makedirs(shared_storage_path, exist_ok=True)
-        os.chmod(shared_storage_path, 0o777) # 赋予777权限，允许任何worker服务写入
-        logger.info(f"已为 workflow_id='{workflow_id}' 创建共享目录: {shared_storage_path}")
+        existing_state = state_manager.get_workflow_state(workflow_id)
+        # 修复：只有当工作流状态真正不存在时才报错
+        # 不应该因为有error字段就认为工作流不存在，失败的工作流也应该可以重试
+        if not existing_state:
+            raise HTTPException(status_code=404, detail=f"工作流 '{workflow_id}' 不存在")
 
-        # 1. 创建初始工作流上下文
-        initial_context = WorkflowContext(
-            workflow_id=workflow_id,
-            create_at=datetime.now().isoformat(),
-            input_params={
-                "video_path": request.video_path,
-                "workflow_chain": request.workflow_config.get("workflow_chain", [])
-            },
-            shared_storage_path=shared_storage_path,
-            stages={},
-            error=None
+        # 如果工作流存在但有错误，仍然允许重试
+        if existing_state.get("error"):
+            logger.info(f"工作流 '{workflow_id}' 存在但之前有错误，允许重试: {existing_state.get('error')}")
+
+        existing_context = WorkflowContext(**existing_state)
+        
+        if not os.path.exists(existing_context.shared_storage_path):
+            raise HTTPException(status_code=410, detail=f"工作流存储目录不存在: {existing_context.shared_storage_path}")
+
+        old_chain = existing_context.input_params.get("workflow_chain", [])
+        new_chain = request.workflow_config.get("workflow_chain", [])
+        if not new_chain:
+            raise ValueError("workflow_config 中的 'workflow_chain' 不能为空")
+
+        diff_result = incremental_utils.compute_workflow_diff(
+            old_chain=old_chain,
+            new_chain=new_chain,
+            existing_stages=existing_context.stages,
+            mode=request.execution_mode
         )
 
-        # 2. 持久化初始状态到Redis
-        state_manager.create_workflow_state(initial_context)
+        all_params = request.model_dump()
+        standard_keys = {"video_path", "workflow_config", "workflow_id", "execution_mode", "param_merge_strategy"}
+        new_node_params = {k: v for k, v in all_params.items() if k not in standard_keys}
 
-        # 3. 调用工厂，根据配置构建任务链
+        merged_params = incremental_utils.merge_node_params(
+            old_params=existing_context.input_params.get("node_params", {}),
+            new_params=new_node_params,
+            strategy=request.param_merge_strategy
+        )
+
+        existing_context.input_params["workflow_chain"] = new_chain
+        existing_context.input_params["node_params"] = merged_params
+
+        if not diff_result.tasks_to_execute:
+            logger.info(f"工作流 '{workflow_id}' 所有任务已完成，无需执行。")
+            return {
+                "workflow_id": workflow_id,
+                "execution_mode": request.execution_mode,
+                "tasks_total": len(new_chain),
+                "tasks_skipped": len(diff_result.tasks_to_skip),
+                "tasks_to_execute": 0,
+                "message": "All tasks already completed, no execution needed."
+            }
+
+        incremental_config = {"workflow_chain": diff_result.tasks_to_execute}
         workflow_chain = workflow_factory.build_workflow_chain(
-            workflow_config=request.workflow_config,
-            initial_context=initial_context.model_dump()
+            workflow_config=incremental_config,
+            initial_context=existing_context.model_dump()
         )
 
-        # 4. 异步执行任务链
-        logger.info(f"正在为 workflow_id='{workflow_id}' 启动任务链...")
+        state_manager.update_workflow_state(existing_context)
+        
+        # 推荐：重置TTL
+        if state_manager.redis_client:
+            state_manager.redis_client.expire(f"workflow_state:{workflow_id}", state_manager.WORKFLOW_TTL_SECONDS)
+            logger.info(f"已重置工作流 TTL: {workflow_id}")
+
         workflow_chain.apply_async()
+        logger.info(f"已为 workflow_id='{workflow_id}' 提交增量任务链: {diff_result.tasks_to_execute}")
 
-        # 5. 立即返回，表示请求已被接受处理
-        return {"workflow_id": workflow_id}
-
-    except ValueError as e:
-        logger.error(f"工作流构建失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"创建工作流时发生未知错误: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An internal error occurred while creating the workflow.")
+        return {
+            "workflow_id": workflow_id,
+            "execution_mode": request.execution_mode,
+            "tasks_total": len(new_chain),
+            "tasks_skipped": len(diff_result.tasks_to_skip),
+            "tasks_to_execute": len(diff_result.tasks_to_execute),
+            "message": "Incremental execution started successfully."
+        }
+    finally:
+        # 安全释放锁：使用获取锁时得到的 lock_value
+        incremental_utils.release_workflow_lock(workflow_id, lock_value)
 
 
 @app.get("/v1/workflows/status/{workflow_id}", response_model=Dict[str, Any])

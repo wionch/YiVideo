@@ -25,25 +25,14 @@ try:
     from services.common.logger import get_logger
     from services.common.locks import SmartGpuLockManager
 except ImportError as e:
-    print(f"导入共享模块失败: {e}")
-    print("尝试直接使用基础配置...")
-    # 提供备用配置
+    # 这是一个严重错误，服务无法在没有其通用模块的情况下运行。
+    # 记录错误并立即退出。
     import logging
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.ERROR)
     logger = logging.getLogger(__name__)
-
-    class DummyConfig:
-        def get(self, key, default=None):
-            return {
-                'redis': {
-                    'port': 6379,
-                    'broker_db': 0,
-                    'backend_db': 1
-                }
-            }.get(key, default)
-
-    config = DummyConfig()
-    gpu_lock_manager = None
+    logger.critical(f"无法导入共享模块 (例如, config_loader, logger): {e}", exc_info=True)
+    logger.critical("这是一个致命错误，服务将退出。请检查 PYTHONPATH 和模块依赖项。")
+    sys.exit("错误：关键共享模块缺失，服务无法启动。")
 else:
     # 设置日志
     logger = get_logger(__name__)
@@ -74,16 +63,14 @@ from celery import Celery
 # 创建 Celery 应用
 celery_app = Celery('indextts_service')
 
-# 从配置文件中读取 Redis 连接信息
-redis_config = config.get('redis', {})
-broker_url = f"redis://{redis_config.get('host', 'redis')}:{redis_config.get('port', 6379)}/{redis_config.get('broker_db', 0)}"
-backend_url = f"redis://{redis_config.get('host', 'redis')}:{redis_config.get('port', 6379)}/{redis_config.get('backend_db', 1)}"
+# 从环境变量中读取 Redis 连接信息
+from services.common.celery_config import BROKER_URL, BACKEND_URL
 
 # Celery 配置
 celery_app.conf.update(
     # Broker 配置
-    broker_url=broker_url,
-    result_backend=backend_url,
+    broker_url=BROKER_URL,
+    result_backend=BACKEND_URL,
 
     # 任务序列化
     task_serializer='json',

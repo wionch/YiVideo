@@ -85,8 +85,8 @@ WORKDIR /app
 # 这是多阶段构建的核心优势：只引入纯净的依赖，不引入任何编译工具
 COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 # 修复虚拟环境中的符号链接，使其指向 final 阶段的正确解释器
-RUN ln -sf /usr/bin/python3 /opt/venv/bin/python && \
-    ln -sf /usr/bin/pip3 /opt/venv/bin/pip
+RUN ln -sf /usr/bin/python3.12 /opt/venv/bin/python && \
+    ln -sf /usr/bin/python3.12 /opt/venv/bin/python3
 
 # 7. 复制应用程序源代码
 COPY --chown=appuser:appuser ./services/common /app/services/common
