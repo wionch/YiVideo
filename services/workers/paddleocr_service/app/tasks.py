@@ -40,6 +40,7 @@ from services.common.context import StageExecution
 from services.common.context import WorkflowContext
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
+from services.common.parameter_resolver import resolve_parameters
 
 # --- 日志配置 ---
 # 日志已统一管理，使用 services.common.logger
@@ -114,6 +115,18 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
 
     keyframe_dir = None
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
         prev_stage_output = prev_stage.output if prev_stage else {}
 
@@ -204,6 +217,18 @@ def create_stitched_images(self: Task, context: dict) -> dict:
 
     input_dir_str = None  # 用于清理的变量
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         # 1. 获取输入路径和字幕区域
         crop_stage = workflow_context.stages.get("ffmpeg.crop_subtitle_images")
         area_stage = workflow_context.stages.get("paddleocr.detect_subtitle_area")
@@ -302,6 +327,18 @@ def perform_ocr(self: Task, context: dict) -> dict:
     manifest_path = None  # 用于清理的变量
     multi_frames_path = None  # 用于清理的变量
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         prev_stage = workflow_context.stages.get('paddleocr.create_stitched_images')
         prev_stage_output = prev_stage.output if prev_stage else {}
 
@@ -417,6 +454,18 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         prev_stage = workflow_context.stages.get('paddleocr.perform_ocr')
         prev_stage_output = prev_stage.output if prev_stage else {}
 

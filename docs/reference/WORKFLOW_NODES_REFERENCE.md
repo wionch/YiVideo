@@ -191,18 +191,35 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 **功能描述**：根据字幕时间戳将音频分割为小片段，为语音生成提供参考音频。支持多种输出格式和按说话人分组存储。
 
 **输入参数**：
-- `audio_path` (string, 可选): 指定音频文件路径（优先级高于自动检测）
-- `subtitle_path` (string, 可选): 指定字幕文件路径（优先级高于自动检测）
+- `audio_path` (string, 可选): 指定音频文件路径（优先级高于自动检测），支持 `${{}}` 格式的参数引用
+  - 可以在节点特定参数中提供：`"ffmpeg.split_audio_segments": {"audio_path": "..."}`
+  - 也可以在全局参数中提供：`"audio_path": "..."`
+- `subtitle_path` (string, 可选): 指定字幕文件路径（优先级高于自动检测），支持 `${{}}` 格式的参数引用
+  - 可以在节点特定参数中提供：`"ffmpeg.split_audio_segments": {"subtitle_path": "..."}`
+  - 也可以在全局参数中提供：`"subtitle_path": "..."`
 - `output_format` (string, 可选): 输出格式，默认 "wav"
 - `sample_rate` (int, 可选): 采样率，默认 16000
 - `channels` (int, 可选): 声道数，默认 1
 - `min_segment_duration` (float, 可选): 最小片段时长，默认 1.0秒
 - `max_segment_duration` (float, 可选): 最大片段时长，默认 30.0秒
-- `group_by_speaker` (bool, 可选): 按说话人分组，默认 true
+- `group_by_speaker` (bool, 可选): 按说话人分组，默认 false
 - `include_silence` (bool, 可选): 包含静音片段，默认 false
 - `enable_concurrent` (bool, 可选): 启用并发分割，默认 true
 - `max_workers` (int, 可选): 最大工作线程数，默认 8
 - `concurrent_timeout` (int, 可选): 并发超时时间，默认 600秒
+
+**参数引用支持**：
+所有字符串类型的参数都支持 `${{ stages.<stage_name>.output.<field_name> }}` 格式的动态引用，例如：
+```json
+{
+  "ffmpeg.split_audio_segments": {
+    "audio_path": "${{ stages.audio_separator.separate_vocals.output.vocal_audio }}",
+    "subtitle_path": "${{ stages.faster_whisper.generate_subtitle_files.output.speaker_srt_path }}",
+    "output_format": "wav",
+    "group_by_speaker": true
+  }
+}
+```
 
 **智能音频源选择**（按优先级）：
 1. 人声音频 (`audio_separator.separate_vocals` 输出的 `vocal_audio`)
@@ -261,7 +278,7 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
   },
   "ffmpeg.split_audio_segments": {
     "output_format": "wav",
-    "group_by_speaker": true,
+    "group_by_speaker": false,
     "min_segment_duration": 2.0,
     "max_workers": 6
   }
@@ -512,7 +529,7 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 **功能描述**：基于大语言模型对转录字幕进行语法纠错、标点优化、语义理解等智能处理。
 
 **输入参数**：
-- `subtitle_file` (string, 必需): 待校正的字幕文件路径
+- `subtitle_path` (string, 可选): 待校正的字幕文件路径。**支持 `${{...}}` 动态引用**，优先级高于自动检测。
 - `correction_model` (string, 可选): 校正模型，默认 "gemini"
   - 可选值：`"gemini"`, `"gpt4"`, `"claude"`
 - `correction_type` (string, 可选): 校正类型，默认 "comprehensive"
@@ -523,7 +540,12 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 - `api_key` (string, 可选): LLM API 密钥
 
 **前置依赖**：
-- `faster_whisper.generate_subtitle_files`
+- `faster_whisper.generate_subtitle_files` (如果未通过参数指定 `subtitle_path`)
+
+**智能输入源选择**（按优先级）：
+1.  **`subtitle_path` 参数**: 如果在节点参数中明确提供了 `subtitle_path`（支持动态引用），将直接使用该文件。
+2.  **`generate_subtitle_files` 的输出 (带说话人)**: 自动寻找 `faster_whisper.generate_subtitle_files` 阶段输出的 `speaker_srt_path`。
+3.  **`generate_subtitle_files` 的输出 (基础SRT)**: 最后尝试使用 `faster_whisper.generate_subtitle_files` 阶段输出的 `subtitle_path`。
 
 **输出格式**：
 ```json
@@ -558,8 +580,25 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 }
 ```
 
+**使用动态参数示例**：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "...",
+      "faster_whisper.generate_subtitle_files",
+      "faster_whisper.correct_subtitles"
+    ]
+  },
+  "faster_whisper.correct_subtitles": {
+    "subtitle_path": "${{ stages.faster_whisper.generate_subtitle_files.output.speaker_srt_path }}",
+    "correction_model": "gpt4"
+  }
+}
+```
+
 **依赖关系**：
-- `faster_whisper.generate_subtitle_files`
+- `faster_whisper.generate_subtitle_files` (如果未通过 `subtitle_path` 参数指定输入)
 
 **校正类型说明**：
 - `basic`: 基础标点和空格校正
@@ -571,6 +610,65 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 - 需要配置相应的 LLM API 密钥
 - 处理时间取决于文本长度和模型响应速度
 - 批处理可以优化 API 调用成本
+
+---
+
+### 4. faster_whisper.merge_for_tts
+
+为TTS参考音合并字幕片段。
+
+**功能描述**：根据TTS参考音的时长要求（如3-10秒），智能地合并或分割字幕片段，以生成最适合作为语音合成参考的片段。
+
+**输入参数**：
+- `subtitle_path` (string, 可选): 指定要处理的字幕数据文件（.json格式）。如果提供，将覆盖节点的自动输入文件查找逻辑。
+- `min_duration` (float, 可选): 合并后片段的最小目标时长（秒），默认 3.0。
+- `max_duration` (float, 可选): 合并后片段的最大目标时长（秒），默认 10.0。
+- `max_gap` (float, 可选): 相邻字幕片段之间允许合并的最大时间间隔（秒），默认 1.0。
+- `split_on_punctuation` (bool, 可选): 是否在遇到句末标点符号时强制停止合并，默认 `false`。
+
+**前置依赖**：
+- `faster_whisper.generate_subtitle_files` (必需)
+
+**输出格式**：
+```json
+{
+  "merged_tts_segments_path": "/share/workflows/{workflow_id}/subtitles/video_with_speakers_merged_for_tts.json",
+  "statistics": {
+    "original_count": 223,
+    "merged_count": 85,
+    "merged_items": 138
+  }
+}
+```
+
+**使用示例**：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "...",
+      "faster_whisper.generate_subtitle_files",
+      "faster_whisper.merge_for_tts"
+    ]
+  },
+  "faster_whisper.merge_for_tts": {
+    "min_duration": 3.5,
+    "max_duration": 9.5
+  }
+}
+```
+
+**依赖关系**：
+- 必需：`faster_whisper.generate_subtitle_files`
+
+**智能输入源选择**（按优先级）：
+1.  **`subtitle_path` 参数**: 如果在节点参数中明确提供了 `subtitle_path`，将直接使用该文件。
+2.  **`generate_subtitle_files` 的输出**: 自动寻找 `faster_whisper.generate_subtitle_files` 阶段的输出，并优先使用 `speaker_json_path`。
+3.  **`transcribe_audio` 的输出**: 最后尝试使用 `faster_whisper.transcribe_audio` 阶段输出的 `segments_file`。
+
+**注意事项**：
+- 为了工作流的清晰和可控，推荐显式提供 `subtitle_path` 参数。
+- 输出的JSON文件包含了符合TTS要求的优化片段，可用于后续的音频分割和语音合成。
 
 ---
 
@@ -1457,7 +1555,7 @@ IndexTTS 服务提供基于 IndexTTS2 模型的高质量语音合成功能，支
   "indextts.generate_speech": {
     "text": "这是要合成的文本内容",
     "output_path": "/share/workflows/{workflow_id}/tts/output.wav",
-    "spk_audio_prompt": "${{ stages.ffmpeg.split_audio_segments.output.audio_segments_dir }}/speaker_00_segment_001.wav"
+    "spk_audio_prompt": "${{ stages.ffmpeg.split_audio_segments.output.audio_segments_dir }}/segment_001.wav"
   }
 }
 ```

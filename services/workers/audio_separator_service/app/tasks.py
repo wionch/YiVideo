@@ -20,6 +20,7 @@ from .celery_app import celery_app
 from .model_manager import get_model_manager
 # 导入新的通用配置加载器
 from services.common.config_loader import CONFIG
+from services.common.parameter_resolver import resolve_parameters
 
 # 配置日志
 logger = get_logger('audio_separator.tasks')
@@ -82,6 +83,18 @@ def separate_vocals(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         # 1. 音频源选择逻辑：优先使用已提取的音频文件
         audio_path = None
         audio_source = ""

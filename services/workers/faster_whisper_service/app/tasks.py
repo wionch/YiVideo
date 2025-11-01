@@ -24,6 +24,7 @@ from services.common.config_loader import CONFIG
 
 # 导入GPU锁装饰器
 from services.common.locks import gpu_lock
+from services.common.parameter_resolver import resolve_parameters
 
 # 导入字幕合并模块
 from services.workers.faster_whisper_service.app.subtitle_merger import (
@@ -35,6 +36,7 @@ from services.workers.faster_whisper_service.app.subtitle_merger import (
 )
 # 导入字幕校正模块
 from services.common.subtitle.subtitle_correction import SubtitleCorrector, CorrectionResult
+from services.common.subtitle.subtitle_parser import SubtitleEntry, SRTParser
 
 logger = get_logger('tasks')
 
@@ -641,6 +643,18 @@ def transcribe_audio(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         # 从前一个任务的输出中获取音频文件路径
         audio_path = None
         audio_source = ""
@@ -826,6 +840,18 @@ def generate_subtitle_files(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         # 获取转录结果（必需）
         transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
         if not transcribe_stage or transcribe_stage.status not in ['SUCCESS', 'COMPLETED']:
@@ -1442,25 +1468,41 @@ def correct_subtitles(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] ========== 开始字幕AI校正任务 ==========")
         logger.info(f"[{stage_name}] 使用的AI提供商: {provider or '默认'}")
 
-        # 2. 获取前一阶段生成的字幕文件
-        generate_stage = workflow_context.stages.get('faster_whisper.generate_subtitle_files')
-        if not generate_stage or generate_stage.status not in ['SUCCESS', 'COMPLETED']:
-            raise ValueError("无法获取字幕生成结果：请确保 faster_whisper.generate_subtitle_files 任务已成功完成")
+        # 2. 获取并解析参数
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+        
+        # 3. 获取待校正的字幕文件（新逻辑）
+        subtitle_to_correct = None
+        subtitle_source = ""
 
-        generate_output = generate_stage.output
-        if not isinstance(generate_output, dict):
-            raise ValueError("字幕生成阶段的输出格式不正确")
+        # 优先级1：检查动态参数
+        subtitle_path_param = resolved_params.get("subtitle_path")
+        if subtitle_path_param and os.path.exists(subtitle_path_param):
+            subtitle_to_correct = subtitle_path_param
+            subtitle_source = "参数传入"
+        
+        # 优先级2：如果参数未提供，则回退到自动检测
+        if not subtitle_to_correct:
+            generate_stage = workflow_context.stages.get('faster_whisper.generate_subtitle_files')
+            if generate_stage and generate_stage.output:
+                # 优先使用带说话人的SRT
+                subtitle_to_correct = generate_stage.output.get('speaker_srt_path')
+                if subtitle_to_correct and os.path.exists(subtitle_to_correct):
+                    subtitle_source = "自动检测 (带说话人SRT)"
+                else:
+                    # 其次使用基础SRT
+                    subtitle_to_correct = generate_stage.output.get('subtitle_path')
+                    if subtitle_to_correct and os.path.exists(subtitle_to_correct):
+                        subtitle_source = "自动检测 (基础SRT)"
 
-        # 智能选择最佳字幕文件进行校正
-        # 优先使用带说话人信息的SRT，其次是基础SRT
-        subtitle_to_correct = generate_output.get('speaker_srt_path') or generate_output.get('subtitle_path')
-
+        # 最终验证
         if not subtitle_to_correct or not os.path.exists(subtitle_to_correct):
-            raise FileNotFoundError(f"未找到可供校正的字幕文件，路径: {subtitle_to_correct}")
+            raise FileNotFoundError("未找到可供校正的字幕文件。请检查工作流配置或确保前序任务已成功生成字幕文件。")
 
-        logger.info(f"[{stage_name}] 选择用于校正的字幕文件: {subtitle_to_correct}")
+        logger.info(f"[{stage_name}] 选择的校正源: {subtitle_source}, 路径: {subtitle_to_correct}")
 
-        # 3. 执行校正
+        # 4. 执行校正
         # SubtitleCorrector 的方法是 async 的，所以我们需要在同步的Celery任务中运行它
         corrector = SubtitleCorrector(provider=provider)
         
@@ -1505,6 +1547,162 @@ def correct_subtitles(self, context: dict) -> dict:
         workflow_context.stages[stage_name].status = 'FAILED'
         workflow_context.stages[stage_name].error = str(e)
         workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    finally:
+        workflow_context.stages[stage_name].duration = time.time() - start_time
+        state_manager.update_workflow_state(workflow_context)
+
+    return workflow_context.model_dump()
+
+@celery_app.task(bind=True, name='faster_whisper.merge_for_tts')
+def merge_for_tts(self, context: dict) -> dict:
+    """
+    为TTS参考音合并字幕片段的工作流节点。
+    """
+    import json
+    from .tts_merger import TtsMerger
+
+    workflow_context = WorkflowContext(**context)
+    stage_name = self.name
+    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+    state_manager.update_workflow_state(workflow_context)
+    
+    start_time = time.time()
+
+    try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+                # 更新 node_params 以便后续逻辑使用
+                node_params = resolved_params
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        logger.info(f"[{stage_name}] 节点参数: {node_params}")
+
+        # 2. 获取输入字幕文件路径（智能选择）
+        subtitle_file_path = None
+        source_description = ""
+
+        # 优先级 1: 从节点参数中直接指定
+        if node_params and node_params.get('subtitle_path'):
+            subtitle_file_path = node_params['subtitle_path']
+            source_description = f"参数指定路径 ({subtitle_file_path})"
+            logger.info(f"[{stage_name}] 使用参数指定的字幕文件: {subtitle_file_path}")
+
+        # 优先级 2: 从 generate_subtitle_files 阶段获取 speaker_json_path
+        if not subtitle_file_path:
+            generate_stage = workflow_context.stages.get('faster_whisper.generate_subtitle_files')
+            if generate_stage and generate_stage.output and generate_stage.output.get('speaker_json_path'):
+                subtitle_file_path = generate_stage.output['speaker_json_path']
+                source_description = f"来自 'generate_subtitle_files' 的带说话人JSON ({subtitle_file_path})"
+                logger.info(f"[{stage_name}] 使用来自 'generate_subtitle_files' 的带说话人JSON: {subtitle_file_path}")
+
+        # 优先级 3: 从 transcribe_audio 阶段获取 segments_file
+        if not subtitle_file_path:
+            transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
+            if transcribe_stage and transcribe_stage.output and transcribe_stage.output.get('segments_file'):
+                subtitle_file_path = transcribe_stage.output['segments_file']
+                source_description = f"来自 'transcribe_audio' 的转录数据文件 ({subtitle_file_path})"
+                logger.info(f"[{stage_name}] 使用来自 'transcribe_audio' 的转录数据文件: {subtitle_file_path}")
+
+        if not subtitle_file_path or not os.path.exists(subtitle_file_path):
+            raise FileNotFoundError(f"未找到可供合并的字幕数据文件。搜索路径: {subtitle_file_path}")
+
+        logger.info(f"[{stage_name}] 最终选择的字幕源: {source_description}")
+
+        with open(subtitle_file_path, 'r', encoding='utf-8') as f:
+            subtitle_data = json.load(f)
+        
+        # 兼容纯segments列表或包含segments的JSON对象
+        if isinstance(subtitle_data, dict):
+            segments = subtitle_data.get('segments', [])
+        elif isinstance(subtitle_data, list):
+            segments = subtitle_data
+        else:
+            segments = []
+
+        if not segments:
+            raise ValueError("字幕数据文件中不包含 'segments' 或为空。")
+
+        # 3. 初始化并执行合并
+        # TtsMerger 的配置仍然从节点参数中获取
+        merger = TtsMerger(config=node_params)
+        merged_segments = merger.merge_segments(segments)
+
+        # 4. 准备输出
+        base_filename = os.path.splitext(os.path.basename(subtitle_file_path))[0]
+        # 确保输出文件名不会重复 "_merged_for_tts"
+        if base_filename.endswith('_merged_for_tts'):
+            base_filename = base_filename.rsplit('_merged_for_tts', 1)[0]
+        if base_filename.endswith('_with_speakers'):
+            base_filename = base_filename.rsplit('_with_speakers', 1)[0]
+        
+        output_filename = f"{base_filename}_merged_for_tts.json"
+        output_file_path = os.path.join(os.path.dirname(subtitle_file_path), output_filename)
+        
+        output_json_data = {
+            "metadata": {
+                "source_file": subtitle_file_path,
+                "source_description": source_description,
+                "merge_config": node_params,
+                "original_segment_count": len(segments),
+                "merged_segment_count": len(merged_segments),
+                "created_at": time.time()
+            },
+            "segments": merged_segments
+        }
+
+        with open(output_file_path, 'w', encoding='utf-8') as f:
+            json.dump(output_json_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"[{stage_name}] 合并后的TTS字幕JSON文件已生成: {output_file_path}")
+
+        # 新增：生成SRT格式的字幕文件
+        srt_output_filename = f"{base_filename}_merged_for_tts.srt"
+        srt_output_file_path = os.path.join(os.path.dirname(subtitle_file_path), srt_output_filename)
+
+        try:
+            srt_entries = [
+                SubtitleEntry(
+                    index=i + 1,
+                    start_time=seg['start'],
+                    end_time=seg['end'],
+                    text=f"[{seg.get('speaker')}] {seg['text']}" if 'speaker' in seg and seg.get('speaker') else seg['text']
+                ) for i, seg in enumerate(merged_segments)
+            ]
+            
+            parser = SRTParser()
+            parser.write_file(srt_entries, srt_output_file_path)
+            logger.info(f"[{stage_name}] 合并后的TTS字幕SRT文件已生成: {srt_output_file_path}")
+        except Exception as e:
+            logger.warning(f"[{stage_name}] 生成SRT文件失败: {e}")
+            srt_output_file_path = None
+
+        output_data = {
+            "merged_tts_json_path": output_file_path,
+            "merged_tts_srt_path": srt_output_file_path,
+            "statistics": {
+                "original_count": len(segments),
+                "merged_count": len(merged_segments),
+                "merged_items": len(segments) - len(merged_segments)
+            }
+        }
+        
+        workflow_context.stages[stage_name].status = 'SUCCESS'
+        workflow_context.stages[stage_name].output = output_data
+
+    except Exception as e:
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+        workflow_context.stages[stage_name].status = 'FAILED'
+        workflow_context.stages[stage_name].error = str(e)
+        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
+    
     finally:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)

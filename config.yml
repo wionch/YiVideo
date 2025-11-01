@@ -377,7 +377,7 @@ ffmpeg_service:
     # 最大片段时长（秒），防止产生过长的片段
     max_segment_duration: 30.0
     # 是否按说话人分组存储音频文件
-    group_by_speaker: true
+    group_by_speaker: false
     # 是否包含静音段（时长小于min_segment_duration的片段）
     include_silence: false
     # 分割后的音频文件存储目录（工作流中间数据）

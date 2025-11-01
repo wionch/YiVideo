@@ -31,6 +31,7 @@ from services.common.logger import get_logger
 from services.common.locks import gpu_lock
 from services.common import state_manager
 from services.common.context import StageExecution, WorkflowContext
+from services.common.parameter_resolver import resolve_parameters
 
 config = get_config()
 logger = get_logger(__name__)
@@ -98,6 +99,18 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         # 验证输入上下文
         if not isinstance(context, dict):
             raise ValueError("工作流上下文必须为字典格式")
+
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
 
         workflow_id = workflow_context.workflow_id
         logger.info(f"[{workflow_id}] 开始说话人分离任务 (subprocess模式)")
@@ -323,7 +336,22 @@ def get_speaker_segments(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         workflow_id = context.get('workflow_id', 'unknown')
-        input_params = context.get('input_params', {})
+        
+        # --- Parameter Resolution ---
+        workflow_context = WorkflowContext(**context)
+        stage_name = self.name
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        input_params = workflow_context.input_params
 
         diarization_file = input_params.get('diarization_file')
         target_speaker = input_params.get('speaker', None)
@@ -387,7 +415,22 @@ def validate_diarization(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         workflow_id = context.get('workflow_id', 'unknown')
-        input_params = context.get('input_params', {})
+
+        # --- Parameter Resolution ---
+        workflow_context = WorkflowContext(**context)
+        stage_name = self.name
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        input_params = workflow_context.input_params
 
         diarization_file = input_params.get('diarization_file')
 

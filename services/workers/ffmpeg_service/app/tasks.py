@@ -27,6 +27,7 @@ from services.common.context import StageExecution
 from services.common.context import WorkflowContext
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
+from services.common.parameter_resolver import resolve_parameters
 
 # 导入该服务内部的核心视频处理逻辑模块
 from .modules.video_decoder import extract_random_frames
@@ -48,6 +49,18 @@ def extract_keyframes(self: Task, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+
         os.makedirs(workflow_context.shared_storage_path, exist_ok=True)
 
         video_path = workflow_context.input_params.get("video_path")
@@ -90,6 +103,18 @@ def extract_audio(self: Task, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
         video_path = workflow_context.input_params.get("video_path")
         if not video_path or not os.path.exists(video_path):
             raise FileNotFoundError(f"视频文件不存在: {video_path}")
@@ -173,6 +198,18 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        # --- Parameter Resolution ---
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+                # 将解析后的参数更新回 input_params 的顶层
+                workflow_context.input_params.update(resolved_params)
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
         video_path = workflow_context.input_params.get("video_path")
         
         prev_stage = workflow_context.stages.get('paddleocr.detect_subtitle_area')
@@ -279,22 +316,28 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         subtitle_config = ffmpeg_config.get('subtitle', {})
         audio_source_config = ffmpeg_config.get('audio_source', {})
 
+        # 步骤0: 解析参数
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+
         logger.info(f"[{stage_name}] ========== 音频分割任务开始 ==========")
         logger.info(f"[{stage_name}] 配置加载完成")
+        logger.info(f"[{stage_name}] 解析后的节点参数: {resolved_params}")
 
         # 步骤1: 获取音频文件路径
         audio_path = None
         audio_source = ""
 
         # 检查是否通过参数传入音频文件（单步测试模式）
-        audio_path_param = workflow_context.input_params.get("audio_path")
+        # 优先使用通过参数传入的音频文件路径
+        audio_path_param = resolved_params.get("audio_path")
         if audio_path_param and os.path.exists(audio_path_param):
             audio_path = audio_path_param
             audio_source = "参数传入"
-            logger.info(f"[{stage_name}] 使用参数传入的音频文件: {audio_path}")
+            logger.info(f"[{stage_name}] 使用解析后的参数传入音频文件: {audio_path}")
         else:
             # 工作流模式：从上下文中自动获取音频文件
-            logger.info(f"[{stage_name}] 开始音频源选择逻辑...")
+            logger.info(f"[{stage_name}] 未提供音频路径参数，开始音频源选择逻辑...")
             priority_order = audio_source_config.get('priority_order', ["vocal_audio", "audio_path"])
 
             for source_type in priority_order:
@@ -337,14 +380,15 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         subtitle_source = ""
 
         # 检查是否通过参数传入字幕文件（单步测试模式）
-        subtitle_path_param = workflow_context.input_params.get("subtitle_path")
+        # 优先使用通过参数传入的字幕文件路径
+        subtitle_path_param = resolved_params.get("subtitle_path")
         if subtitle_path_param and os.path.exists(subtitle_path_param):
             subtitle_path = subtitle_path_param
             subtitle_source = "参数传入"
-            logger.info(f"[{stage_name}] 使用参数传入的字幕文件: {subtitle_path}")
+            logger.info(f"[{stage_name}] 使用解析后的参数传入字幕文件: {subtitle_path}")
         else:
             # 工作流模式：从上下文中自动获取字幕文件
-            logger.info(f"[{stage_name}] 开始字幕文件选择逻辑...")
+            logger.info(f"[{stage_name}] 未提供字幕路径参数，开始字幕文件选择逻辑...")
             priority_order = subtitle_config.get('priority_order', ["speaker_srt_path", "subtitle_path", "speaker_json_path"])
 
             for source_type in priority_order:
@@ -377,19 +421,22 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         os.makedirs(audio_segments_dir, exist_ok=True)
 
         # 步骤4: 配置音频分割器参数
+        # 优先级: resolved_params > split_config (from config.yml) > hardcoded defaults
         split_params = {
             'output_format': split_config.get('output_format', 'wav'),
             'sample_rate': split_config.get('sample_rate', 16000),
             'channels': split_config.get('channels', 1),
             'min_segment_duration': split_config.get('min_segment_duration', 1.0),
             'max_segment_duration': split_config.get('max_segment_duration', 30.0),
-            'group_by_speaker': split_config.get('group_by_speaker', True),
+            'group_by_speaker': split_config.get('group_by_speaker', False),
             'include_silence': split_config.get('include_silence', False),
             # 并发分割配置
             'enable_concurrent': split_config.get('enable_concurrent', True),
             'max_workers': split_config.get('max_workers', 8),
             'concurrent_timeout': split_config.get('concurrent_timeout', 600)
         }
+        # 使用解析后的参数覆盖默认配置
+        split_params.update(resolved_params)
 
         logger.info(f"[{stage_name}] 开始执行音频分割...")
         logger.info(f"[{stage_name}] 分割参数: {split_params}")
