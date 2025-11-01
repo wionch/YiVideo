@@ -335,6 +335,61 @@ class VolcengineProvider(AIProviderBase):
         }
 
 
+class OpenAICompatibleProvider(AIProviderBase):
+    """通用OpenAI兼容AI服务提供商"""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # 优先使用配置中的api_base_url，否则使用默认值
+        self.api_base_url = self.api_base_url or "https://np.wionch.top/v1/chat/completions"
+        self.model = self.model or "流式抗截断/gemini-2.5-pro" # 提供一个默认模型
+        logger.info(f"OpenAICompatibleProvider: {self.model}")
+
+    async def chat_completion(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        """OpenAI兼容聊天补全"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        data = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": kwargs.get('max_tokens', self.max_tokens),
+            "temperature": kwargs.get('temperature', self.temperature),
+            "stream": False
+        }
+
+        try:
+            logger.debug(f"调用OpenAI兼容API: {self.model}")
+            logger.debug(f"URL: {self.api_base_url}")
+            response = await self._make_http_request(self.api_base_url, headers, data)
+
+            content = response['choices'][0]['message']['content']
+            logger.debug("OpenAI兼容API调用成功")
+            return content
+
+        except aiohttp.ClientResponseError as e:
+            logger.error(f"OpenAI兼容API HTTP错误: {e.status} - {e.message}")
+            if e.status == 401:
+                logger.error("401 Unauthorized 错误: API密钥无效或未提供。请检查 `OpenAI_Compatible_KEY` 环境变量。")
+            raise
+
+        except Exception as e:
+            logger.error(f"OpenAI兼容API调用失败: {e}")
+            raise
+
+    def get_provider_info(self) -> Dict[str, Any]:
+        return {
+            "name": "OpenAI Compatible",
+            "model": self.model,
+            "api_base_url": self.api_base_url,
+            "supported_features": ["chat_completion", "text_correction"],
+            "language_support": ["多语言"],
+            "max_tokens": self.max_tokens
+        }
+
+
 class AIProviderFactory:
     """AI服务提供商工厂类"""
 
@@ -342,7 +397,8 @@ class AIProviderFactory:
         'deepseek': DeepSeekProvider,
         'gemini': GeminiProvider,
         'zhipu': ZhipuProvider,
-        'volcengine': VolcengineProvider
+        'volcengine': VolcengineProvider,
+        'openai_compatible': OpenAICompatibleProvider
     }
 
     @classmethod
