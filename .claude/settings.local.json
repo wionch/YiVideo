@@ -67,7 +67,10 @@
       "Read(//app/**)",
       "Read(///**)",
       "mcp__serena__initial_instructions",
-      "mcp__web-search-prime__webSearchPrime"
+      "mcp__web-search-prime__webSearchPrime",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "Bash(bash:*)"
     ],
     "deny": [
       "Bash(docker build:*)",

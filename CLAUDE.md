@@ -237,3 +237,10 @@ def gpu_intensive_task(self, context):
 - 支持CUDA 11.x+
 - 推荐使用NVIDIA RTX系列GPU
 - Python版本：3.8+
+
+## Active Technologies
+- Python 3.11+ (与现有系统保持一致) (002-subtitle-ai-optimization)
+- JSON文件存储 + Redis状态管理 (共享文件系统 /share) (002-subtitle-ai-optimization)
+
+## Recent Changes
+- 002-subtitle-ai-optimization: Added Python 3.11+ (与现有系统保持一致)
