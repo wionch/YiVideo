@@ -1,108 +1,108 @@
 ---
-description: "Task list template for feature implementation"
+description: "功能实现的任务列表模板"
 ---
 
-# Tasks: [FEATURE NAME]
+# 任务列表: [功能名称]
 
-**Input**: Design documents from `/specs/[###-feature-name]/`
-**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
+**输入**: 来自 `/specs/[###-功能名称]/` 的设计文档
+**前置条件**: plan.md (必需), spec.md (用户故事需要), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Tests are MANDATORY as per constitution (Principle III: Strict Test-First Development).
+**测试**: 以下示例包含测试任务。根据宪法（原则 III：严格的测试驱动开发），测试是**强制性**的。
 
-**Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
+**组织方式**: 任务按用户故事分组，以便能够独立实现和测试每个故事。
 
-## Format: `[ID] [P?] [Story] Description`
+## 格式: `[ID] [P?] [故事] 描述`
 
-- **[P]**: Can run in parallel (different files, no dependencies)
-- **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
-- Include exact file paths in descriptions
+- **[P]**: 可并行执行 (操作不同文件，无依赖)
+- **[故事]**: 此任务所属的用户故事 (例如：US1, US2, US3)
+- **描述**: 在描述中应包含确切的文件路径
 
-## Path Conventions
+## 路径约定
 
-- Paths shown below assume the YiVideo microservice structure (`services/workers/[service_name]`, `services/api_gateway`, etc.). Adjust based on plan.md.
+- 以下显示的路径假定为 YiVideo 微服务结构 (`services/workers/[service_name]`, `services/api_gateway` 等)。请根据 `plan.md` 进行调整。
 
 <!--
   ============================================================================
-  IMPORTANT: The tasks below are SAMPLE TASKS for illustration purposes only.
+  重要提示：以下任务仅为示例，用于说明目的。
 
-  The /speckit.tasks command MUST replace these with actual tasks based on the design artifacts.
+  /speckit.tasks 命令必须根据设计产物将这些替换为实际任务。
 
-  DO NOT keep these sample tasks in the generated tasks.md file.
+  请勿在生成的 tasks.md 文件中保留这些示例任务。
   ============================================================================
 -->
 
-## Phase 1: Setup (Shared Infrastructure)
+## 阶段 1: 设置 (共享基础设施)
 
-**Purpose**: Project initialization and basic structure for the new service/feature.
+**目的**: 为新服务/功能进行项目初始化和基础结构设置。
 
-- [ ] T001 Create service directory structure in `services/workers/[service_name]` per plan.
-- [ ] T002 Initialize dependencies (e.g., `requirements.txt`).
-- [ ] T003 [P] Configure linting and formatting tools.
-
----
-
-## Phase 2: Foundational (Blocking Prerequisites)
-
-**Purpose**: Core infrastructure that MUST be complete before ANY user story can be implemented.
-
-**⚠️ CRITICAL**: No user story work can begin until this phase is complete.
-
-- [ ] T004 Setup database schema/models if needed.
-- [ ] T005 Setup service-to-service communication (e.g., Celery task registration).
-- [ ] T006 **(Observability)** Configure structured logging infrastructure.
-- [ ] T007 **(Observability)** Setup Prometheus metrics endpoint and basic service metrics.
-- [ ] T008 **(Observability)** Integrate distributed tracing middleware/decorators.
-- [ ] T009 **(AI Models)** Establish AI model storage, versioning, and loading strategy.
-- [ ] T010 Configure environment variable handling for the service.
-
-**Checkpoint**: Foundation ready - user story implementation can now begin.
+- [ ] T001 根据计划在 `services/workers/[service_name]` 中创建服务目录结构。
+- [ ] T002 初始化依赖项 (例如, `requirements.txt`)。
+- [ ] T003 [P] 配置 linting 和格式化工具。
 
 ---
 
-## Phase 3: User Story 1 - [Title] (Priority: P1) 🎯 MVP
+## 阶段 2: 基础 (阻塞性前置任务)
 
-**Goal**: [Brief description of what this story delivers]
-**Independent Test**: [How to verify this story works on its own]
+**目的**: 必须在任何用户故事实现之前完成的核心基础设施。
 
-### Tests for User Story 1 (Write these first!) ⚠️
+**⚠️ 关键**: 在此阶段完成之前，不能开始任何用户故事的工作。
 
-- [ ] T011 [P] [US1] Contract test for endpoint/message in `tests/contract/test_[name].py`.
-- [ ] T012 [P] [US1] Integration test for user journey in `tests/integration/test_[name].py`.
-- [ ] T013 [P] [US1] Unit tests for business logic in `tests/unit/test_[name].py`.
+- [ ] T004 如果需要，设置数据库 schema/模型。
+- [ ] T005 设置服务间通信 (例如, Celery 任务注册)。
+- [ ] T006 **(可观测性)** 配置结构化日志基础设施。
+- [ ] T007 **(可观测性)** 设置 Prometheus 指标端点和基础服务指标。
+- [ ] T008 **(可观测性)** 集成分布式追踪中间件/装饰器。
+- [ ] T009 **(AI 模型)** 建立 AI 模型存储、版本控制和加载策略。
+- [ ] T010 为服务配置环境变量处理。
 
-### Implementation for User Story 1
-
-- [ ] T014 [US1] **(Contracts)** Define/update API contracts in `services/common/contracts/` or OpenAPI spec.
-- [ ] T015 [P] [US1] Implement data models/entities.
-- [ ] T016 [US1] Implement core service logic (depends on T015).
-- [ ] T017 [US1] Implement API endpoint / Celery task consumer.
-- [ ] T018 [US1] Add specific structured logging for User Story 1 operations.
-- [ ] T019 [US1] **(Observability)** Expose relevant Prometheus metrics for User Story 1 (e.g., processing time, success/error count).
-
-**Checkpoint**: User Story 1 is fully functional, tested, and observable.
+**检查点**: 基础已就绪 - 现在可以开始实现用户故事。
 
 ---
 
-[Add more user story phases as needed]
+## 阶段 3: 用户故事 1 - [标题] (优先级: P1) 🎯 MVP
+
+**目标**: [简要描述此故事交付的价值]
+**独立测试**: [如何独立验证此故事的功能]
+
+### 用户故事 1 的测试 (优先编写!) ⚠️
+
+- [ ] T011 [P] [US1] 在 `tests/contract/test_[name].py` 中为端点/消息编写合约测试。
+- [ ] T012 [P] [US1] 在 `tests/integration/test_[name].py` 中为用户旅程编写集成测试。
+- [ ] T013 [P] [US1] 在 `tests/unit/test_[name].py` 中为业务逻辑编写单元测试。
+
+### 用户故事 1 的实现
+
+- [ ] T014 [US1] **(合约)** 在 `services/common/contracts/` 或 OpenAPI 规范中定义/更新 API 合约。
+- [ ] T015 [P] [US1] 实现数据模型/实体。
+- [ ] T016 [US1] 实现核心服务逻辑 (依赖 T015)。
+- [ ] T017 [US1] 实现 API 端点 / Celery 任务消费者。
+- [ ] T018 [US1] 为用户故事 1 的操作添加特定的结构化日志。
+- [ ] T019 [US1] **(可观测性)** 为用户故事 1 暴露相关的 Prometheus 指标 (例如：处理时间、成功/错误计数)。
+
+**检查点**: 用户故事 1 功能完整，经过测试，并具备可观测性。
 
 ---
 
-## Phase N: Polish & Cross-Cutting Concerns
-
-- [ ] TXXX [P] Documentation updates in `docs/`.
-- [ ] TXXX Code cleanup and refactoring.
-- [ ] TXXX Security hardening (review inputs, permissions).
-- [ ] TXXX Run `quickstart.md` validation.
+[根据需要添加更多的用户故事阶段]
 
 ---
-## Implementation Strategy
 
-### MVP First (User Story 1 Only)
-1. Complete Phase 1 & 2 (Setup & Foundational).
-2. Complete all tasks in Phase 3 (User Story 1).
-3. **STOP and VALIDATE**: Test User Story 1 independently.
+## 阶段 N: 优化与横切关注点
 
-### Incremental Delivery
-1. Complete Setup + Foundational.
-2. Add User Story 1 → Test → Deploy/Demo.
-3. Add User Story 2 → Test → Deploy/Demo.
+- [ ] TXXX [P] 在 `docs/` 中更新文档。
+- [ ] TXXX 代码清理和重构。
+- [ ] TXXX 安全加固 (审查输入、权限)。
+- [ ] TXXX 运行 `quickstart.md` 验证。
+
+---
+## 实施策略
+
+### MVP 优先 (仅用户故事 1)
+1. 完成阶段 1 和 2 (设置 & 基础)。
+2. 完成阶段 3 中的所有任务 (用户故事 1)。
+3. **停止并验证**: 独立测试用户故事 1。
+
+### 增量交付
+1. 完成设置 + 基础。
+2. 添加用户故事 1 → 测试 → 部署/演示。
+3. 添加用户故事 2 → 测试 → 部署/演示。

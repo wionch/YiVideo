@@ -1,92 +1,109 @@
-# Feature Specification: [FEATURE NAME]
+# 功能需求规格: [功能名称]
 
-**Feature Branch**: `[###-feature-name]`
-**Created**: [DATE]
-**Status**: Draft
-**Input**: User description: "$ARGUMENTS"
+**功能分支**: `[###-功能名称]`
+**创建日期**: [日期]
+**状态**: 草稿
+**输入**: 用户描述: "$ARGUMENTS"
 
-## User Scenarios & Testing *(mandatory)*
+## 用户场景与测试 *(必填)*
 
 <!--
-  IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
-  Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
-  you should still have a viable MVP (Minimum Viable Product) that delivers value.
+  重要提示：用户故事应按重要性排序，作为用户的操作旅程。
+  每个用户故事/旅程必须是【可独立测试】的——这意味着即使只实现其中一个，
+  你仍然应该有一个能够交付价值的、可行的最小化产品（MVP）。
 
-  Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
-  Think of each story as a standalone slice of functionality that can be:
-  - Developed independently
-  - Tested independently
-  - Deployed independently
-  - Demonstrated to users independently
+  为每个故事分配优先级（P1, P2, P3 等），其中 P1 是最关键的。
+  将每个故事视为一个独立的功能切片，它可以：
+  - 独立开发
+  - 独立测试
+  - 独立部署
+  - 独立向用户演示
 -->
 
-### User Story 1 - [Brief Title] (Priority: P1)
+### 用户故事 1 - [简短标题] (优先级: P1)
 
-[Describe this user journey in plain language]
+[用通俗易懂的语言描述这个用户旅程]
 
-**Why this priority**: [Explain the value and why it has this priority level]
+**优先级原因**: [解释其价值以及为何具有此优先级]
 
-**Independent Test**: [Describe how this can be tested independently - e.g., "Can be fully tested by [specific action] and delivers [specific value]"]
+**独立测试**: [描述如何独立测试此功能 - 例如：“可通过 [特定操作] 进行完整测试，并交付 [特定价值]”]
 
-**Acceptance Scenarios**:
+**验收场景**:
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-2. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **假如** [初始状态], **当** [执行操作], **那么** [预期结果]
+2. **假如** [初始状态], **当** [执行操作], **那么** [预期结果]
 
 ---
 
-[Add more user stories as needed]
+[根据需要添加更多用户故事]
 
-### Edge Cases
+### 边界情况
 
-- What happens when [boundary condition]?
-- How does system handle [error scenario]?
+- 当 [边界条件] 发生时会怎样？
+- 系统如何处理 [错误场景]？
 
-## Requirements *(mandatory)*
+## 需求 *(必填)*
 
-### Functional Requirements
+### 功能需求
 
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
+- **FR-001**: 系统必须 [具体能力，例如：“允许用户创建账户”]
+- **FR-002**: 系统必须 [具体能力，例如：“验证电子邮件地址”]
+- **FR-003**: 用户必须能够 [关键交互，例如：“重置他们的密码”]
 
-### Key Entities *(include if feature involves data)*
+### 关键实体 *(如果功能涉及数据则包含)*
 
-- **[Entity 1]**: [What it represents, key attributes without implementation]
-- **[Entity 2]**: [What it represents, relationships to other entities]
+- **[实体 1]**: [它代表什么，关键属性，无需实现细节]
+- **[实体 2]**: [它代表什么，与其他实体的关系]
 
-## Architectural Compliance Requirements *(mandatory)*
-
-<!--
-  ACTION REQUIRED: Fill out how this feature will comply with the project constitution.
--->
-
-### Service Boundaries (Principle I)
-- [Describe if this is a new service or an extension of an existing one. Justify the boundary.]
-
-### API Contracts (Principle II)
-- [List new or updated API contracts (e.g., OpenAPI specs, Pydantic models) this feature will introduce.]
-
-### Observability (Principle IV)
-- **Metrics**: [List key Prometheus metrics to be exposed.]
-- **Logs**: [Describe critical events to be logged.]
-- **Traces**: [Identify key spans for distributed tracing.]
-
-### State Management (Principle V)
-- [Describe how and where the feature's state will be managed (e.g., Redis, database) to ensure workers remain stateless.]
-
-### AI Model Impact (Principle VI)
-- [If applicable, describe how AI models will be versioned, deployed, and documented for this feature. If not, state "N/A".]
-
-## Success Criteria *(mandatory)*
+## 架构合规性要求 *(必填)*
 
 <!--
-  ACTION REQUIRED: Define measurable success criteria.
-  These must be technology-agnostic and measurable.
+  需要操作：填写此功能将如何遵守项目宪法。
 -->
 
-### Measurable Outcomes
+### 服务边界 (原则 I)
+- [描述这是一个新服务还是现有服务的扩展。说明理由。]
 
-- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
-- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
-- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
+### API 合约 (原则 II)
+- [列出此功能将引入的新的或更新的 API 合约（例如：OpenAPI 规范, Pydantic 模型）。]
+
+### 可观测性 (原则 IV)
+- **指标**: [列出需要暴露的关键 Prometheus 指标。]
+- **日志**: [描述需要记录的关键事件。]
+- **追踪**: [识别分布式追踪的关键跨度。]
+
+### 状态管理 (原则 V)
+- [描述该功能的状态将如何以及在何处管理（例如：Redis, 数据库），以确保 worker 保持无状态。]
+
+### AI 模型影响 (原则 VI)
+- [如果适用，描述此功能将如何对 AI 模型进行版本控制、部署和文档记录。如果不适用，请注明“不适用”。]
+
+## 成功标准 *(必填)*
+
+<!--
+  需要操作：定义可衡量的成功标准。
+  这些标准必须与技术无关且可衡量。
+-->
+
+### 最终产出物/目标
+
+- **产出物-001**: [例如：“一个位于 `/v1/feature` 的新 RESTful 端点”]
+- **产出物-002**: [例如：“一个名为 `feature-service` 的新服务被添加到 `docker-compose.yml`”]
+- **产出物-003**: [例如：“一个解释其用法的文档页面 `docs/features/new-feature.md`”]
+
+### 可衡量的成果
+
+- **SC-001**: [可衡量指标，例如：“用户可以在2分钟内完成账户创建”]
+- **SC-002**: [可衡量指标，例如：“系统在1000个并发用户下无性能下降”]
+- **SC-003**: [用户满意度指标，例如：“90%的用户首次尝试即可成功完成主要任务”]
+
+## 待澄清问题 *(供AI与真人讨论)*
+
+<!--
+  需要操作：列出任何开放性问题、模糊之处或需要进一步讨论的领域。
+  这些将是 `/speckit.clarify` 命令的主要输入。
+-->
+
+- **问题-001**: [关于某个具体需求的问题，例如：“调用外部服务的 API 超时时间具体应该是多少？”]
+- **问题-002**: [关于边界情况的问题，例如：“如果用户的输入包含特殊字符，系统应如何表现？”]
+- **问题-003**: [关于技术选型的问题，例如：“我们应该使用 Redis 还是数据库来缓存这些数据？”]

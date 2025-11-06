@@ -1,82 +1,79 @@
-# Implementation Plan: [FEATURE]
+# 实施计划: [功能名称]
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**分支**: `[###-功能名称]` | **日期**: [日期] | **需求规约**: [链接]
+**输入**: 来自 `/specs/[###-功能名称]/spec.md` 的功能需求规格
 
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+**注意**: 此模板由 `/speckit.plan` 命令填充。执行工作流请参见 `.specify/templates/commands/plan.md`。
 
-## Summary
+## 概述
 
-[Extract from feature spec: primary requirement + technical approach from research]
+[从功能需求规格中提取：主要需求 + 技术研究方法]
 
-## Technical Context
+## 技术背景
 
 <!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
+  需要操作：将此部分的内容替换为项目的技术细节。
+  此处的结构作为指导迭代过程的建议。
 -->
 
-**Language/Version**: [e.g., Python 3.8+ (as per constitution)]
-**Primary Dependencies**: [e.g., Celery, Redis, FastAPI]
-**Storage**: [e.g., Redis, Shared Filesystem (`/share`)]
-**Testing**: [e.g., pytest (as per constitution)]
-**Target Platform**: [e.g., Docker on Linux server with NVIDIA GPUs (CUDA 11.x+)]
-**Project Type**: [microservice-based]
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**语言/版本**: [例如：Python 3.11+ (依据宪法)]
+**主要依赖**: [例如：Celery, Redis, FastAPI]
+**存储**: [例如：Redis, 共享文件系统 (`/share`)]
+**测试**: [例如：pytest (依据宪法)]
+**目标平台**: [例如：运行于带有NVIDIA GPU (CUDA 11.x+) 的 Linux 服务器上的 Docker]
+**项目类型**: [基于微服务]
+**性能目标**: [领域特定，例如：1000 请求/秒, 1万行/秒, 60 fps 或 需要澄清]
+**约束条件**: [领域特定，例如：p95延迟 <200ms, 内存占用 <100MB, 支持离线 或 需要澄清]
+**规模/范围**: [领域特定，例如：1万用户, 100万行代码, 50个屏幕 或 需要澄清]
 
-## Constitution Check
+## 宪法检查
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+*前置检查：必须在阶段0研究之前通过。在阶段1设计之后重新检查。*
 
-- [ ] **I. Service-First Architecture**: Is the feature encapsulated in a single-responsibility, independently deployable service?
-- [ ] **II. Contract-Driven Communication**: Are all inter-service interactions defined by versioned, explicit contracts?
-- [ ] **III. Strict Test-First Development**: Is Test-Driven Development being followed? Are integration and contract tests planned?
-- [ ] **IV. Observability by Design**: Does the service have built-in structured logging, metrics, and tracing?
-- [ ] **V. Stateless Work Units**: Is the worker service stateless, with state managed centrally?
-- [ ] **VI. Systematic AI Model Management**: Is there a formal process for versioning and deploying the AI models used?
-- [ ] **VII. Configuration as Code**: Are all configurations stored in version control, with secrets separated?
+- [ ] **I. 核心架构与开发模式**: 功能是否封装在单一职责、可独立部署的服务中？
+- [ ] **II. 技术栈与规范**: 是否遵循了规定的技术栈和代码规范？
+- [ ] **III. 开发规范**: 是否遵循测试驱动开发？是否已规划集成和合约测试？
+- [ ] **IV. 文档与输出**: 所有产出物是否都使用中文？Commit Message 是否规范？
+- [ ] **V. MCP 服务集成**: 是否按规范在对应阶段使用了 MCP 服务？
 
-## Project Structure
+## 项目结构
 
-### Documentation (this feature)
+### 文档 (此功能)
 
 ```text
-specs/[###-feature]/
-├── plan.md              # This file (/speckit.plan command output)
-├── research.md          # Phase 0 output (/speckit.plan command)
-├── data-model.md        # Phase 1 output (/speckit.plan command)
-├── quickstart.md        # Phase 1 output (/speckit.plan command)
-├── contracts/           # Phase 1 output (/speckit.plan command)
-└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
+specs/[###-功能]/
+├── plan.md              # 此文件 (/speckit.plan 命令产出)
+├── research.md          # 阶段0 产出 (/speckit.plan 命令)
+├── data-model.md        # 阶段1 产出 (/speckit.plan 命令)
+├── quickstart.md        # 阶段1 产出 (/speckit.plan 命令)
+├── contracts/           # 阶段1 产出 (/speckit.plan 命令)
+└── tasks.md             # 阶段2 产出 (/speckit.tasks 命令 - 非 /speckit.plan 创建)
 ```
 
-### Source Code (repository root)
+### 源代码 (仓库根目录)
 <!--
-  ACTION REQUIRED: The structure below is based on the project constitution.
-  Expand it with real paths for this feature.
+  需要操作：以下结构基于项目宪法。
+  请用此功能的真实路径进行扩展。
 -->
 
 ```text
 services/
-├── api_gateway/      # API gateway service
-├── workers/          # AI worker services (e.g., faster_whisper, paddleocr)
-└── common/           # Shared components and utilities
+├── api_gateway/      # API 网关服务
+├── workers/          # AI worker 服务 (例如：faster_whisper, paddleocr)
+└── common/           # 共享组件和工具
 tests/
-├── unit/
-├── integration/
-└── e2e/
+├── unit/             # 单元测试
+├── integration/      # 集成测试
+└── e2e/              # 端到端测试
 docs/
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real directories captured above]
+**结构决策**: [记录所选的结构，并引用上面捕获的真实目录]
 
-## Complexity Tracking
+## 复杂性跟踪
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
+> **仅当“宪法检查”中有必须说明理由的违规项时填写**
 
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., Principle Name] | [Justification for deviation] | [Explanation of why the simpler, compliant alternative was not chosen] |
+| 违规原则 | 为何需要 | 被拒绝的更简单替代方案的原因 |
+|------------|------------|-----------------------------------|
+| [例如：原则名称] | [对偏离的解释] | [解释为何未选择更简单且合规的替代方案] |

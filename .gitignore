@@ -243,7 +243,6 @@ run_pipeline.py
 .tmp.drivedownload/
 .kilocode/
 .gemini/
-.claude/
 specs/
 
 # Model checkpoints
