@@ -54,7 +54,9 @@
       "Bash(git stash:*)",
       "Bash(git pull:*)",
       "Bash(git merge:*)",
-      "Bash(git merge-base:*)"
+      "Bash(git merge-base:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(git ls-tree:*)"
     ],
     "deny": [
       "Bash(docker build:*)"
