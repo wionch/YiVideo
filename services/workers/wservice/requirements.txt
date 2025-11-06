@@ -1,0 +1,9 @@
+# Base dependencies for Celery
+celery[redis]>=5.3.6
+
+# For loading YAML configuration
+PyYAML>=6.0
+
+# For AI subtitle correction task
+# This assumes the corrector might use Google's Generative AI
+google-generativeai>=0.5.4
