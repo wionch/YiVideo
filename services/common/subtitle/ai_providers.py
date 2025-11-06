@@ -130,7 +130,10 @@ class DeepSeekProvider(AIProviderBase):
         try:
             logger.debug(f"调用DeepSeek API: {self.model}")
             logger.debug(f"url: {self.api_base_url}")
-            logger.debug(f"headers: {headers}")
+            # 安全：掩码敏感信息
+            safe_headers = {k: '***' if 'authorization' in k.lower() or 'apikey' in k.lower() else v
+                           for k, v in headers.items()}
+            logger.debug(f"headers: {safe_headers}")
             logger.debug(f"data: {data}")
             response = await self._make_http_request(self.api_base_url, headers, data)
 
@@ -218,6 +221,9 @@ class GeminiProvider(AIProviderBase):
             # Gemini API需要在URL中包含API密钥
             url = f"{self.api_base_url}?key={self.api_key}"
             logger.debug(f"调用Gemini API: {self.model}")
+            # 安全：掩码URL中的API密钥
+            safe_url = f"{self.api_base_url}?key=***"
+            logger.debug(f"url: {safe_url}")
 
             response = await self._make_http_request(url, headers, data)
 
@@ -363,6 +369,10 @@ class OpenAICompatibleProvider(AIProviderBase):
         try:
             logger.debug(f"调用OpenAI兼容API: {self.model}")
             logger.debug(f"URL: {self.api_base_url}")
+            # 安全：掩码敏感信息
+            safe_headers = {k: '***' if 'authorization' in k.lower() or 'apikey' in k.lower() else v
+                           for k, v in headers.items()}
+            logger.debug(f"headers: {safe_headers}")
             response = await self._make_http_request(self.api_base_url, headers, data)
 
             content = response['choices'][0]['message']['content']

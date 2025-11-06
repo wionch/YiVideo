@@ -28,6 +28,9 @@ from services.common.subtitle.subtitle_merger import (
 )
 # 导入公共字幕校正模块
 from services.common.subtitle.subtitle_correction import SubtitleCorrector
+# 导入AI字幕优化模块
+from services.common.subtitle.subtitle_optimizer import SubtitleOptimizer
+from services.common.subtitle.metrics import metrics_collector
 
 logger = get_logger('wservice_tasks')
 
@@ -383,4 +386,128 @@ def correct_subtitles(self, context: dict) -> dict:
     finally:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
+    return workflow_context.model_dump()
+
+
+@celery_app.task(bind=True, name='wservice.ai_optimize_subtitles')
+def ai_optimize_subtitles(self, context: dict) -> dict:
+    """
+    AI字幕优化任务节点
+
+    通过AI大模型对转录后的字幕进行智能优化和校正，包括：
+    1. 修正错别字和语法错误
+    2. 添加适当的标点符号
+    3. 删除口头禅和填充词
+    4. 支持大体积字幕的并发处理
+    """
+    start_time = time.time()
+    workflow_context = WorkflowContext(**context)
+    stage_name = self.name
+    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+    state_manager.update_workflow_state(workflow_context)
+
+    try:
+        # 获取配置参数
+        optimization_params = workflow_context.input_params.get('params', {}).get('subtitle_optimization', {})
+        is_enabled = optimization_params.get('enabled', False)
+
+        if not is_enabled:
+            logger.info(f"[{stage_name}] 字幕优化未启用，跳过处理")
+            workflow_context.stages[stage_name].status = 'SKIPPED'
+            return workflow_context.model_dump()
+
+        # 获取AI提供商
+        provider = optimization_params.get('provider', 'deepseek')
+
+        # 获取批处理配置
+        batch_size = optimization_params.get('batch_size', 50)
+        overlap_size = optimization_params.get('overlap_size', 10)
+
+        logger.info(f"[{stage_name}] 开始AI字幕优化 - 提供商: {provider}, "
+                   f"批次大小: {batch_size}, 重叠大小: {overlap_size}")
+
+        # 获取转录文件路径
+        faster_whisper_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
+        if not faster_whisper_stage:
+            raise FileNotFoundError("未找到faster_whisper转录阶段")
+
+        segments_file = faster_whisper_stage.output.get('segments_file')
+        if not segments_file or not os.path.exists(segments_file):
+            raise FileNotFoundError(f"未找到转录文件: {segments_file}")
+
+        # 初始化字幕优化器
+        optimizer = SubtitleOptimizer(
+            batch_size=batch_size,
+            overlap_size=overlap_size,
+            provider=provider
+        )
+
+        # 执行优化
+        result = optimizer.optimize_subtitles(
+            transcribe_file_path=segments_file,
+            output_file_path=None,  # 自动生成输出路径
+            prompt_file_path=None   # 使用默认提示词
+        )
+
+        if not result['success']:
+            raise RuntimeError(f"AI字幕优化失败: {result.get('error', '未知错误')}")
+
+        # 记录指标
+        metrics_collector.record_request(
+            provider=provider,
+            status='success',
+            duration=time.time() - start_time
+        )
+        metrics_collector.set_processing_time(provider, result['processing_time'])
+        metrics_collector.set_batch_size(provider, batch_size)
+        metrics_collector.record_subtitle_count(
+            result['subtitles_count'],
+            result['batch_mode']
+        )
+
+        # 构造输出数据
+        output_data = {
+            "optimized_file_path": result['file_path'],
+            "original_file_path": segments_file,
+            "provider_used": provider,
+            "processing_time": result['processing_time'],
+            "subtitles_count": result['subtitles_count'],
+            "commands_applied": result['commands_applied'],
+            "batch_mode": result['batch_mode'],
+            "batches_count": result.get('batches_count', 1),
+            "statistics": {
+                "total_commands": result['commands_applied'],
+                "optimization_rate": result['commands_applied'] / max(result['subtitles_count'], 1)
+            }
+        }
+
+        # 更新工作流状态
+        workflow_context.stages[stage_name].status = 'SUCCESS'
+        workflow_context.stages[stage_name].output = output_data
+
+        logger.info(f"[{stage_name}] 字幕优化完成 - 文件: {result['file_path']}, "
+                   f"处理时间: {result['processing_time']:.2f}秒")
+
+    except Exception as e:
+        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
+
+        # 记录错误指标
+        if 'provider' in locals():
+            metrics_collector.record_request(
+                provider=provider,
+                status='failure',
+                duration=time.time() - start_time
+            )
+
+        workflow_context.stages[stage_name].status = 'FAILED'
+        workflow_context.stages[stage_name].error = str(e)
+
+    finally:
+        # 记录持续时间
+        duration = time.time() - start_time
+        workflow_context.stages[stage_name].duration = duration
+        state_manager.update_workflow_state(workflow_context)
+        logger.info(f"[{stage_name}] 任务完成 - 状态: {workflow_context.stages[stage_name].status}, "
+                   f"耗时: {duration:.2f}秒")
+
     return workflow_context.model_dump()

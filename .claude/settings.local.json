@@ -56,7 +56,13 @@
       "Bash(git merge:*)",
       "Bash(git merge-base:*)",
       "WebFetch(domain:github.com)",
-      "Bash(git ls-tree:*)"
+      "Bash(git ls-tree:*)",
+      "Bash(sed -E 's/.*\\/([0-9]+)-.*/\\1/')",
+      "Bash(bash .specify/scripts/bash/setup-plan.sh --json)",
+      "Bash(xargs -r sed -i 's/\\r$//')",
+      "Bash(sed -i 's/\\r$//' .specify/scripts/bash/check-prerequisites.sh)",
+      "Bash(sudo mkdir -p /mnt/d/WSL2/docker/YiVideo/tests/unit /mnt/d/WSL2/docker/YiVideo/tests/integration /mnt/d/WSL2/docker/YiVideo/tests/e2e)",
+      "Bash(sudo touch /mnt/d/WSL2/docker/YiVideo/tests/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/unit/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/integration/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/e2e/__init__.py)"
     ],
     "deny": [
       "Bash(docker build:*)"

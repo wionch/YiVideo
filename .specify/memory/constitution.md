@@ -11,7 +11,7 @@
 - **语言**: Python 3.11+
 - **核心框架**: Docker, Docker Compose, Celery, Redis
 - **代码风格**: 遵循 PEP 8，使用 Black 和 isort 进行格式化。
-- **依赖管理**: 使用 `requirements.txt`。新增依赖需经过审查。
+- **依赖管理**: 各容器使用 `requirements.txt`。新增依赖需经过审查。
 
 ### III. 开发规范 (Development Norms)
 - **SOLID**: 所有代码设计必须严格遵循 SOLID 原则。
