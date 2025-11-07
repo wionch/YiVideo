@@ -2,6 +2,82 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 项目架构图
+
+```mermaid
+graph TB
+    %% 用户层
+    User[👤 用户] -->|HTTP请求| API[API Gateway<br/>端口8000]
+
+    %% 核心服务层
+    API -->|工作流调度| Redis[(Redis<br/>多数据库架构)]
+    API -->|状态管理| SM[State Manager]
+    API -->|监控| Mon[Monitoring]
+
+    %% 微服务层
+    API -->|Celery任务| Workers[AI Workers]
+
+    %% Workers子服务
+    Workers --> FF[FFmpeg Service<br/>视频/音频处理]
+    Workers --> FW[Faster Whisper<br/>语音识别]
+    Workers --> PA[Pyannote Audio<br/>说话人分离]
+    Workers --> PO[PaddleOCR<br/>文字识别]
+    Workers --> AS[Audio Separator<br/>人声分离]
+    Workers --> TTS[IndexTTS<br/>文本转语音]
+    Workers --> GPT[GPT-SoVITS<br/>语音克隆]
+    Workers --> IP[Inpainting<br/>图像修复]
+    Workers --> WS[WService<br/>字幕AI优化]
+
+    %% 共享组件
+    SM -->|共享| Common[Common Module]
+    Common -->|日志| Logger[Logger]
+    Common -->|锁机制| Locks[GPU Locks]
+    Common -->|配置| Config[Config Loader]
+    Common -->|字幕| Sub[Subtitle Module]
+
+    %% 存储层
+    Redis -->|DB 0| Broker[Broker<br/>任务队列]
+    Redis -->|DB 1| Backend[Backend<br/>结果存储]
+    Redis -->|DB 2| LockDB[Locks<br/>分布式锁]
+    Redis -->|DB 3| StateDB[States<br/>工作流状态]
+
+    Share[/share<br/>共享存储] -->|文件交换| Workers
+
+    %% 监控层
+    Mon -->|指标| Prom[Prometheus]
+    Mon -->|可视化| Graf[Grafana]
+
+    %% 子图：共享组件详细
+    subgraph Common [Common Module - 共享组件]
+        Logger
+        Locks
+        Config
+        Sub
+    end
+
+    %% 子图：字幕处理子模块
+    subgraph Sub [Subtitle Module - 字幕处理]
+        AICmd[AI Command Parser]
+        AIProv[AI Providers]
+        CmdExe[Command Executor]
+        SubOpt[Subtitle Optimizer]
+        SubMerge[Subtitle Merger]
+    end
+
+    %% 样式
+    classDef userClass fill:#e1f5fe
+    classDef serviceClass fill:#f3e5f5
+    classDef workerClass fill:#e8f5e9
+    classDef storageClass fill:#fff3e0
+    classDef monitorClass fill:#fce4ec
+
+    class User userClass
+    class API,Mon serviceClass
+    class Workers,FF,FW,PA,PO,AS,TTS,GP,IP,WS workerClass
+    class Redis,Share storageClass
+    class Prom,Graf monitorClass
+```
+
 ## 项目概述
 
 YiVideo 是一个基于动态工作流引擎的AI视频处理平台，采用微服务架构设计。系统核心思想是"配置而非编码"，通过工作流配置文件动态构建AI处理链条，支持语音识别、OCR、字幕处理、音频分离、文本转语音等多种AI功能的灵活组合。
@@ -22,6 +98,32 @@ YiVideo 是一个基于动态工作流引擎的AI视频处理平台，采用微�
 - **Redis**: 作为Celery消息队列、状态存储、分布式锁和缓存
 - **共享存储**: `/share`目录用于所有服务间的文件共享
 - **GPU锁系统**: 基于Redis的分布式GPU资源管理，支持智能轮询和自动恢复
+
+## 模块索引
+
+本项目已建立完整的AI上下文索引，各模块文档位置如下：
+
+### 📋 主要模块文档
+- **根目录**: [`/mnt/d/WSL2/docker/YiVideo/CLAUDE.md`](./CLAUDE.md) - 项目整体架构、开发和运维指南
+- **API网关**: [`/mnt/d/WSL2/docker/YiVideo/services/api_gateway/CLAUDE.md`](./services/api_gateway/CLAUDE.md) - API接口、工作流管理、监控
+- **共享组件**: [`/mnt/d/WSL2/docker/YiVideo/services/common/CLAUDE.md`](./services/common/CLAUDE.md) - 状态管理、GPU锁、日志、配置、字幕处理
+
+### 🤖 Worker服务文档
+- **FFmpeg服务**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/ffmpeg_service/CLAUDE.md`](./services/workers/ffmpeg_service/CLAUDE.md) - 视频/音频处理
+- **Faster Whisper**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/faster_whisper_service/CLAUDE.md`](./services/workers/faster_whisper_service/CLAUDE.md) - 语音识别(ASR)
+- **Pyannote Audio**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/pyannote_audio_service/CLAUDE.md`](./services/workers/pyannote_audio_service/CLAUDE.md) - 说话人分离
+- **PaddleOCR**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/paddleocr_service/CLAUDE.md`](./services/workers/paddleocr_service/CLAUDE.md) - 光学字符识别
+- **Audio Separator**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/audio_separator_service/CLAUDE.md`](./services/workers/audio_separator_service/CLAUDE.md) - 人声/伴奏分离
+- **IndexTTS**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/indextts_service/CLAUDE.md`](./services/workers/indextts_service/CLAUDE.md) - 文本转语音
+- **GPT-SoVITS**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/gptsovits_service/CLAUDE.md`](./services/workers/gptsovits_service/CLAUDE.md) - 语音克隆
+- **Inpainting**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/inpainting_service/CLAUDE.md`](./services/workers/inpainting_service/CLAUDE.md) - 图像修复
+- **WService**: [`/mnt/d/WSL2/docker/YiVideo/services/workers/wservice/CLAUDE.md`](./services/workers/wservice/CLAUDE.md) - 字幕AI优化
+
+### ✨ 特性
+- 📊 **已生成 Mermaid 结构图** - 完整展示系统架构和模块关系
+- 🧭 **已为 12 个模块添加导航面包屑** - 每个模块文档都包含清晰的导航路径
+- 📚 **详细文档** - 包含API接口、配置参数、使用示例、最佳实践
+- 🔗 **交叉引用** - 模块间相互引用，便于快速定位相关功能
 
 ## 常用开发命令
 
