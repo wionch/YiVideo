@@ -1,53 +1,139 @@
 # AI字幕优化API文档
 
+**版本**: v1.0.0
+**更新日期**: 2025-11-07
+**功能**: AI字幕优化功能
+
 ## 概述
 
-AI字幕优化系统提供了完整的RESTful API接口，支持通过HTTP调用进行字幕优化。这些API可以直接调用，也可以通过YiVideo工作流引擎间接使用。
+AI字幕优化系统提供了完整的RESTful API接口，支持通过HTTP调用进行字幕优化。这些API通过YiVideo工作流引擎间接使用，基于Celery任务队列实现异步处理。
 
 ## API端点
 
-### 1. 字幕优化API
+### 1. 工作流任务API
 
-**端点**: `POST /v1/workflows/subtitle/optimize`
+**端点**: `POST /v1/workflows`
 
-**描述**: 通过工作流引擎执行AI字幕优化
+**描述**: 通过工作流引擎执行AI字幕优化任务
 
 **请求参数**:
 ```json
 {
+    "workflow_id": "可选-工作流ID（增量执行时提供）",
+    "execution_mode": "可选-执行模式：incremental/retry",
     "video_path": "/share/videos/input/example.mp4",
     "workflow_config": {
+        "workflow_chain": [
+            "faster_whisper.transcribe_audio",
+            "wservice.ai_optimize_subtitles",
+            "faster_whisper.generate_subtitle_files"
+        ]
+    },
+    "wservice.ai_optimize_subtitles": {
         "subtitle_optimization": {
-            "strategy": "ai_proofread",
+            "enabled": true,
             "provider": "deepseek",
             "batch_size": 50,
             "overlap_size": 10,
             "max_retries": 3,
-            "max_concurrent": 5
-        }
+            "timeout": 300
+        },
+        "segments_file": "${{ stages.faster_whisper.transcribe_audio.output.segments_file }}"
     }
 }
 ```
+
+**参数格式说明**:
+- **节点参数**: 直接在工作流请求的根级别指定，如 `"wservice.ai_optimize_subtitles": {...}`
+- **动态引用**: 使用 `${{ stages.<stage_name>.output.<field_name> }}` 格式引用其他阶段的输出
+- **向後兼容**: 仍然支持 `input_params.params.subtitle_optimization` 格式
+- **参数解析**: 所有节点参数在工作流执行前都会通过 `parameter_resolver` 进行解析，支持嵌套参数和动态引用
+
+**注意事项**:
+- 参数名称必须与节点任务名称完全匹配（如 `wservice.ai_optimize_subtitles`）
+- `subtitle_optimization` 是节点参数内的子对象，用于存放优化配置
+- 如果同时使用新格式（旧格式兼容）和动态引用，新的参数格式优先级更高
 
 **响应格式**:
 ```json
 {
     "success": true,
-    "workflow_id": "workflow-12345",
+    "workflow_id": "fd8cfc21-2d3f-47d7-86fc-2550adc86a37",
     "stages": {
-        "subtitle_extraction": {
-            "status": "completed",
-            "output": "/share/subtitles/extracted.json"
+        "faster_whisper.transcribe_audio": {
+            "status": "SUCCESS",
+            "output": {
+                "segments_file": "/share/workflows/fd8cfc21/segments.json",
+                "transcribe_duration": 125.5,
+                "language": "zh"
+            },
+            "duration": 125.5
         },
-        "subtitle_optimization": {
-            "status": "completed",
-            "output": "/share/subtitles/optimized.json",
-            "stats": {
-                "processing_time": 12.5,
+        "wservice.ai_optimize_subtitles": {
+            "status": "SUCCESS",
+            "output": {
+                "optimized_file_path": "/share/workflows/fd8cfc21/optimized.json",
+                "original_file_path": "/share/workflows/fd8cfc21/original.json",
+                "provider_used": "deepseek",
+                "processing_time": 45.2,
                 "commands_applied": 15,
-                "success_rate": 0.95
-            }
+                "batch_mode": true,
+                "batches_count": 3,
+                "segments_count": 100
+            },
+            "duration": 45.2
         }
+    }
+}
+```
+
+### 2. 查询工作流状态
+
+**端点**: `GET /v1/workflows/{workflow_id}`
+
+**描述**: 查询工作流执行状态和结果
+
+**响应格式**:
+```json
+{
+    "success": true,
+    "workflow_id": "fd8cfc21-2d3f-47d7-86fc-2550adc86a37",
+    "stages": {
+        "wservice.ai_optimize_subtitles": {
+            "status": "SUCCESS|FAILED|IN_PROGRESS|PENDING",
+            "output": {
+                "optimized_file_path": "...",
+                "processing_time": 45.2,
+                "commands_applied": 15
+            },
+            "error": "错误信息（如果失败）",
+            "duration": 45.2
+        }
+    }
+}
+```
+
+### 3. GPU锁监控API
+
+**端点**: `GET /v1/gpu-locks/status`
+
+**描述**: 查询GPU资源锁状态（用于调试）
+
+**响应格式**:
+```json
+{
+    "success": true,
+    "gpu_locks": {
+        "active_locks": 2,
+        "locked_resources": ["gpu:0", "gpu:1"],
+        "lock_details": [
+            {
+                "lock_id": "wservice-gpu-lock",
+                "workflow_id": "fd8cfc21",
+                "acquired_at": "2025-11-07T10:00:00Z",
+                "expires_at": "2025-11-07T10:30:00Z"
+            }
+        ]
     }
 }
 ```
@@ -95,61 +181,207 @@ context = {
 
 ## Python SDK
 
-### 安装依赖
+### 直接调用Celery任务
 
 ```python
-from services.common.subtitle import SubtitleOptimizer
+from services.workers.wservice.app.tasks import ai_optimize_subtitles
+
+# 构造工作流上下文
+context = {
+    "workflow_id": "test-123",
+    "shared_storage_path": "/share/workflows/test-123",
+    "stages": {
+        "faster_whisper.transcribe_audio": {
+            "status": "SUCCESS",
+            "output": {
+                "segments_file": "/share/workflows/test-123/segments.json",
+                "audio_path": "/share/workflows/test-123/audio.wav",
+                "language": "zh"
+            }
+        }
+    },
+    "input_params": {
+        "params": {
+            "subtitle_optimization": {
+                "enabled": True,
+                "provider": "deepseek",
+                "batch_size": 50,
+                "overlap_size": 10,
+                "max_retries": 3,
+                "timeout": 300
+            }
+        }
+    }
+}
+
+# 异步调用任务
+result = ai_optimize_subtitles.delay(context)
+
+# 等待完成并获取结果
+try:
+    output = result.get(timeout=600)
+    print("任务执行成功!")
+    print(f"工作流ID: {output['workflow_id']}")
+    print(f"状态: {output['stages']['wservice.ai_optimize_subtitles']['status']}")
+    if output['stages']['wservice.ai_optimize_subtitles']['status'] == 'SUCCESS':
+        print(f"优化文件: {output['stages']['wservice.ai_optimize_subtitles']['output']['optimized_file_path']}")
+except Exception as e:
+    print(f"任务执行失败: {e}")
 ```
 
-### 基本用法
+### 使用字幕优化模块
 
 ```python
-# 创建优化器
+from services.common.subtitle.subtitle_optimizer import SubtitleOptimizer
+
+# 创建优化器实例
 optimizer = SubtitleOptimizer(
     provider="deepseek",
     batch_size=50,
     overlap_size=10,
     max_retries=3,
-    max_concurrent=5,
-    batch_threshold=100
+    timeout=300
 )
 
+# 准备输入数据
+input_data = {
+    "metadata": {
+        "task_name": "faster_whisper.transcribe_audio",
+        "workflow_id": "test-123",
+        "language": "zh"
+    },
+    "segments": [
+        {
+            "id": 1,
+            "start": 0.0,
+            "end": 2.94,
+            "text": "你的儿子王思聪是一个网红"
+        }
+    ]
+}
+
 # 执行优化
-result = optimizer.optimize_subtitles(
-    transcribe_file_path="/path/to/input.json",
-    output_file_path="/path/to/output.json",
-    prompt_file_path="/path/to/prompt.md"
+result = optimizer.optimize(
+    segments_data=input_data,
+    output_path="/share/workflows/test-123/optimized.json"
 )
 
 # 检查结果
 if result['success']:
-    print(f"优化成功，耗时: {result['processing_time']:.2f}秒")
+    print(f"优化成功!")
+    print(f"处理时间: {result['processing_time']:.2f}秒")
     print(f"应用指令: {result['commands_applied']}个")
-    print(f"输出文件: {result['file_path']}")
+    print(f"使用提供商: {result['provider_used']}")
+    if result.get('batch_mode'):
+        print(f"批处理模式: {result['batches_count']}个批次")
 else:
-    print(f"优化失败: {result['error']}")
+    print(f"优化失败: {result.get('error')}")
 ```
 
-### 高级配置
+### 大体积字幕处理示例
 
 ```python
-# 大体积字幕处理
-optimizer = SubtitleOptimizer(
-    provider="gemini",
-    batch_size=100,
-    overlap_size=15,
-    max_retries=5,
-    timeout=600,
-    max_concurrent=10,
-    batch_threshold=200
-)
+from services.common.subtitle.subtitle_optimizer import SubtitleOptimizer
+from services.common.subtitle.concurrent_batch_processor import ConcurrentBatchProcessor
 
-# 单批处理（小字幕）
+# 创建大体积字幕优化器
 optimizer = SubtitleOptimizer(
     provider="deepseek",
-    batch_size=50,
-    batch_threshold=1000  # 即使字幕很多也使用单批
+    batch_size=100,        # 增大批次大小
+    overlap_size=20,       # 增加重叠
+    max_retries=3,
+    timeout=300,
+    batch_threshold=100    # 超过100条启用批处理
 )
+
+# 模拟大量字幕数据
+large_data = {
+    "metadata": {"task_name": "test"},
+    "segments": [
+        {"id": i, "start": i*3.0, "end": (i+1)*3.0, "text": f"这是第{i}段字幕"}
+        for i in range(1, 501)  # 500条字幕
+    ]
+}
+
+# 执行优化（自动使用批处理）
+result = optimizer.optimize(
+    segments_data=large_data,
+    output_path="/share/workflows/test-123/large_optimized.json"
+)
+
+print(f"总片段数: {result['segments_count']}")
+print(f"批处理数: {result['batches_count']}")
+print(f"总处理时间: {result['processing_time']:.2f}秒")
+```
+
+### AI提供商工厂使用
+
+```python
+from services.common.subtitle.ai_providers import AIProviderFactory
+
+# 获取AI提供商实例
+provider = AIProviderFactory.get_provider(
+    provider_name="deepseek",
+    api_key="your-api-key",
+    model="deepseek-chat",
+    timeout=300,
+    max_retries=3
+)
+
+# 调用AI服务
+response = provider.call_ai(
+    prompt="优化以下字幕：...",
+    system_prompt="你是一个专业的字幕校对员...",
+    max_tokens=2000,
+    temperature=0.1
+)
+
+print(f"AI响应: {response['text']}")
+print(f"Token使用: {response['usage']}")
+```
+
+### 指令解析和执行
+
+```python
+from services.common.subtitle.ai_command_parser import AICommandParser
+from services.common.subtitle.command_executor import CommandExecutor
+
+# 解析AI响应中的指令
+parser = AICommandParser()
+commands = parser.parse_commands(ai_response_text)
+
+print(f"解析到 {len(commands)} 个指令")
+for cmd in commands:
+    print(f"- {cmd['command']}: {cmd}")
+
+# 执行指令
+executor = CommandExecutor(segments_data)
+result = executor.execute_commands(commands)
+
+print(f"成功执行: {result['successful_count']}个")
+print(f"失败: {result['failed_count']}个")
+print(f"处理后数据: {result['optimized_segments']}")
+```
+
+### 性能监控
+
+```python
+from services.common.subtitle.metrics import OptimizationMetrics
+
+# 创建指标收集器
+metrics = OptimizationMetrics()
+
+# 在优化过程中记录指标
+with metrics.track_optimization("test-optimization"):
+    # 执行优化
+    result = optimizer.optimize(...)
+
+# 获取性能报告
+report = metrics.get_report()
+print(f"总请求数: {report['total_requests']}")
+print(f"平均处理时间: {report['avg_duration']:.2f}秒")
+print(f"错误率: {report['error_rate']:.2%}")
+print(f"成功率: {report['success_rate']:.2%}")
 ```
 
 ## API提供商配置
@@ -323,69 +555,251 @@ config = {
 
 ### 常见错误
 
-#### 1. 指令验证失败
+#### 1. 工作流上下文错误
 
 ```json
 {
     "success": false,
-    "error": "有 2 个指令验证失败",
-    "details": [
-        {
-            "command_index": 0,
-            "command_type": "MOVE",
-            "errors": ["源片段ID 999 不存在"]
-        },
-        {
-            "command_index": 1,
-            "command_type": "UPDATE",
-            "errors": ["UPDATE指令缺少changes字段"]
-        }
-    ]
+    "error": "工作流上下文无效",
+    "error_type": "VALUE_ERROR",
+    "details": {
+        "required_fields": ["workflow_id", "stages"],
+        "missing_fields": ["stages"]
+    }
 }
 ```
 
-#### 2. API调用失败
+#### 1.5. 参数解析错误
+
+```json
+{
+    "success": false,
+    "error": "参数解析失败: 在阶段 'faster_whisper.transcribe_audio' 的输出中未找到字段 'segments_file'",
+    "error_type": "PARAM_RESOLVE_ERROR",
+    "details": {
+        "parameter": "segments_file",
+        "reference": "${{ stages.faster_whisper.transcribe_audio.output.segments_file }}",
+        "available_fields": ["audio_path", "language", "transcribe_duration"]
+    }
+}
+```
+
+**解决方案**:
+- 检查引用的阶段是否已成功完成
+- 确认字段名称是否正确
+- 验证阶段输出的实际字段名
+
+#### 2. 转录文件不存在
+
+```json
+{
+    "success": false,
+    "error": "转录文件不存在: /share/workflows/test/segments.json",
+    "error_type": "FILE_NOT_FOUND",
+    "stage": "wservice.ai_optimize_subtitles",
+    "workflow_id": "test-123"
+}
+```
+
+#### 3. AI API调用失败
 
 ```json
 {
     "success": false,
     "error": "AI API调用失败: 401 Unauthorized",
+    "error_type": "AI_API_ERROR",
     "details": {
         "provider": "deepseek",
         "retry_count": 3,
-        "last_error": "Invalid API key"
-    }
+        "max_retries": 3,
+        "last_error": "Invalid API key",
+        "request_timeout": 300
+    },
+    "stage": "wservice.ai_optimize_subtitles"
 }
 ```
 
-#### 3. 批处理失败
+#### 4. AI响应格式无效
 
 ```json
 {
     "success": false,
-    "error": "有 2 个批次处理失败",
+    "error": "AI响应格式无效",
+    "error_type": "AI_RESPONSE_INVALID",
+    "details": {
+        "provider": "gemini",
+        "response_snippet": "无法解析JSON响应",
+        "expected_format": "JSON数组格式的指令列表"
+    },
+    "stage": "wservice.ai_optimize_subtitles"
+}
+```
+
+#### 5. 批处理失败
+
+```json
+{
+    "success": false,
+    "error": "批处理部分失败",
+    "error_type": "BATCH_ERROR",
     "details": {
         "total_batches": 5,
         "success_batches": 3,
         "failed_batches": 2,
-        "errors": [
-            "批次1: 网络超时",
-            "批次3: 指令验证失败"
+        "batch_details": [
+            {
+                "batch_id": 1,
+                "status": "FAILED",
+                "error": "网络超时"
+            },
+            {
+                "batch_id": 3,
+                "status": "FAILED",
+                "error": "指令验证失败"
+            }
         ]
     }
 }
 ```
 
-### 错误代码
+#### 6. 文件写入失败
 
-| 错误类型 | HTTP状态码 | 说明 |
-|----------|------------|------|
-| `VALIDATION_ERROR` | 400 | 指令验证失败 |
-| `API_ERROR` | 502 | AI API调用失败 |
-| `TIMEOUT_ERROR` | 408 | 请求超时 |
-| `BATCH_ERROR` | 422 | 批处理失败 |
-| `FILE_ERROR` | 404 | 文件不存在 |
-| `CONFIG_ERROR` | 500 | 配置错误 |
+```json
+{
+    "success": false,
+    "error": "无法写入优化文件: /share/workflows/test/optimized.json",
+    "error_type": "FILE_WRITE_ERROR",
+    "details": {
+        "output_path": "/share/workflows/test/optimized.json",
+        "error": "Permission denied",
+        "available_space": "1.2GB"
+    }
+}
+```
+
+#### 7. 配置文件错误
+
+```json
+{
+    "success": false,
+    "error": "字幕优化配置错误",
+    "error_type": "CONFIG_ERROR",
+    "details": {
+        "parameter": "provider",
+        "invalid_value": "invalid_provider",
+        "expected_values": ["deepseek", "gemini", "zhipu", "volcengine", "openai_compatible"]
+    }
+}
+```
+
+#### 8. System Prompt文件不存在
+
+```json
+{
+    "success": false,
+    "error": "System prompt文件不存在",
+    "error_type": "PROMPT_NOT_FOUND",
+    "details": {
+        "prompt_path": "/app/prompts/subtitle_optimization.md",
+        "search_paths": [
+            "/app/prompts/",
+            "/share/prompts/"
+        ]
+    }
+}
+```
+
+### 错误代码说明
+
+| 错误类型 | 状态码 | HTTP状态码 | 说明 | 解决方案 |
+|----------|--------|------------|------|----------|
+| `VALUE_ERROR` | INVALID_INPUT | 400 | 输入参数无效 | 检查工作流上下文格式 |
+| `PARAM_RESOLVE_ERROR` | INVALID_INPUT | 400 | 动态参数解析失败 | 检查${{}}引用格式和字段名 |
+| `FILE_NOT_FOUND` | FILE_ERROR | 404 | 转录文件不存在 | 确保faster_whisper任务已成功完成 |
+| `FILE_READ_ERROR` | FILE_ERROR | 400 | 无法读取转录文件 | 检查文件权限和格式 |
+| `FILE_WRITE_ERROR` | FILE_ERROR | 500 | 无法写入优化文件 | 检查存储空间和权限 |
+| `AI_API_ERROR` | EXTERNAL_ERROR | 502 | AI API调用失败 | 检查API密钥和网络连接 |
+| `AI_RESPONSE_INVALID` | PARSE_ERROR | 400 | AI响应格式无效 | 检查System Prompt配置 |
+| `PROMPT_NOT_FOUND` | CONFIG_ERROR | 500 | Prompt文件不存在 | 确保prompt文件存在 |
+| `BATCH_ERROR` | PROCESSING_ERROR | 422 | 批处理失败 | 查看批处理详情日志 |
+| `TIMEOUT_ERROR` | TIMEOUT | 408 | 请求超时 | 增加timeout参数值 |
+| `CONFIG_ERROR` | CONFIG_ERROR | 500 | 配置错误 | 检查参数值和类型 |
+
+### 错误恢复策略
+
+#### 1. 自动重试机制
+- AI API错误：指数退避重试（1s, 2s, 4s...）
+- 最大重试次数：3次（可配置）
+- 网络超时：自动重试
+
+#### 2. 优雅降级
+- 批处理失败：使用原始字幕
+- AI响应无效：跳过该批次
+- 部分指令失败：继续执行其他指令
+
+#### 3. 错误日志
+- 记录详细错误信息（仅限调试模式）
+- 脱敏处理敏感信息（API密钥等）
+- 工作流状态持久化
+
+### 调试建议
+
+```python
+# 启用详细日志
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# 检查工作流状态
+from services.common.state_manager import StateManager
+state_mgr = StateManager()
+status = state_mgr.get_workflow_status("test-123")
+print(status)
+
+# 查看Redis中的工作流数据
+import redis
+r = redis.Redis(host='redis', db=3)
+workflow_data = r.get('workflow_state:test-123')
+print(workflow_data)
+
+# 检查GPU锁状态
+locks = r.keys('gpu_lock:*')
+print(f"活跃GPU锁: {len(locks)}")
+```
+
+## 性能指标
+
+### Prometheus监控指标
+
+```python
+# 任务执行指标
+ai_subtitle_optimization_requests_total  # 总请求数
+ai_subtitle_optimization_duration_seconds  # 处理时间
+ai_subtitle_optimization_errors_total  # 错误数
+ai_subtitle_optimization_segments_count  # 处理片段数
+ai_subtitle_optimization_commands_applied  # 应用指令数
+
+# 批处理指标
+ai_subtitle_optimization_api_calls_total  # API调用数
+ai_subtitle_optimization_api_duration_seconds  # API调用时间
+ai_subtitle_optimization_batch_count  # 批处理数量
+```
+
+### 性能基准
+
+| 字幕条数 | 批处理模式 | 平均时间 | 95%分位时间 | 内存使用 |
+|----------|------------|----------|-------------|----------|
+| < 50 | 单批 | 5-10秒 | 15秒 | 200MB |
+| 50-200 | 批处理 | 20-60秒 | 90秒 | 500MB |
+| 200-500 | 批处理 | 60-120秒 | 180秒 | 1GB |
+| > 500 | 批处理 | 2-5分钟 | 8分钟 | 2GB |
+
+### 优化建议
+
+1. **小文件** (<50条): 禁用批处理，避免额外开销
+2. **中文件** (50-200条): 批处理大小50，重叠10
+3. **大文件** (>200条): 批处理大小100，重叠20
+4. **网络慢**: 增加timeout到600秒
+5. **API限制**: 降低并发数到2-3
 
 ## 性能配置
 

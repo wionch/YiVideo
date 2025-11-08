@@ -63,7 +63,8 @@
       "Bash(sed -i 's/\\r$//' .specify/scripts/bash/check-prerequisites.sh)",
       "Bash(sudo mkdir -p /mnt/d/WSL2/docker/YiVideo/tests/unit /mnt/d/WSL2/docker/YiVideo/tests/integration /mnt/d/WSL2/docker/YiVideo/tests/e2e)",
       "Bash(sudo touch /mnt/d/WSL2/docker/YiVideo/tests/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/unit/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/integration/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/e2e/__init__.py)",
-      "mcp__sequential-thinking__sequentialthinking"
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(git fetch:*)"
     ],
     "deny": [
       "Bash(docker build:*)"

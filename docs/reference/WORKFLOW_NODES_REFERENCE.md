@@ -12,6 +12,7 @@
 - [Pyannote Audio 服务节点](#pyannote-audio-服务节点) - 说话人分离
 - [PaddleOCR 服务节点](#paddleocr-服务节点) - 文字识别
 - [IndexTTS 服务节点](#indextts-服务节点) - 语音合成
+- [WService 字幕优化服务节点](#wservice-字幕优化服务节点) - AI字幕优化
 
 ## 通用参数说明
 
@@ -67,8 +68,12 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 **功能描述**：随机从视频中抽取指定数量的关键帧图片，保存为 JPEG 格式。
 
 **输入参数**：
-- `video_path` (string, 必需): 视频文件路径
-- `keyframe_sample_count` (int, 可选): 抽取帧数，默认 100
+- `video_path` (string, 全局必需): 视频文件路径，在API请求的顶层提供。
+- `keyframe_sample_count` (int, 节点可选): 抽取帧数，默认 100。
+
+**配置来源说明**：
+- `video_path`: **全局参数** (在API请求的顶层 `video_path` 字段提供)
+- `keyframe_sample_count`: **节点参数** (在请求体中的 `ffmpeg.extract_keyframes` 对象内提供)
 
 **输出格式**：
 ```json
@@ -105,7 +110,10 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 **功能描述**：使用 FFmpeg 从视频中提取音频，转换为 16kHz 单声道 WAV 格式。
 
 **输入参数**：
-- `video_path` (string, 必需): 视频文件路径
+- `video_path` (string, 全局必需): 视频文件路径，在API请求的顶层提供。
+
+**配置来源说明**：
+- `video_path`: **全局参数** (在API请求的顶层 `video_path` 字段提供)
 
 **输出格式**：
 ```json
@@ -145,8 +153,12 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 **功能描述**：通过外部脚本并发解码视频，根据字幕区域坐标裁剪出所有字幕帧图片。
 
 **输入参数**：
-- `video_path` (string, 必需): 视频文件路径
-- `decode_processes` (int, 可选): 解码进程数，默认 10
+- `video_path` (string, 全局必需): 视频文件路径，在API请求的顶层提供。
+- `decode_processes` (int, 节点可选): 解码进程数，默认 10。
+
+**配置来源说明**：
+- `video_path`: **全局参数** (在API请求的顶层 `video_path` 字段提供)
+- `decode_processes`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供)
 
 **前置依赖**：
 - `paddleocr.detect_subtitle_area` - 必须先完成字幕区域检测
@@ -191,22 +203,21 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 **功能描述**：根据字幕时间戳将音频分割为小片段，为语音生成提供参考音频。支持多种输出格式和按说话人分组存储。
 
 **输入参数**：
-- `audio_path` (string, 可选): 指定音频文件路径（优先级高于自动检测），支持 `${{}}` 格式的参数引用
-  - 可以在节点特定参数中提供：`"ffmpeg.split_audio_segments": {"audio_path": "..."}`
-  - 也可以在全局参数中提供：`"audio_path": "..."`
-- `subtitle_path` (string, 可选): 指定字幕文件路径（优先级高于自动检测），支持 `${{}}` 格式的参数引用
-  - 可以在节点特定参数中提供：`"ffmpeg.split_audio_segments": {"subtitle_path": "..."}`
-  - 也可以在全局参数中提供：`"subtitle_path": "..."`
-- `output_format` (string, 可选): 输出格式，默认 "wav"
-- `sample_rate` (int, 可选): 采样率，默认 16000
-- `channels` (int, 可选): 声道数，默认 1
-- `min_segment_duration` (float, 可选): 最小片段时长，默认 1.0秒
-- `max_segment_duration` (float, 可选): 最大片段时长，默认 30.0秒
-- `group_by_speaker` (bool, 可选): 按说话人分组，默认 false
-- `include_silence` (bool, 可选): 包含静音片段，默认 false
-- `enable_concurrent` (bool, 可选): 启用并发分割，默认 true
-- `max_workers` (int, 可选): 最大工作线程数，默认 8
-- `concurrent_timeout` (int, 可选): 并发超时时间，默认 600秒
+- `audio_path` (string, 节点可选): 指定音频文件路径，支持 `${{...}}` 格式的参数引用。如果未提供，将启用智能检测。
+- `subtitle_path` (string, 节点可选): 指定字幕文件路径，支持 `${{...}}` 格式的参数引用。如果未提供，将启用智能检测。
+- `output_format` (string, 节点可选): 输出格式，默认 "wav"。
+- `sample_rate` (int, 节点可选): 采样率，默认 16000。
+- `channels` (int, 节点可选): 声道数，默认 1。
+- `min_segment_duration` (float, 节点可选): 最小片段时长，默认 1.0秒。
+- `max_segment_duration` (float, 节点可选): 最大片段时长，默认 30.0秒。
+- `group_by_speaker` (bool, 节点可选): 按说话人分组，默认 false。
+- `include_silence` (bool, 节点可选): 包含静音片段，默认 false。
+- `enable_concurrent` (bool, 节点可选): 启用并发分割，默认 true。
+- `max_workers` (int, 节点可选): 最大工作线程数，默认 8。
+- `concurrent_timeout` (int, 节点可选): 并发超时时间，默认 600秒。
+
+**配置来源说明**：
+- 所有列出的参数均为 **节点参数**，在请求体中的 `ffmpeg.split_audio_segments` 对象内提供。
 
 **参数引用支持**：
 所有字符串类型的参数都支持 `${{ stages.<stage_name>.output.<field_name> }}` 格式的动态引用，例如：
@@ -309,20 +320,22 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 **功能描述**：使用 faster-whisper 模型对音频进行语音识别，生成包含词级时间戳的精确转录结果。
 
 **输入参数**：
-- `audio_path` (string, 可选): 指定音频文件路径（自动检测优先）
-- `model_size` (string, 可选): 模型大小，默认 "base"
-  - 可选值：`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v2`
-- `language` (string, 可选): 指定语言代码，如 "zh", "en"（不指定则自动检测）
-- `task` (string, 可选): 任务类型，默认 "transcribe"
-  - 可选值：`transcribe`, `translate`
-- `beam_size` (int, 可选): 束搜索大小，默认 5
-- `vad_filter` (bool, 可选): 启用语音活动检测过滤，默认 true
-- `word_timestamps` (bool, 可选): 启用词级时间戳，默认 true
-- `condition_on_previous_text` (bool, 可选): 基于前文条件化，默认 true
-- `temperature` (float, 可选): 采样温度，默认 0.0
-- `compression_ratio_threshold` (float, 可选): 压缩比阈值，默认 2.4
-- `logprob_threshold` (float, 可选): 对数概率阈值，默认 -1.0
-- `no_speech_threshold` (float, 可选): 无语音阈值，默认 0.6
+- `audio_path` (string, 节点可选): 指定音频文件路径，以覆盖智能音频源选择逻辑。支持 `${{...}}` 格式的参数引用。
+
+**配置来源说明**：
+- `audio_path`: **节点参数** (在请求体中的 `faster_whisper.transcribe_audio` 对象内提供)。
+- **其他模型参数**: 如模型大小 (`model_size`)、语言 (`language`)、计算精度、VAD过滤等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
+
+**全局配置示例 (config.yml)**:
+```yaml
+faster_whisper_service:
+  default_model: "large-v3"
+  default_device: "cuda"
+  default_compute_type: "float16"
+  default_language: "zh"
+  default_word_timestamps: true
+  default_vad_filter: true
+```
 
 **智能音频源选择**（按优先级）：
 1. 人声音频 (`audio_separator.separate_vocals` 输出的 `vocal_audio`)
@@ -429,17 +442,23 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 **功能描述**：将转录数据转换为标准字幕格式，支持 SRT、VTT、ASS 等格式，并可选择集成说话人信息。
 
 **输入参数**：
-- `segments_file` (string, 可选): 指定转录数据文件路径（自动检测优先）
-- `diarization_file` (string, 可选): 指定说话人分离数据文件路径（可选）
-- `output_formats` (list, 可选): 输出格式列表，默认 ["srt"]
-  - 可选值：`"srt"`, `"vtt"`, `"ass"`, `"txt"`, `"json"`
-- `max_chars_per_line` (int, 可选): 每行最大字符数，默认 42
-- `max_lines_per_subtitle` (int, 可选): 每个字幕最大行数，默认 2
-- `min_subtitle_duration` (float, 可选): 最小字幕时长，默认 1.0秒
-- `max_subtitle_duration` (float, 可选): 最大字幕时长，默认 7.0秒
-- `include_speaker_labels` (bool, 可选): 包含说话人标签，默认 true（如果提供说话人数据）
-- `speaker_label_format` (string, 可选): 说话人标签格式，默认 "[SPEAKER_00]"
-  - 可选值：`"[SPEAKER_00]"`, `"Speaker 1:"`, `"发言人A:"`
+- `segments_file` (string, 节点可选): 指定转录数据文件路径，以覆盖智能输入源选择逻辑。
+- `diarization_file` (string, 节点可选): 指定说话人分离数据文件路径，以覆盖智能输入源选择逻辑。
+
+**配置来源说明**：
+- `segments_file`, `diarization_file`: **节点参数** (在请求体中的 `faster_whisper.generate_subtitle_files` 对象内提供)。
+- **其他字幕格式化参数**: 如 `output_formats`, `max_chars_per_line`, `max_lines_per_subtitle` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
+
+**全局配置示例 (config.yml)**:
+```yaml
+faster_whisper_service:
+  # ... (other faster_whisper settings)
+  subtitle_options:
+    max_chars_per_line: 42
+    max_lines_per_subtitle: 2
+    min_subtitle_duration: 1.0
+    include_speaker_labels: true
+```
 
 **前置依赖**：
 - `faster_whisper.transcribe_audio` (必需)
@@ -522,109 +541,20 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 
 ---
 
-### 3. faster_whisper.correct_subtitles
-
-使用 LLM 对字幕进行智能校正和优化。
-
-**功能描述**：基于大语言模型对转录字幕进行语法纠错、标点优化、语义理解等智能处理。
-
-**输入参数**：
-- `subtitle_path` (string, 可选): 待校正的字幕文件路径。**支持 `${{...}}` 动态引用**，优先级高于自动检测。
-- `correction_model` (string, 可选): 校正模型，默认 "gemini"
-  - 可选值：`"gemini"`, `"gpt4"`, `"claude"`
-- `correction_type` (string, 可选): 校正类型，默认 "comprehensive"
-  - 可选值：`"basic"`, `"comprehensive"`, `"proofread"`, `"localization"`
-- `target_language` (string, 可选): 目标语言，默认 "zh"
-- `preserve_timestamps` (bool, 可选): 保持时间戳不变，默认 true
-- `batch_size` (int, 可选): 批处理大小，默认 10
-- `api_key` (string, 可选): LLM API 密钥
-
-**前置依赖**：
-- `faster_whisper.generate_subtitle_files` (如果未通过参数指定 `subtitle_path`)
-
-**智能输入源选择**（按优先级）：
-1.  **`subtitle_path` 参数**: 如果在节点参数中明确提供了 `subtitle_path`（支持动态引用），将直接使用该文件。
-2.  **`generate_subtitle_files` 的输出 (带说话人)**: 自动寻找 `faster_whisper.generate_subtitle_files` 阶段输出的 `speaker_srt_path`。
-3.  **`generate_subtitle_files` 的输出 (基础SRT)**: 最后尝试使用 `faster_whisper.generate_subtitle_files` 阶段输出的 `subtitle_path`。
-
-**输出格式**：
-```json
-{
-  "corrected_subtitle_path": "/share/workflows/{workflow_id}/subtitles/video_corrected.srt",
-  "correction_report": "/share/workflows/{workflow_id}/subtitles/correction_report.json",
-  "original_segments": 125,
-  "corrected_segments": 125,
-  "corrections_count": 15,
-  "correction_types": ["punctuation", "grammar", "spacing"],
-  "processing_time": 25.3
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_audio",
-      "faster_whisper.transcribe_audio",
-      "faster_whisper.generate_subtitle_files",
-      "faster_whisper.correct_subtitles"
-    ]
-  },
-  "faster_whisper.correct_subtitles": {
-    "correction_model": "gemini",
-    "correction_type": "comprehensive",
-    "target_language": "zh",
-    "preserve_timestamps": true
-  }
-}
-```
-
-**使用动态参数示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "...",
-      "faster_whisper.generate_subtitle_files",
-      "faster_whisper.correct_subtitles"
-    ]
-  },
-  "faster_whisper.correct_subtitles": {
-    "subtitle_path": "${{ stages.faster_whisper.generate_subtitle_files.output.speaker_srt_path }}",
-    "correction_model": "gpt4"
-  }
-}
-```
-
-**依赖关系**：
-- `faster_whisper.generate_subtitle_files` (如果未通过 `subtitle_path` 参数指定输入)
-
-**校正类型说明**：
-- `basic`: 基础标点和空格校正
-- `comprehensive`: 全面语法、语义、标点校正
-- `proofread`: 专业校对级别
-- `localization`: 本地化处理，包括文化适配
-
-**注意事项**：
-- 需要配置相应的 LLM API 密钥
-- 处理时间取决于文本长度和模型响应速度
-- 批处理可以优化 API 调用成本
-
----
-
-### 4. faster_whisper.merge_for_tts
+### 3. faster_whisper.merge_for_tts
 
 为TTS参考音合并字幕片段。
 
 **功能描述**：根据TTS参考音的时长要求（如3-10秒），智能地合并或分割字幕片段，以生成最适合作为语音合成参考的片段。
 
 **输入参数**：
-- `subtitle_path` (string, 可选): 指定要处理的字幕数据文件（.json格式）。如果提供，将覆盖节点的自动输入文件查找逻辑。
-- `min_duration` (float, 可选): 合并后片段的最小目标时长（秒），默认 3.0。
-- `max_duration` (float, 可选): 合并后片段的最大目标时长（秒），默认 10.0。
-- `max_gap` (float, 可选): 相邻字幕片段之间允许合并的最大时间间隔（秒），默认 1.0。
-- `split_on_punctuation` (bool, 可选): 是否在遇到句末标点符号时强制停止合并，默认 `false`。
+- `subtitle_path` (string, 节点可选): 指定要处理的字幕数据文件（.json或.srt格式），以覆盖智能输入源选择逻辑。支持 `${{...}}` 格式的参数引用。
+- `max_duration` (float, 节点可选): 合并后片段的最大目标时长（秒）。
+- `max_gap` (float, 节点可选): 相邻字幕片段之间允许合并的最大时间间隔（秒）。
+- `single_speaker_priority` (bool, 节点可选): 是否优先合并单个说话人的片段。
+
+**配置来源说明**：
+- 所有列出的参数均为 **节点参数**，在请求体中的 `faster_whisper.merge_for_tts` 对象内提供。
 
 **前置依赖**：
 - `faster_whisper.generate_subtitle_files` (必需)
@@ -672,6 +602,64 @@ Faster-Whisper 服务提供基于 faster-whisper 模型的语音识别和字幕�
 
 ---
 
+### 4. faster_whisper.correct_subtitles
+
+使用大语言模型（LLM）对生成的字幕进行基础的校对和润色。
+
+**功能描述**：调用配置的AI提供商，对SRT字幕文件进行自动校正，修正明显的拼写和语法错误。这是一个轻量级的校正过程，与 `wservice.ai_optimize_subtitles` 的深度优化不同。
+
+**输入参数**：
+- `subtitle_path` (string, 可选): 指定待校正的SRT字幕文件路径。如果未提供，将自动从上游任务（如 `faster_whisper.generate_subtitle_files`）获取。
+- `subtitle_correction` (object, 全局参数): 字幕校正的全局配置，在API请求的顶层提供。
+  - `enabled` (bool): 是否启用校正，默认 `false`。
+  - `provider` (string): AI 提供商，支持 "deepseek", "gemini", "zhipu", "volcengine", "openai_compatible"。
+  - `api_key` (string, 可选): 如果未在环境变量中设置，可在此处提供。
+
+**配置来源说明**：
+- `subtitle_path`: 节点参数
+- `subtitle_correction`: 全局参数 (API请求顶层)
+
+**前置依赖**：
+- `faster_whisper.generate_subtitle_files` (必需)
+
+**输出格式**：
+```json
+{
+  "corrected_subtitle_path": "/share/workflows/{workflow_id}/subtitles/video_corrected.srt",
+  "provider_used": "gemini",
+  "corrections_made": 25,
+  "processing_time": 30.5
+}
+```
+
+**使用示例**：
+```json
+{
+  "video_path": "/share/videos/example.mp4",
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "faster_whisper.transcribe_audio",
+      "faster_whisper.generate_subtitle_files",
+      "faster_whisper.correct_subtitles"
+    ],
+    "subtitle_correction": {
+      "enabled": true,
+      "provider": "gemini"
+    }
+  }
+}
+```
+
+**依赖关系**：
+- 必需：`faster_whisper.generate_subtitle_files`
+
+**注意事项**：
+- 这是一个基础校正功能，更复杂的优化（如风格、流畅度）应使用 `wservice.ai_optimize_subtitles`。
+- 需要在环境变量或请求中配置相应AI提供商的API密钥。
+- 此节点直接修改原始的 `subtitle_path` 对应的文件，并生成一个带 `_corrected` 后缀的新文件。
+
+---
 ## Audio Separator 服务节点
 
 Audio Separator 服务提供基于 UVR-MDX 模型的专业音频分离功能，支持人声与伴奏的高质量分离。
@@ -683,20 +671,24 @@ Audio Separator 服务提供基于 UVR-MDX 模型的专业音频分离功能，�
 **功能描述**：使用 UVR-MDX 深度学习模型将音频分离为人声和各种乐器轨道，支持高质量分离和GPU加速。
 
 **输入参数**：
-- `audio_path` (string, 可选): 指定音频文件路径（自动检测优先）
-- `audio_separator_config` (object, 可选): 分离配置对象
-  - `quality_mode` (string): 质量模式，默认 "default"
-    - 可选值：`"fast"`, `"default"`, `"high_quality"`
-  - `model_type` (string): 模型类型，默认 "demucs"
-    - 可选值：`"demucs"`, `"mdx"`, `"vr"`
-  - `model_name` (string): 具体模型名称（可选，自动选择）
-  - `use_vocal_optimization` (bool): 启用人声优化，默认 false
-  - `vocal_optimization_level` (int): 人声优化级别，默认 0
-  - `output_format` (string): 输出格式，默认 "flac"
-  - `sample_rate` (int): 输出采样率，默认 44100
-  - `bit_rate` (int): 比特率，默认 320
-  - `normalize` (bool): 音量标准化，默认 true
-  - `amp_factor` (float): 放大系数，默认 1.0
+- `audio_path` (string, 节点可选): 指定音频文件路径，以覆盖智能音频源选择逻辑。
+- `model_name` (string, 节点可选): 指定要使用的分离模型名称，如 "UVR-MDX-NET-Inst_HQ_3"。如果未提供，则根据 `quality_mode` 从全局配置中选择默认模型。
+- `quality_mode` (string, 节点可选): 质量模式，会影响默认模型的选择。可选值: `"fast"`, `"default"`, `"high_quality"`。
+
+**配置来源说明**：
+- `audio_path`, `model_name`, `quality_mode`: **节点参数** (在请求体中的 `audio_separator.separate_vocals` 对象内提供)。
+- **其他分离参数**: 如 `output_format`, `sample_rate`, `normalize` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
+
+**全局配置示例 (config.yml)**:
+```yaml
+audio_separator_service:
+  # ... (other settings)
+  separator_options:
+    output_format: "flac"
+    sample_rate: 44100
+    bit_rate: 320
+    normalize: true
+```
 
 **智能音频源选择**（按优先级）：
 1. `ffmpeg.extract_audio` 输出的 `audio_path`
@@ -794,13 +786,23 @@ Pyannote Audio 服务提供基于 pyannote-audio 模型的专业说话人分离�
 **功能描述**：使用 pyannote-audio 深度学习模型识别音频中的不同说话人，生成精确的说话人时间戳。
 
 **输入参数**：
-- `audio_path` (string, 可选): 指定音频文件路径（自动检测优先）
-- `hf_token` (string, 必需): Hugging Face 访问令牌
-- `num_speakers` (int, 可选): 说话人数量（不指定则自动检测）
-- `min_duration_on` (float, 可选): 最小说话时长，默认 0.5秒
-- `min_duration_off` (float, 可选): 最小静音时长，默认 0.3秒
-- `overlap_ratio` (float, 可选): 重叠比例，默认 0.5
-- `model_name` (string, 可选): 模型名称，默认 "pyannote/speaker-diarization-3.1"
+- `audio_path` (string, 节点可选): 指定音频文件路径，以覆盖智能音频源选择逻辑。
+
+**配置来源说明**：
+- `audio_path`: **节点参数** (在请求体中的 `pyannote_audio.diarize_speakers` 对象内提供)。
+- **Hugging Face Token (`hf_token`)**: **必需的全局配置**，请在 `config.yml` 中设置。
+- **其他 diarization 参数**: 如 `num_speakers`, `min_duration_on`, `min_duration_off` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
+
+**全局配置示例 (config.yml)**:
+```yaml
+pyannote_audio_service:
+  # ... (other settings)
+  diarization_options:
+    hf_token: "your_hugging_face_token_here"
+    num_speakers: 0 # 0 for auto-detection
+    min_duration_on: 0.5
+    min_duration_off: 0.3
+```
 
 **智能音频源选择**（按优先级）：
 1. 人声音频 (`audio_separator.separate_vocals` 输出的 `vocal_audio`)
@@ -909,146 +911,6 @@ Pyannote Audio 服务提供基于 pyannote-audio 模型的专业说话人分离�
 
 ---
 
-### 2. pyannote_audio.get_speaker_segments
-
-获取已完成的说话人分离结果，提供详细的分析数据。
-
-**功能描述**：从已完成的说话人分离结果中提取详细信息，包括说话人统计、时间分布等。
-
-**输入参数**：
-- `diarization_file` (string, 必需): 说话人分离结果文件路径
-- `analysis_level` (string, 可选): 分析级别，默认 "basic"
-  - 可选值：`"basic"`, `"detailed"`, `"statistics"`
-- `time_window` (float, 可选): 时间窗口大小（秒），默认 10.0
-- `include_confidence` (bool, 可选): 包含置信度信息，默认 true
-
-**前置依赖**：
-- `pyannote_audio.diarize_speakers`
-
-**输出格式**：
-```json
-{
-  "speaker_segments": "/share/workflows/{workflow_id}/diarization/detailed_segments.json",
-  "statistics": {
-    "total_speakers": 2,
-    "total_speech_duration": 280.5,
-    "silence_duration": 45.2,
-    "speaker_durations": {
-      "SPEAKER_00": 165.3,
-      "SPEAKER_01": 115.2
-    },
-    "speaker_percentages": {
-      "SPEAKER_00": 58.9,
-      "SPEAKER_01": 41.1
-    },
-    "average_segment_duration": 8.5,
-    "segment_count": 33
-  },
-  "analysis_summary": {
-    "dominant_speaker": "SPEAKER_00",
-    "speaker_turns": 15,
-    "overlap_instances": 2,
-    "confidence_average": 0.92
-  }
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_audio",
-      "pyannote_audio.diarize_speakers",
-      "pyannote_audio.get_speaker_segments"
-    ]
-  },
-  "pyannote_audio.get_speaker_segments": {
-    "analysis_level": "detailed",
-    "include_confidence": true,
-    "time_window": 15.0
-  }
-}
-```
-
-**依赖关系**：
-- `pyannote_audio.diarize_speakers`
-
-**分析级别说明**：
-- `basic`: 基础说话人段信息
-- `detailed`: 详细的时间分析和统计
-- `statistics`: 完整的统计分析报告
-
----
-
-### 3. pyannote_audio.validate_diarization
-
-验证说话人分离结果的质量和准确性。
-
-**功能描述**：对说话人分离结果进行质量评估，包括置信度分析、异常检测等。
-
-**输入参数**：
-- `diarization_file` (string, 必需): 说话人分离结果文件路径
-- `validation_criteria` (object, 可选): 验证标准
-  - `min_confidence_threshold` (float): 最小置信度阈值，默认 0.8
-  - `max_silence_gap` (float): 最大静音间隔，默认 5.0秒
-  - `min_segment_duration` (float): 最小片段时长，默认 1.0秒
-  - `check_speaker_consistency` (bool): 检查说话人一致性，默认 true
-
-**前置依赖**：
-- `pyannote_audio.diarize_speakers`
-
-**输出格式**：
-```json
-{
-  "validation_result": "/share/workflows/{workflow_id}/diarization/validation_report.json",
-  "quality_score": 0.91,
-  "validation_passed": true,
-  "issues_found": [],
-  "recommendations": [
-    "说话人分离质量良好",
-    "建议使用当前结果进行后续处理"
-  ],
-  "detailed_metrics": {
-    "average_confidence": 0.92,
-    "low_confidence_segments": 2,
-    "suspicious_gaps": 0,
-    "speaker_consistency_score": 0.95
-  }
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_audio",
-      "pyannote_audio.diarize_speakers",
-      "pyannote_audio.validate_diarization"
-    ]
-  },
-  "pyannote_audio.validate_diarization": {
-    "validation_criteria": {
-      "min_confidence_threshold": 0.85,
-      "max_silence_gap": 3.0,
-      "check_speaker_consistency": true
-    }
-  }
-}
-```
-
-**依赖关系**：
-- `pyannote_audio.diarize_speakers`
-
-**验证指标**：
-- 置信度分布分析
-- 异常短片段检测
-- 不合理静音间隔检测
-- 说话人一致性验证
-
----
-
 ## PaddleOCR 服务节点
 
 PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用于视频字幕的检测、识别和处理。
@@ -1110,46 +972,10 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 **功能描述**：将多个独立的字幕条图像拼接成一张大图，便于批量 OCR 处理。
 
 **输入参数**：
-- 无直接参数，从工作流上下文自动获取裁剪图像
+- 无直接节点参数。
 
-**前置依赖**：
-- `ffmpeg.crop_subtitle_images`
-
-**输出格式**：
-```json
-{
-  "stitched_image_path": "/share/workflows/{workflow_id}/ocr/stitched_subtitles.png",
-  "image_count": 125,
-  "stitching_method": "grid_layout",
-  "output_dimensions": {
-    "width": 1920,
-    "height": 3000
-  }
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_keyframes",
-      "paddleocr.detect_subtitle_area",
-      "ffmpeg.crop_subtitle_images",
-      "paddleocr.create_stitched_images"
-    ]
-  }
-}
-```
-
-**依赖关系**：
-- `ffmpeg.crop_subtitle_images`
-
-**拼接特性**：
-- 自动网格布局优化
-- 保持图像清晰度
-- 高效存储格式
-- 支持大量图像拼接
+**配置来源说明**：
+- **拼接参数**: 如 `concat_batch_size`, `stitching_workers` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。
 
 ---
 
@@ -1160,61 +986,10 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 **功能描述**：使用 PaddleOCR 模型对字幕图像进行高精度文字识别。
 
 **输入参数**：
-- `ocr_config` (object, 可选): OCR 配置
-  - `lang` (string): 语言设置，默认 "ch"
-    - 可选值：`"ch"`, `"en"`, `"chinese_cht"`, `"ko"`, `"ja"`
-  - `use_angle_cls` (bool): 启用文字方向分类，默认 true
-  - `use_gpu` (bool): 使用 GPU 加速，默认 true
-  - `det_model_dir` (string): 检测模型路径（可选）
-  - `rec_model_dir` (string): 识别模型路径（可选）
-  - `cls_model_dir` (string): 分类模型路径（可选）
+- 无直接节点参数。
 
-**前置依赖**：
-- `paddleocr.create_stitched_images`
-
-**输出格式**：
-```json
-{
-  "ocr_results_path": "/share/workflows/{workflow_id}/ocr/ocr_results.json",
-  "raw_text_path": "/share/workflows/{workflow_id}/ocr/raw_text.txt",
-  "subtitles_extracted": 125,
-  "confidence_average": 0.92,
-  "processing_time": 45.2,
-  "languages_detected": ["ch"]
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_keyframes",
-      "paddleocr.detect_subtitle_area",
-      "ffmpeg.crop_subtitle_images",
-      "paddleocr.create_stitched_images",
-      "paddleocr.perform_ocr"
-    ]
-  },
-  "paddleocr.perform_ocr": {
-    "ocr_config": {
-      "lang": "ch",
-      "use_angle_cls": true,
-      "use_gpu": true
-    }
-  }
-}
-```
-
-**依赖关系**：
-- `paddleocr.create_stitched_images`
-
-**OCR 特性**：
-- 支持多语言识别
-- 高精度文字检测
-- GPU 加速处理
-- 置信度评估
-- 自动文字方向校正
+**配置来源说明**：
+- **OCR参数**: 如 `lang`, `use_angle_cls`, `use_gpu` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。
 
 ---
 
@@ -1225,74 +1000,10 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 **功能描述**：对 OCR 识别结果进行智能后处理，包括时间对齐、文本校正、格式化等。
 
 **输入参数**：
-- `postprocess_config` (object, 可选): 后处理配置
-  - `time_alignment_method` (string): 时间对齐方法，默认 "linear"
-    - 可选值：`"linear"`, `"adaptive"`, `"manual"`
-  - `text_correction` (bool): 启用文本校正，默认 true
-  - `output_format` (string): 输出格式，默认 "srt"
-    - 可选值：`"srt"`, `"vtt"`, `"ass"`, `"txt"`
-  - `min_confidence_threshold` (float): 最小置信度阈值，默认 0.8
-  - `merge_similar_subtitles` (bool): 合并相似字幕，默认 true
+- 无直接节点参数。
 
-**前置依赖**：
-- `paddleocr.perform_ocr`
-
-**输出格式**：
-```json
-{
-  "final_subtitle_path": "/share/workflows/{workflow_id}/ocr/final_subtitles.srt",
-  "corrected_text_path": "/share/workflows/{workflow_id}/ocr/corrected_text.txt",
-  "processing_summary": {
-    "original_subtitles": 125,
-    "final_subtitles": 118,
-    "merged_subtitles": 7,
-    "low_confidence_filtered": 5,
-    "corrections_made": 12
-  },
-  "quality_metrics": {
-    "average_confidence": 0.94,
-    "text_accuracy": 0.97,
-    "timing_accuracy": 0.92
-  }
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_keyframes",
-      "paddleocr.detect_subtitle_area",
-      "ffmpeg.crop_subtitle_images",
-      "paddleocr.create_stitched_images",
-      "paddleocr.perform_ocr",
-      "paddleocr.postprocess_and_finalize"
-    ]
-  },
-  "paddleocr.postprocess_and_finalize": {
-    "postprocess_config": {
-      "time_alignment_method": "adaptive",
-      "text_correction": true,
-      "output_format": "srt",
-      "min_confidence_threshold": 0.85
-    }
-  }
-}
-```
-
-**依赖关系**：
-- `paddleocr.perform_ocr`
-
-**后处理功能**：
-- 智能时间轴对齐
-- OCR 错误校正
-- 重复字幕合并
-- 低置信度内容过滤
-- 字幕格式标准化
-- 质量评估和统计
-
----
+**配置来源说明**：
+- **后处理参数**: 如 `time_alignment_method`, `text_correction`, `min_confidence_threshold` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。
 
 ## IndexTTS 服务节点
 
@@ -1305,18 +1016,14 @@ IndexTTS 服务提供基于 IndexTTS2 模型的高质量语音合成功能，支
 **功能描述**：基于 IndexTTS2 模型，使用参考音频的音色特征合成新的语音内容，支持情感表达。
 
 **输入参数**：
-- `text` (string, 必需): 要合成的文本内容
-- `output_path` (string, 必需): 输出音频文件路径
-- `spk_audio_prompt` (string, 必需): 说话人参考音频路径
-- `emo_audio_prompt` (string, 可选): 情感参考音频路径
-- `emotion_alpha` (float, 可选): 情感强度系数，默认 1.0
-- `emotion_vector` (array, 可选): 情感向量（高级参数）
-- `emotion_text` (string, 可选): 情感描述文本
-- `use_emo_text` (bool, 可选): 使用情感文本，默认 false
-- `use_random` (bool, 可选): 随机情感变化，默认 false
-- `speed` (float, 可选): 语速控制，默认 1.0
-- `max_text_tokens_per_segment` (int, 可选): 每段最大token数，默认 120
-- `verbose` (bool, 可选): 详细输出，默认 false
+- `text` (string, 必需): 要合成的文本内容。
+- `output_path` (string, 必需): 输出音频文件路径。
+- `spk_audio_prompt` (string, 必需): 说话人参考音频路径。
+- `emo_audio_prompt` (string, 可选): 情感参考音频路径。
+
+**配置来源说明**：
+- `text`, `output_path`, `spk_audio_prompt`, `emo_audio_prompt`: **节点参数** (在请求体中的 `indextts.generate_speech` 对象内提供)。
+- **其他合成参数**: 如 `emotion_alpha`, `speed` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
 
 **输出格式**：
 ```json
@@ -1380,108 +1087,89 @@ IndexTTS 服务提供基于 IndexTTS2 模型的高质量语音合成功能，支
 
 ---
 
-### 2. indextts.list_voice_presets
+## WService 字幕优化服务节点
 
-列出可用的语音预设和音色选项。
+WService 服务提供基于 AI 大模型的字幕智能优化功能，支持错别字修正、语法优化、标点符号补充和口头禅过滤。
 
-**功能描述**：获取系统中可用的语音预设、音色模型和参考音频列表。
+### 1. wservice.ai_optimize_subtitles
+
+对转录后的字幕进行 AI 智能优化和校正。
+
+**功能描述**：使用 AI 大模型对 faster_whisper 转录的字幕进行智能优化，包括错别字修正、标点补充、口头禅删除、语法优化等。支持大体积字幕的并发处理，采用滑窗重叠分段策略保证上下文完整性。
 
 **输入参数**：
-- `preset_type` (string, 可选): 预设类型过滤
-  - 可选值：`"all"`, `"custom"`, `"builtin"`
-- `include_details` (bool, 可选): 包含详细信息，默认 false
+- `segments_file` (string, 节点可选): 输入字幕文件路径。**支持 `${{...}}` 动态引用**，优先级高于自动检测。
+
+**配置来源说明**：
+- `segments_file`: **节点参数** (在请求体中的 `wservice.ai_optimize_subtitles` 对象内提供)。
+- `subtitle_optimization` (object): **全局参数** (在API请求的顶层 `workflow_config` 内提供)，包含 `enabled`, `provider`, `batch_size` 等所有优化相关的微调选项。
+
+**前置依赖**：
+- `faster_whisper.transcribe_audio` (必需)
+
+**智能输入源选择**（按优先级）：
+1. **`segments_file` 参数**: 如果在节点参数中明确提供了 `segments_file`（支持动态引用），将直接使用该文件
+2. **`faster_whisper.transcribe_audio` 输出**: 自动获取 `faster_whisper.transcribe_audio` 阶段的 `segments_file`
 
 **输出格式**：
 ```json
 {
-  "presets": [
-    {
-      "name": "female_news",
-      "display_name": "新闻女声",
-      "language": "zh",
-      "gender": "female",
-      "description": "清晰专业的新闻播报音色",
-      "reference_audio": "/share/presets/female_news.wav",
-      "emotion_samples": [
-        "/share/presets/female_news_neutral.wav",
-        "/share/presets/female_news_happy.wav"
-      ]
-    }
-  ],
-  "total_count": 5,
-  "supported_languages": ["zh", "en"],
-  "preset_categories": ["news", "storytelling", "conversation"]
+  "optimized_file_path": "/share/workflows/{workflow_id}/optimized.json",
+  "original_file_path": "/share/workflows/{workflow_id}/original.json",
+  "provider_used": "deepseek",
+  "processing_time": 12.5,
+  "commands_applied": 15,
+  "batch_mode": true,
+  "batches_count": 3,
+  "segments_count": 100
 }
 ```
 
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": ["indextts.list_voice_presets"]
-  },
-  "indextts.list_voice_presets": {
-    "preset_type": "all",
-    "include_details": true
-  }
-}
-```
+**依赖关系**：
+- 必需：`faster_whisper.transcribe_audio`
+- 后置：`faster_whisper.generate_subtitle_files` (可选)
 
-**依赖关系**：无
+**注意事项**：
+- `subtitle_optimization` 的详细参数（如 `provider`, `batch_size`）应在API请求顶层的 `workflow_config` 中配置。
+- 需要配置相应AI提供商的API密钥。
+- 大体积字幕自动启用分段处理。
+- 滑窗重叠机制确保上下文完整性。
 
 ---
 
-### 3. indextts.get_model_info
+### 2. wservice.correct_subtitles
 
-获取 IndexTTS 模型的详细信息和技术规格。
+使用 LLM 对字幕进行智能校正和优化。
 
-**功能描述**：返回当前加载的 IndexTTS 模型的技术信息、配置参数和支持的功能。
+**功能描述**：基于大语言模型对转录字幕进行语法纠错、标点优化、语义理解等智能处理。
 
 **输入参数**：
-- `include_performance_info` (bool, 可选): 包含性能信息，默认 false
+- `subtitle_path` (string, 节点可选): 待校正的字幕文件路径。**支持 `${{...}}` 动态引用**，优先级高于自动检测。
+
+**配置来源说明**：
+- `subtitle_path`: **节点参数** (在请求体中的 `wservice.correct_subtitles` 对象内提供)。
+- **其他校正参数**: 如 `correction_model`, `correction_type`, `target_language` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
+
+**智能输入源选择**（按优先级）：
+1.  **`subtitle_path` 参数**: 如果在节点参数中明确提供了 `subtitle_path`（支持动态引用），将直接使用该文件。
+2.  **`generate_subtitle_files` 的输出 (带说话人)**: 自动寻找 `faster_whisper.generate_subtitle_files` 阶段输出的 `speaker_srt_path`。
+3.  **`generate_subtitle_files` 的输出 (基础SRT)**: 最后尝试使用 `faster_whisper.generate_subtitle_files` 阶段输出的 `subtitle_path`。
 
 **输出格式**：
 ```json
 {
-  "model_name": "IndexTTS2",
-  "version": "2.0.1",
-  "sample_rate": 22050,
-  "channels": 1,
-  "supported_languages": ["zh", "en", "ja", "ko"],
-  "max_text_length": 1000,
-  "model_size": "2.3GB",
-  "capabilities": {
-    "voice_cloning": true,
-    "emotion_control": true,
-    "speed_control": true,
-    "multi_language": true
-  },
-  "performance_info": {
-    "gpu_memory_required": "4GB",
-    "average_generation_time": "0.8x realtime",
-    "supported_batch_sizes": [1, 2, 4, 8]
-  },
-  "recommendations": {
-    "optimal_reference_duration": "3-10 seconds",
-    "best_audio_formats": ["wav", "flac"],
-    "recommended_sample_rate": 22050
-  }
+  "corrected_subtitle_path": "/share/workflows/{workflow_id}/subtitles/video_corrected.srt",
+  "correction_report": "/share/workflows/{workflow_id}/subtitles/correction_report.json",
+  "processing_time": 25.3
 }
 ```
 
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": ["indextts.get_model_info"]
-  },
-  "indextts.get_model_info": {
-    "include_performance_info": true
-  }
-}
-```
+**依赖关系**：
+- `faster_whisper.generate_subtitle_files` (如果未通过 `subtitle_path` 参数指定输入)
 
-**依赖关系**：无
+**注意事项**：
+- 校正相关的微调参数（如 `correction_model`）应在 `config.yml` 中配置。
+- 需要配置相应的 LLM API 密钥。
 
 ---
 

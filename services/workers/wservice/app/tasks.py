@@ -407,8 +407,18 @@ def ai_optimize_subtitles(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
-        # 获取配置参数
-        optimization_params = workflow_context.input_params.get('params', {}).get('subtitle_optimization', {})
+        # 获取节点特定参数
+        node_params = workflow_context.input_params.get('node_params', {})
+        stage_params = node_params.get(stage_name, {})
+        # 向后兼容：也检查params.subtitle_optimization格式
+        optimization_params = stage_params.get('subtitle_optimization',
+                                               workflow_context.input_params.get('params', {}).get('subtitle_optimization', {}))
+
+        # 使用参数解析器处理动态引用
+        from services.common.parameter_resolver import resolve_parameters
+        resolved_params = resolve_parameters(stage_params, workflow_context.model_dump())
+        optimization_params = resolved_params.get('subtitle_optimization', optimization_params)
+
         is_enabled = optimization_params.get('enabled', False)
 
         if not is_enabled:
@@ -426,12 +436,19 @@ def ai_optimize_subtitles(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 开始AI字幕优化 - 提供商: {provider}, "
                    f"批次大小: {batch_size}, 重叠大小: {overlap_size}")
 
-        # 获取转录文件路径
-        faster_whisper_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
-        if not faster_whisper_stage:
-            raise FileNotFoundError("未找到faster_whisper转录阶段")
+        # 获取转录文件路径（支持动态引用或自定义路径）
+        segments_file = optimization_params.get('segments_file')
+        if not segments_file:
+            # 尝试从参数中获取，支持动态引用
+            segments_file = resolved_params.get('segments_file')
 
-        segments_file = faster_whisper_stage.output.get('segments_file')
+        if not segments_file:
+            # 回退到从faster_whisper阶段自动获取
+            faster_whisper_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
+            if not faster_whisper_stage:
+                raise FileNotFoundError("未找到faster_whisper转录阶段")
+            segments_file = faster_whisper_stage.output.get('segments_file')
+
         if not segments_file or not os.path.exists(segments_file):
             raise FileNotFoundError(f"未找到转录文件: {segments_file}")
 
