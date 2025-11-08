@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 {
   "permissions": {
     "allow": [
@@ -73,3 +74,93 @@
   },
   "outputStyle": "engineer-professional"
 }
+=======
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(docker-compose:*)",
+      "Read(//d/**)",
+      "WebSearch",
+      "WebFetch(domain:*)",
+      "Bash(uv sync:*)",
+      "Read(//d//**)",
+      "Bash(docker logs:*)",
+      "mcp__serena__find_file",
+      "mcp__serena__list_dir",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker stats:*)",
+      "mcp__serena__get_current_config",
+      "mcp__serena__activate_project",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__onboarding",
+      "Bash(curl:*)",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__find_symbol",
+      "mcp__serena__search_for_pattern",
+      "mcp__serena__*",
+      "mcp__serena__find_referencing_symbols",
+      "mcp__serena__read_file",
+      "Bash(find:*)",
+      "mcp__serena__prepare_for_new_conversation",
+      "Bash(nvidia-smi:*)",
+      "Bash(md5sum:*)",
+      "Bash(mkdir:*)",
+      "Bash(docker:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "mcp__exa__web_search_exa",
+      "WebFetch(domain:www.volcengine.com)",
+      "WebFetch(domain:api-docs.deepseek.com)",
+      "WebFetch(domain:www.datastudios.org)",
+      "mcp__serena__think_about_collected_information",
+      "Bash(git rev-parse:*)",
+      "Bash(cp:*)",
+      "Bash(echo:*)",
+      "Bash(BACKUP_DIR=\"/tmp/faster_whisper_cleanup_backup/20251021_144458\")",
+      "WebFetch(domain:opennmt.net)",
+      "WebFetch(domain:docs.pytorch.org)",
+      "mcp__serena__read_memory",
+      "Bash(git checkout:*)",
+      "Bash(for file in .claude/agents/*.md)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(head:*)",
+      "Bash(done)",
+      "Bash(git stash:*)",
+      "Bash(git pull:*)",
+      "Bash(git merge:*)",
+      "Bash(git merge-base:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(git ls-tree:*)",
+      "Bash(sed -E 's/.*\\/([0-9]+)-.*/\\1/')",
+      "Bash(bash .specify/scripts/bash/setup-plan.sh --json)",
+      "Bash(xargs -r sed -i 's/\\r$//')",
+      "Bash(sed -i 's/\\r$//' .specify/scripts/bash/check-prerequisites.sh)",
+      "Bash(sudo mkdir -p /mnt/d/WSL2/docker/YiVideo/tests/unit /mnt/d/WSL2/docker/YiVideo/tests/integration /mnt/d/WSL2/docker/YiVideo/tests/e2e)",
+      "Bash(sudo touch /mnt/d/WSL2/docker/YiVideo/tests/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/unit/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/integration/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/e2e/__init__.py)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(git fetch:*)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh:*)",
+      "SlashCommand(/speckit.analyze 002-migrate-nongpu-nodes)",
+      "SlashCommand(/speckit.plan:*)",
+      "Bash(.specify/scripts/bash/setup-plan.sh:*)",
+      "Bash(bash:*)",
+      "Bash(python3 -c:*)",
+      "Bash(cat:*)",
+      "Bash(/mnt/d/WSL2/docker/YiVideo/services/workers/faster_whisper_service/app/tasks.py:*)",
+      "Bash(/tmp/part1.txt)",
+      "Bash(/tmp/wservice_tasks.txt)",
+      "Bash(/tmp/fixed_final.txt)",
+      "Bash(/tmp/final_doc.txt)",
+      "Bash(/tmp/final_doc_v2.txt)"
+    ],
+    "deny": [
+      "Bash(docker build:*)"
+    ],
+    "ask": []
+  },
+  "outputStyle": "engineer-professional"
+}
+>>>>>>> 002-migrate-nongpu-nodes
