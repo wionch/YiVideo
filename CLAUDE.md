@@ -88,11 +88,12 @@ YiVideo 是一个基于动态工作流引擎的AI视频处理平台，采用微�
 - **api_gateway**: 系统总入口和大脑，负责HTTP请求处理、工作流动态构建、状态管理
 - **AI Workers**: 独立的Celery worker服务
   - `ffmpeg_service`: 视频处理、音频提取和分割
-  - `faster_whisper_service`: 语音识别(ASR)，基于faster-whisper高版本支持
+  - `faster_whisper_service`: 语音识别(ASR)，基于faster-whisper，仅GPU推理功能
   - `pyannote_audio_service`: 说话人分离，基于pyannote-audio独立部署
   - `paddleocr_service`: 光学字符识别(OCR)
   - `audio_separator_service`: 人声/背景音分离
   - `indextts_service`: 文本转语音(TTS)
+  - `wservice`: 字幕AI优化服务，负责字幕生成、合并、校正等非GPU任务
 
 ### 基础设施
 - **Redis**: 作为Celery消息队列、状态存储、分布式锁和缓存

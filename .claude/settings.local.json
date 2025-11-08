@@ -64,7 +64,20 @@
       "Bash(sudo mkdir -p /mnt/d/WSL2/docker/YiVideo/tests/unit /mnt/d/WSL2/docker/YiVideo/tests/integration /mnt/d/WSL2/docker/YiVideo/tests/e2e)",
       "Bash(sudo touch /mnt/d/WSL2/docker/YiVideo/tests/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/unit/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/integration/__init__.py /mnt/d/WSL2/docker/YiVideo/tests/e2e/__init__.py)",
       "mcp__sequential-thinking__sequentialthinking",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh:*)",
+      "SlashCommand(/speckit.analyze 002-migrate-nongpu-nodes)",
+      "SlashCommand(/speckit.plan:*)",
+      "Bash(.specify/scripts/bash/setup-plan.sh:*)",
+      "Bash(bash:*)",
+      "Bash(python3 -c:*)",
+      "Bash(cat:*)",
+      "Bash(/mnt/d/WSL2/docker/YiVideo/services/workers/faster_whisper_service/app/tasks.py:*)",
+      "Bash(/tmp/part1.txt)",
+      "Bash(/tmp/wservice_tasks.txt)",
+      "Bash(/tmp/fixed_final.txt)",
+      "Bash(/tmp/final_doc.txt)",
+      "Bash(/tmp/final_doc_v2.txt)"
     ],
     "deny": [
       "Bash(docker build:*)"

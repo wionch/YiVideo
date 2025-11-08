@@ -435,231 +435,6 @@ faster_whisper_service:
 
 ---
 
-### 2. faster_whisper.generate_subtitle_files
-
-基于转录数据和可选的说话人数据生成多种格式的字幕文件。
-
-**功能描述**：将转录数据转换为标准字幕格式，支持 SRT、VTT、ASS 等格式，并可选择集成说话人信息。
-
-**输入参数**：
-- `segments_file` (string, 节点可选): 指定转录数据文件路径，以覆盖智能输入源选择逻辑。
-- `diarization_file` (string, 节点可选): 指定说话人分离数据文件路径，以覆盖智能输入源选择逻辑。
-
-**配置来源说明**：
-- `segments_file`, `diarization_file`: **节点参数** (在请求体中的 `faster_whisper.generate_subtitle_files` 对象内提供)。
-- **其他字幕格式化参数**: 如 `output_formats`, `max_chars_per_line`, `max_lines_per_subtitle` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
-
-**全局配置示例 (config.yml)**:
-```yaml
-faster_whisper_service:
-  # ... (other faster_whisper settings)
-  subtitle_options:
-    max_chars_per_line: 42
-    max_lines_per_subtitle: 2
-    min_subtitle_duration: 1.0
-    include_speaker_labels: true
-```
-
-**前置依赖**：
-- `faster_whisper.transcribe_audio` (必需)
-- `pyannote_audio.diarize_speakers` (可选，用于说话人信息)
-
-**输出格式**：
-```json
-{
-  "subtitle_path": "/share/workflows/{workflow_id}/subtitles/video.srt",
-  "vtt_path": "/share/workflows/{workflow_id}/subtitles/video.vtt",
-  "ass_path": "/share/workflows/{workflow_id}/subtitles/video.ass",
-  "txt_path": "/share/workflows/{workflow_id}/subtitles/video.txt",
-  "speaker_srt_path": "/share/workflows/{workflow_id}/subtitles/video_with_speakers.srt",
-  "speaker_json_path": "/share/workflows/{workflow_id}/subtitles/video_with_speakers.json",
-  "word_timestamps_json_path": "/share/workflows/{workflow_id}/subtitles/video_word_timestamps.json",
-  "segments_count": 125,
-  "words_count": 850,
-  "total_duration": 300.5,
-  "languages_detected": ["zh"]
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_audio",
-      "faster_whisper.transcribe_audio",
-      "faster_whisper.generate_subtitle_files"
-    ]
-  },
-  "faster_whisper.generate_subtitle_files": {
-    "output_formats": ["srt", "vtt", "ass"],
-    "max_chars_per_line": 40,
-    "include_speaker_labels": true,
-    "speaker_label_format": "[SPEAKER_00]"
-  }
-}
-```
-
-**带说话人信息的示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_audio",
-      "audio_separator.separate_vocals",
-      "faster_whisper.transcribe_audio",
-      "pyannote_audio.diarize_speakers",
-      "faster_whisper.generate_subtitle_files"
-    ]
-  },
-  "faster_whisper.generate_subtitle_files": {
-    "output_formats": ["srt", "json"],
-    "include_speaker_labels": true,
-    "speaker_label_format": "Speaker 1:"
-  }
-}
-```
-
-**依赖关系**：
-- 必需：`faster_whisper.transcribe_audio`
-- 可选：`pyannote_audio.diarize_speakers`
-
-**输出文件说明**：
-
-1. **基础 SRT 文件** (`subtitle_path`): 标准字幕格式
-2. **带说话人 SRT** (`speaker_srt_path`): 包含说话人信息的字幕
-3. **带说话人 JSON** (`speaker_json_path`): 完整的结构化数据
-4. **词级时间戳 JSON** (`word_timestamps_json_path`): 精确的词级时间戳
-5. **其他格式**: VTT、ASS、TXT 等
-
-**字幕格式特性**：
-- 自动断行和时长优化
-- 智能合并短字幕
-- 拆分长字幕
-- 时间轴平滑处理
-- 说话人切换边界优化
-
----
-
-### 3. faster_whisper.merge_for_tts
-
-为TTS参考音合并字幕片段。
-
-**功能描述**：根据TTS参考音的时长要求（如3-10秒），智能地合并或分割字幕片段，以生成最适合作为语音合成参考的片段。
-
-**输入参数**：
-- `subtitle_path` (string, 节点可选): 指定要处理的字幕数据文件（.json或.srt格式），以覆盖智能输入源选择逻辑。支持 `${{...}}` 格式的参数引用。
-- `max_duration` (float, 节点可选): 合并后片段的最大目标时长（秒）。
-- `max_gap` (float, 节点可选): 相邻字幕片段之间允许合并的最大时间间隔（秒）。
-- `single_speaker_priority` (bool, 节点可选): 是否优先合并单个说话人的片段。
-
-**配置来源说明**：
-- 所有列出的参数均为 **节点参数**，在请求体中的 `faster_whisper.merge_for_tts` 对象内提供。
-
-**前置依赖**：
-- `faster_whisper.generate_subtitle_files` (必需)
-
-**输出格式**：
-```json
-{
-  "merged_tts_segments_path": "/share/workflows/{workflow_id}/subtitles/video_with_speakers_merged_for_tts.json",
-  "statistics": {
-    "original_count": 223,
-    "merged_count": 85,
-    "merged_items": 138
-  }
-}
-```
-
-**使用示例**：
-```json
-{
-  "workflow_config": {
-    "workflow_chain": [
-      "...",
-      "faster_whisper.generate_subtitle_files",
-      "faster_whisper.merge_for_tts"
-    ]
-  },
-  "faster_whisper.merge_for_tts": {
-    "min_duration": 3.5,
-    "max_duration": 9.5
-  }
-}
-```
-
-**依赖关系**：
-- 必需：`faster_whisper.generate_subtitle_files`
-
-**智能输入源选择**（按优先级）：
-1.  **`subtitle_path` 参数**: 如果在节点参数中明确提供了 `subtitle_path`，将直接使用该文件。
-2.  **`generate_subtitle_files` 的输出**: 自动寻找 `faster_whisper.generate_subtitle_files` 阶段的输出，并优先使用 `speaker_json_path`。
-3.  **`transcribe_audio` 的输出**: 最后尝试使用 `faster_whisper.transcribe_audio` 阶段输出的 `segments_file`。
-
-**注意事项**：
-- 为了工作流的清晰和可控，推荐显式提供 `subtitle_path` 参数。
-- 输出的JSON文件包含了符合TTS要求的优化片段，可用于后续的音频分割和语音合成。
-
----
-
-### 4. faster_whisper.correct_subtitles
-
-使用大语言模型（LLM）对生成的字幕进行基础的校对和润色。
-
-**功能描述**：调用配置的AI提供商，对SRT字幕文件进行自动校正，修正明显的拼写和语法错误。这是一个轻量级的校正过程，与 `wservice.ai_optimize_subtitles` 的深度优化不同。
-
-**输入参数**：
-- `subtitle_path` (string, 可选): 指定待校正的SRT字幕文件路径。如果未提供，将自动从上游任务（如 `faster_whisper.generate_subtitle_files`）获取。
-- `subtitle_correction` (object, 全局参数): 字幕校正的全局配置，在API请求的顶层提供。
-  - `enabled` (bool): 是否启用校正，默认 `false`。
-  - `provider` (string): AI 提供商，支持 "deepseek", "gemini", "zhipu", "volcengine", "openai_compatible"。
-  - `api_key` (string, 可选): 如果未在环境变量中设置，可在此处提供。
-
-**配置来源说明**：
-- `subtitle_path`: 节点参数
-- `subtitle_correction`: 全局参数 (API请求顶层)
-
-**前置依赖**：
-- `faster_whisper.generate_subtitle_files` (必需)
-
-**输出格式**：
-```json
-{
-  "corrected_subtitle_path": "/share/workflows/{workflow_id}/subtitles/video_corrected.srt",
-  "provider_used": "gemini",
-  "corrections_made": 25,
-  "processing_time": 30.5
-}
-```
-
-**使用示例**：
-```json
-{
-  "video_path": "/share/videos/example.mp4",
-  "workflow_config": {
-    "workflow_chain": [
-      "ffmpeg.extract_audio",
-      "faster_whisper.transcribe_audio",
-      "faster_whisper.generate_subtitle_files",
-      "faster_whisper.correct_subtitles"
-    ],
-    "subtitle_correction": {
-      "enabled": true,
-      "provider": "gemini"
-    }
-  }
-}
-```
-
-**依赖关系**：
-- 必需：`faster_whisper.generate_subtitle_files`
-
-**注意事项**：
-- 这是一个基础校正功能，更复杂的优化（如风格、流畅度）应使用 `wservice.ai_optimize_subtitles`。
-- 需要在环境变量或请求中配置相应AI提供商的API密钥。
-- 此节点直接修改原始的 `subtitle_path` 对应的文件，并生成一个带 `_corrected` 后缀的新文件。
-
----
 ## Audio Separator 服务节点
 
 Audio Separator 服务提供基于 UVR-MDX 模型的专业音频分离功能，支持人声与伴奏的高质量分离。
@@ -1127,7 +902,7 @@ WService 服务提供基于 AI 大模型的字幕智能优化功能，支持错�
 
 **依赖关系**：
 - 必需：`faster_whisper.transcribe_audio`
-- 后置：`faster_whisper.generate_subtitle_files` (可选)
+- 后置：`wservice.generate_subtitle_files` (可选)
 
 **注意事项**：
 - `subtitle_optimization` 的详细参数（如 `provider`, `batch_size`）应在API请求顶层的 `workflow_config` 中配置。
@@ -1152,8 +927,8 @@ WService 服务提供基于 AI 大模型的字幕智能优化功能，支持错�
 
 **智能输入源选择**（按优先级）：
 1.  **`subtitle_path` 参数**: 如果在节点参数中明确提供了 `subtitle_path`（支持动态引用），将直接使用该文件。
-2.  **`generate_subtitle_files` 的输出 (带说话人)**: 自动寻找 `faster_whisper.generate_subtitle_files` 阶段输出的 `speaker_srt_path`。
-3.  **`generate_subtitle_files` 的输出 (基础SRT)**: 最后尝试使用 `faster_whisper.generate_subtitle_files` 阶段输出的 `subtitle_path`。
+2.  **`generate_subtitle_files` 的输出 (带说话人)**: 自动寻找 `wservice.generate_subtitle_files` 阶段输出的 `speaker_srt_path`。
+3.  **`generate_subtitle_files` 的输出 (基础SRT)**: 最后尝试使用 `wservice.generate_subtitle_files` 阶段输出的 `subtitle_path`。
 
 **输出格式**：
 ```json
@@ -1165,11 +940,228 @@ WService 服务提供基于 AI 大模型的字幕智能优化功能，支持错�
 ```
 
 **依赖关系**：
-- `faster_whisper.generate_subtitle_files` (如果未通过 `subtitle_path` 参数指定输入)
+- `wservice.generate_subtitle_files` (如果未通过 `subtitle_path` 参数指定输入)
 
 **注意事项**：
 - 校正相关的微调参数（如 `correction_model`）应在 `config.yml` 中配置。
 - 需要配置相应的 LLM API 密钥。
+
+---
+
+### 3. wservice.generate_subtitle_files
+
+基于转录数据和可选的说话人数据生成多种格式的字幕文件。
+
+**功能描述**：将转录数据转换为标准字幕格式，支持 SRT、VTT、ASS 等格式，并可选择集成说话人信息。
+
+**输入参数**：
+- `segments_file` (string, 节点可选): 指定转录数据文件路径，以覆盖智能输入源选择逻辑。
+- `diarization_file` (string, 节点可选): 指定说话人分离数据文件路径，以覆盖智能输入源选择逻辑。
+
+**配置来源说明**：
+- `segments_file`, `diarization_file`: **节点参数** (在请求体中的 `wservice.generate_subtitle_files` 对象内提供)。
+- **其他字幕格式化参数**: 如 `output_formats`, `max_chars_per_line`, `max_lines_per_subtitle` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
+
+**全局配置示例 (config.yml)**:
+```yaml
+wservice:
+  # ... (other wservice settings)
+  subtitle_options:
+    max_chars_per_line: 42
+    max_lines_per_subtitle: 2
+    min_subtitle_duration: 1.0
+    include_speaker_labels: true
+```
+
+**前置依赖**：
+- `faster_whisper.transcribe_audio` (必需)
+- `pyannote_audio.diarize_speakers` (可选，用于说话人信息)
+- `wservice.ai_optimize_subtitles` (可选，可先优化再生成文件)
+
+**输出格式**：
+```json
+{
+  "subtitle_path": "/share/workflows/{workflow_id}/subtitles/video.srt",
+  "vtt_path": "/share/workflows/{workflow_id}/subtitles/video.vtt",
+  "ass_path": "/share/workflows/{workflow_id}/subtitles/video.ass",
+  "txt_path": "/share/workflows/{workflow_id}/subtitles/video.txt",
+  "speaker_srt_path": "/share/workflows/{workflow_id}/subtitles/video_with_speakers.srt",
+  "speaker_json_path": "/share/workflows/{workflow_id}/subtitles/video_with_speakers.json",
+  "word_timestamps_json_path": "/share/workflows/{workflow_id}/subtitles/video_word_timestamps.json",
+  "segments_count": 125,
+  "words_count": 850,
+  "total_duration": 300.5,
+  "languages_detected": ["zh"]
+}
+```
+
+**使用示例**：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "faster_whisper.transcribe_audio",
+      "wservice.generate_subtitle_files"
+    ]
+  },
+  "wservice.generate_subtitle_files": {
+    "output_formats": ["srt", "vtt", "ass"],
+    "max_chars_per_line": 40,
+    "include_speaker_labels": true,
+    "speaker_label_format": "[SPEAKER_00]"
+  }
+}
+```
+
+**带说话人信息的示例**：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "audio_separator.separate_vocals",
+      "faster_whisper.transcribe_audio",
+      "pyannote_audio.diarize_speakers",
+      "wservice.generate_subtitle_files"
+    ]
+  },
+  "wservice.generate_subtitle_files": {
+    "output_formats": ["srt", "json"],
+    "include_speaker_labels": true,
+    "speaker_label_format": "Speaker 1:"
+  }
+}
+```
+
+**依赖关系**：
+- 必需：`faster_whisper.transcribe_audio`
+- 可选：`pyannote_audio.diarize_speakers`
+
+**输出文件说明**：
+
+1. **基础 SRT 文件** (`subtitle_path`): 标准字幕格式
+2. **带说话人 SRT** (`speaker_srt_path`): 包含说话人信息的字幕
+3. **带说话人 JSON** (`speaker_json_path`): 完整的结构化数据
+4. **词级时间戳 JSON** (`word_timestamps_json_path`): 精确的词级时间戳
+5. **其他格式**: VTT、ASS、TXT 等
+
+**字幕格式特性**：
+- 自动断行和时长优化
+- 智能合并短字幕
+- 拆分长字幕
+- 时间轴平滑处理
+- 说话人切换边界优化
+
+---
+
+### 4. wservice.merge_speaker_segments
+
+将转录字幕与说话人时间段进行合并（片段级）。
+
+**功能描述**：根据字幕片段的整体时间戳，将其归属到对应的说话人。这是一个宏观层面的合并，适合于一句字幕只属于一个说话人的场景。
+
+**输入参数**：无直接节点参数。任务从工作流上下文中自动获取所需数据。
+
+**前置依赖**：
+- `faster_whisper.transcribe_audio`
+- `pyannote_audio.diarize_speakers`
+
+**输出格式**：
+```json
+{
+  "merged_segments": [
+    {
+      "start": 0.0,
+      "end": 3.5,
+      "text": "这是第一段归属给某个说话人的文本",
+      "speaker": "SPEAKER_00"
+    }
+  ]
+}
+```
+
+**使用示例**：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "faster_whisper.transcribe_audio",
+      "pyannote_audio.diarize_speakers",
+      "wservice.merge_speaker_segments"
+    ]
+  }
+}
+```
+
+**依赖关系**：
+- `faster_whisper.transcribe_audio`
+- `pyannote_audio.diarize_speakers`
+
+**注意事项**：
+- 合并精度为片段级，可能不适用于一句话内多人交谈的场景。
+- 为获得更高精度，建议使用 `wservice.merge_with_word_timestamps` 节点。
+
+---
+
+### 5. wservice.merge_with_word_timestamps
+
+使用词级时间戳进行高精度字幕与说话人合并。
+
+**功能描述**：利用 `faster_whisper` 输出的词级时间戳，将每个独立的**词**与说话人时间段进行匹配。即使在同一字幕片段内有多个说话人，此方法也能实现精确的归属。
+
+**输入参数**：无直接节点参数。任务从工作流上下文中自动获取所需数据。
+
+**前置依赖**：
+- `faster_whisper.transcribe_audio` (必须启用了词级时间戳)
+- `pyannote_audio.diarize_speakers`
+
+**输出格式**：
+```json
+{
+  "merged_segments": [
+    {
+      "start": 0.0,
+      "end": 3.5,
+      "text": "你好，我是小王。 不，我是小李。",
+      "speaker": "MIXED",
+      "words": [
+        {"word": "你好，", "start": 0.0, "end": 0.5, "speaker": "SPEAKER_00"},
+        {"word": "我是小王。", "start": 0.6, "end": 1.5, "speaker": "SPEAKER_00"},
+        {"word": "不，", "start": 1.8, "end": 2.2, "speaker": "SPEAKER_01"},
+        {"word": "我是小李。", "start": 2.3, "end": 3.5, "speaker": "SPEAKER_01"}
+      ]
+    }
+  ]
+}
+```
+
+**使用示例**：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "faster_whisper.transcribe_audio",
+      "pyannote_audio.diarize_speakers",
+      "wservice.merge_with_word_timestamps"
+    ]
+  },
+  "faster_whisper.transcribe_audio": {
+     "word_timestamps": true
+  }
+}
+```
+
+**依赖关系**：
+- `faster_whisper.transcribe_audio`
+- `pyannote_audio.diarize_speakers`
+
+**技术特性**：
+- 这是**推荐**的说话人合并方式，精度最高。
+- 能够处理一句话内说话人切换的复杂场景。
+- 依赖 `faster_whisper.transcribe_audio` 任务输出词级时间戳。
 
 ---
 

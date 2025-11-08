@@ -33,7 +33,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "ffmpeg.extract_audio",
         "audio_separator.separate_vocals",
         "faster_whisper.transcribe_audio",
-        "faster_whisper.generate_subtitle_files"
+        "wservice.generate_subtitle_files"
       ]
     }
   }'
@@ -52,7 +52,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
       "workflow_chain": [
         "ffmpeg.extract_audio",
         "faster_whisper.transcribe_audio",
-        "faster_whisper.generate_subtitle_files"
+        "wservice.generate_subtitle_files"
       ]
     }
   }'
@@ -127,7 +127,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "audio_separator.separate_vocals",
         "faster_whisper.transcribe_audio",
         "wservice.ai_optimize_subtitles",
-        "faster_whisper.generate_subtitle_files"
+        "wservice.generate_subtitle_files"
       ],
       "subtitle_optimization": {
         "enabled": true,
@@ -177,7 +177,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "ffmpeg.extract_audio",
         "faster_whisper.transcribe_audio",
         "wservice.ai_optimize_subtitles",
-        "faster_whisper.generate_subtitle_files"
+        "wservice.generate_subtitle_files"
       ],
       "subtitle_optimization": {
         "enabled": true,
@@ -210,7 +210,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "faster_whisper.transcribe_audio",
         "pyannote_audio.diarize_speakers",
         "wservice.ai_optimize_subtitles",
-        "faster_whisper.generate_subtitle_files"
+        "wservice.generate_subtitle_files"
       ],
       "subtitle_optimization": {
         "enabled": true,
@@ -224,7 +224,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
 
 ### 9. 仅字幕校正工作流
 
-这个工作流在字幕生成后，使用 `faster_whisper.correct_subtitles` 对字幕进行基础的语法和拼写校正。
+这个工作流在字幕生成后，使用 `wservice.correct_subtitles` 对字幕进行基础的语法和拼写校正。
 
 ```bash
 curl -X POST "${API_BASE_URL}/v1/workflows" \
@@ -235,8 +235,8 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
       "workflow_chain": [
         "ffmpeg.extract_audio",
         "faster_whisper.transcribe_audio",
-        "faster_whisper.generate_subtitle_files",
-        "faster_whisper.correct_subtitles"
+        "wservice.generate_subtitle_files",
+        "wservice.correct_subtitles"
       ]
     },
     "subtitle_correction": {
@@ -267,7 +267,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "audio_separator.separate_vocals",
         "faster_whisper.transcribe_audio",
         "pyannote_audio.diarize_speakers",
-        "faster_whisper.generate_subtitle_files"
+        "wservice.generate_subtitle_files"
       ]
     }
   }'
@@ -296,12 +296,12 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "audio_separator.separate_vocals",
         "faster_whisper.transcribe_audio",
         "pyannote_audio.diarize_speakers",
-        "faster_whisper.generate_subtitle_files",
-        "faster_whisper.merge_for_tts"
+        "wservice.generate_subtitle_files",
+        "wservice.merge_for_tts"
       ]
     },
-    "faster_whisper.merge_for_tts": {
-      "subtitle_path": "${{ stages.faster_whisper.generate_subtitle_files.output.speaker_json_path }}",
+    "wservice.merge_for_tts": {
+      "subtitle_path": "${{ stages.wservice.generate_subtitle_files.output.speaker_json_path }}",
       "max_duration": 10.0,
       "max_gap": 1.0
     }
@@ -349,7 +349,7 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "ffmpeg.extract_audio",
         "audio_separator.separate_vocals",
         "faster_whisper.transcribe_audio",
-        "faster_whisper.generate_subtitle_files"
+        "wservice.generate_subtitle_files"
       ]
     },
     "faster_whisper.transcribe_audio": {

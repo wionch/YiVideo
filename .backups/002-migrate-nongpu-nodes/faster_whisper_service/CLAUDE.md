@@ -4,23 +4,16 @@
 
 ## 服务概述
 
-Faster Whisper Service是基于faster-whisper高版本的语音识别(ASR)服务，提供GPU加速的实时语音转文字功能。该服务专注于GPU推理，仅负责语音转录，生成带词级时间戳的转录数据。
+Faster Whisper Service是基于faster-whisper高版本的语音识别(ASR)服务，提供GPU加速的实时语音转文字功能。该服务支持词级时间戳、说话人分离集成和字幕校正优化。
 
 ## 核心功能
 
-- **语音识别**: 将音频转换为文字（GPU加速）
+- **语音识别**: 将音频转换为文字
 - **词级时间戳**: 提供精确的词级别时间戳
 - **GPU加速**: 使用faster-whisper实现高速推理
-- **模型管理**: 自动下载、缓存和管理模型
-- **内存优化**: GPU显存管理和优化
-
-## 迁移说明
-
-非GPU字幕处理功能已迁移至`wservice`服务，包括：
-- 字幕文件生成
-- 说话人片段合并
-- 词级时间戳合并
-- 字幕AI校正
+- **字幕生成**: 支持SRT、VTT等字幕格式
+- **说话人分离**: 与pyannote_audio_service集成
+- **字幕校正**: 使用AI进行字幕优化
 
 ## 目录结构
 
@@ -42,10 +35,10 @@ services/workers/faster_whisper_service/
 
 ### tasks.py
 - **主要任务**:
-  - `transcribe_audio()`: 语音识别任务（GPU推理）
-  - 使用GPU锁装饰器保护GPU资源
-  - 支持词级时间戳生成
-  - 输出标准化转录数据供后续字幕处理使用
+  - `speech_recognition()`: 语音识别任务
+  - 使用`@gpu_lock`装饰器保护GPU资源
+  - 支持词级时间戳和说话人分离
+  - 集成字幕校正和合并功能
 
 ### faster_whisper_infer.py
 - **功能**: Whisper推理引擎
@@ -123,7 +116,7 @@ def speech_recognition(self, context):
 ## 共享存储
 
 - **输入**: `/share/workflows/{workflow_id}/audio/`
-- **输出**: `/share/workflows/{workflow_id}/transcribe_data.json`（转录数据）
+- **输出**: `/share/workflows/{workflow_id}/subtitles/`
 - **中间文件**: `/share/workflows/{workflow_id}/temp/`
 
 ## 监控
@@ -134,7 +127,8 @@ def speech_recognition(self, context):
 
 ## 集成服务
 
-- **下游字幕处理**: `wservice`（接收转录数据并生成字幕）
+- **说话人分离**: `pyannote_audio_service`
+- **字幕优化**: `services.common.subtitle.*`
 - **状态管理**: `services.common.state_manager`
 - **GPU锁**: `services.common.locks`
 
