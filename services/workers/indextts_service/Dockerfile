@@ -235,10 +235,10 @@ sys.exit(0);" || exit 1
 # ========================================
 # 10. 设置工作目录和启动命令
 # ========================================
-WORKDIR /app/services/workers/indextts_service
+WORKDIR /app
 
 # 注意：实际的启动命令在 docker-compose.yml 中配置
-CMD ["celery", "-A", "app.celery_app", "worker", \
+CMD ["celery", "-A", "services.workers.indextts_service.app.celery_app", "worker", \
      "--loglevel=info", \
      "--concurrency=1", \
      "-Q", "indextts_queue"]

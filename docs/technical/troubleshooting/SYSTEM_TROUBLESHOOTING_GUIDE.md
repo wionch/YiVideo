@@ -47,15 +47,13 @@ nvidia-smi
 free -h
 df -h
 
-# 3. 检查网络连接
+# 3. 检查网络连接和核心服务
 curl http://localhost:8788/health
-curl http://localhost:6379/ping
+docker-compose exec redis redis-cli ping
 
 # 4. 检查 GPU 锁状态
-curl http://localhost:8788/api/v1/monitoring/gpu-lock/health
-
-# 5. 检查最近的工作流
-curl http://localhost:8788/v1/workflows/recent
+# 注意: 正确的监控端点路径为 /api/v1/monitoring/gpu-lock/status
+curl http://localhost:8788/api/v1/monitoring/gpu-lock/status
 ```
 
 ---
@@ -75,13 +73,12 @@ curl http://localhost:8788/v1/workflows/recent
 
 **解决方案**:
 ```bash
-# 检查请求格式
+# 检查请求格式和参数
 curl -X POST http://localhost:8788/v1/workflows \
   -H "Content-Type: application/json" \
-  -d '{"video_path": "/app/videos/test.mp4"}'
+  -d '{"video_path": "/share/videos/input/example.mp4", "workflow_config": {}}'
 
-# 验证参数
-python scripts/validate_request.py
+# 提示: 请仔细核对 workflow_config 的结构和参数
 ```
 
 #### 401 Unauthorized
@@ -89,16 +86,13 @@ python scripts/validate_request.py
 **错误信息**: "Unauthorized: invalid API key"
 
 **可能原因**:
-- API 密钥无效或缺失
-- 认证服务不可用
+- API 密钥无效或缺失 (如果启用了认证)
+- 认证配置错误
 
 **解决方案**:
 ```bash
-# 检查 API 密钥配置
-grep -r "api_key" config.yml
-
-# 重启认证服务
-docker-compose restart auth_service
+# 检查 API 密钥配置 (如果 auth.enabled 为 true)
+grep -r "auth:" config.yml
 ```
 
 #### 404 Not Found
@@ -107,15 +101,12 @@ docker-compose restart auth_service
 
 **可能原因**:
 - 工作流 ID 不存在
-- 工作流已过期
+- 工作流已过期并被清理
 
 **解决方案**:
 ```bash
 # 检查工作流状态
-curl http://localhost:8788/v1/workflows/status/{workflow_id}
-
-# 查看最近的工作流
-curl http://localhost:8788/v1/workflows/recent
+curl http://localhost:8788/v1/workflows/{workflow_id}
 ```
 
 #### 500 Internal Server Error
@@ -285,8 +276,8 @@ iostat -x 1
 # 4. 检查网络带宽
 iftop
 
-# 5. 运行性能分析
-python scripts/performance_analysis.py
+# 5. 运行性能分析 (示例)
+# (可使用 Prometheus/Grafana 或自定义脚本分析)
 ```
 
 #### 优化方案
@@ -315,8 +306,8 @@ watch -n 1 'free -h'
 # 2. 检查 Docker 容器内存
 docker stats --format "table {{.Container}}\t{{.MemUsage}}"
 
-# 3. 分析内存使用
-python scripts/memory_analysis.py
+# 3. 分析内存使用 (示例)
+# (可使用 pmap, valgrind,或自定义脚本分析)
 ```
 
 #### 解决方案
@@ -401,8 +392,8 @@ taskset -c 0,1,2,3 python script.py
 free -h
 cat /proc/meminfo
 
-# 检查内存泄漏
-valgrind --leak-check=full python script.py
+# 检查内存泄漏 (可使用 valgrind 等工具)
+# valgrind --leak-check=full python script.py
 ```
 
 #### 解决方案
@@ -537,10 +528,7 @@ api_gateway:
 #### 诊断
 
 ```bash
-# 验证配置文件
-python scripts/validate_config.py
-
-# 检查配置文件语法
+# 验证配置文件语法 (示例)
 python -c "import yaml; yaml.safe_load(open('config.yml'))"
 ```
 
@@ -551,10 +539,10 @@ python -c "import yaml; yaml.safe_load(open('config.yml'))"
 cp config.yml config.yml.backup
 
 # 2. 使用默认配置
-cp config.yml.default config.yml
+# cp config.yml.default config.yml
 
-# 3. 重新配置
-python scripts/setup_config.py
+# 3. 手动检查和修复配置
+# (对比备份文件，逐项检查)
 ```
 
 ### 环境变量问题
@@ -818,7 +806,7 @@ docker exec pyannote_audio_service env | grep "HF_"
 #### 3. 性能验证
 ```bash
 # 运行简单测试 (示例)
-# python scripts/test_service.py --service faster_whisper
+# (可调用 API 发起一个小型测试工作流)
 
 # 检查日志
 docker-compose logs --tail=50 faster_whisper_service
@@ -900,590 +888,7 @@ networks:
 
 ---
 
-# IndexTTS2 故障排除指南
 
-## 概述
+---
 
-本指南提供 IndexTTS2 语音合成服务常见问题的诊断和解决方案。
-
-## 系统状态检查
-
-### 基础状态检查
-
-```bash
-# 1. 检查服务状态
-docker-compose ps | grep indextts
-
-# 2. 检查服务健康状态
-docker exec indextts_service python3 -c "
-from services.workers.indextts_service.app import health_check
-result = health_check()
-print('健康检查结果:', result)
-"
-
-# 3. 检查 GPU 状态
-docker exec indextts_service nvidia-smi
-
-# 4. 检查 Redis 连接
-docker exec indextts_service python3 -c "
-import redis
-r = redis.Redis(host='redis', port=6379, db=2)
-print('Redis连接状态:', r.ping())
-"
-```
-
-### 日志检查
-
-```bash
-# 查看实时日志
-docker-compose logs -f indextts_service
-
-# 查看最近的错误日志
-docker-compose logs --tail=100 indextts_service | grep -i error
-
-# 查看GPU相关日志
-docker-compose logs indextts_service | grep -i gpu
-```
-
-## 常见错误及解决方案
-
-### 错误类型1: 参数验证错误
-
-#### 错误信息: "输入文本不能为空"
-
-**症状**:
-```
-{'status': 'error', 'error': '输入文本不能为空', 'task_id': 'abc123'}
-```
-
-**原因**: 缺少必需的 `text` 参数
-
-**解决方案**:
-```json
-{
-  "workflow_config": {
-    "text": "这里是要转换的文本内容",
-    // ... 其他参数
-  }
-}
-```
-
-#### 错误信息: "输出路径不能为空"
-
-**症状**:
-```
-{'status': 'error', 'error': '输出路径不能为空', 'task_id': 'abc123'}
-```
-
-**原因**: 缺少必需的 `output_path` 参数
-
-**解决方案**:
-```json
-{
-  "workflow_config": {
-    "output_path": "/share/workflows/output/speech.wav",
-    // ... 其他参数
-  }
-}
-```
-
-#### 错误信息: "缺少必需参数: spk_audio_prompt"
-
-**症状**:
-```
-{'status': 'error', 'error': '缺少必需参数: spk_audio_prompt (说话人参考音频)', 'hint': 'IndexTTS2是基于参考音频的语音合成系统，必须提供说话人参考音频'}
-```
-
-**原因**: 缺少必需的说话人参考音频
-
-**解决方案**:
-```json
-{
-  "workflow_config": {
-    "spk_audio_prompt": "/share/reference/speaker_sample.wav",
-    // ... 其他参数
-  }
-}
-```
-
-#### 错误信息: "参考音频文件不存在"
-
-**症状**:
-```
-{'status': 'error', 'error': '参考音频文件不存在: /path/to/reference.wav'}
-```
-
-**原因**: 指定的参考音频文件路径不存在
-
-**诊断步骤**:
-```bash
-# 检查文件是否存在
-docker exec indextts_service ls -la /path/to/reference.wav
-
-# 检查文件权限
-docker exec indextts_service stat /path/to/reference.wav
-
-# 检查文件格式
-docker exec indextts_service file /path/to/reference.wav
-```
-
-**解决方案**:
-```bash
-# 1. 确保参考音频文件存在
-docker exec indextts_service mkdir -p /share/reference/
-docker cp /path/to/your/reference.wav /share/reference/
-
-# 2. 验证文件可读
-docker exec indextts_service chmod 644 /share/reference/reference.wav
-
-# 3. 更新工作流配置使用正确的路径
-```
-
-### 错误类型2: GPU相关错误
-
-#### 错误信息: CUDA out of memory
-
-**症状**:
-```
-RuntimeError: CUDA out of memory
-```
-
-**诊断步骤**:
-```bash
-# 检查GPU内存使用
-docker exec indextts_service nvidia-smi
-
-# 检查GPU进程
-docker exec indextts_service ps aux | grep python
-
-# 检查模型大小
-docker exec indextts_service du -sh /models/indextts/
-```
-
-**解决方案**:
-```yaml
-# 编辑 config.yml
-indextts_service:
-  use_fp16: true                    # 启用FP16节省显存
-  use_deepspeed: false              # 禁用DeepSpeed
-  num_workers: 1                    # 保持单工作进程
-```
-
-```bash
-# 重启服务
-docker-compose restart indextts_service
-```
-
-#### 错误信息: GPU not available
-
-**症状**:
-```
-RuntimeError: No CUDA GPUs are available
-```
-
-**诊断步骤**:
-```bash
-# 检查NVIDIA驱动
-nvidia-smi
-
-# 检查Docker GPU支持
-docker run --rm --gpus all nvidia/cuda:12.0-base-ubuntu22.04 nvidia-smi
-
-# 检查容器GPU挂载
-docker inspect indextts_service | grep -A 10 -B 10 DeviceRequests
-```
-
-**解决方案**:
-```yaml
-# docker-compose.yml 中确保GPU挂载正确
-indextts_service:
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: 1
-            capabilities: [gpu]
-```
-
-### 错误类型3: 文件系统错误
-
-#### 错误信息: 无法创建输出目录
-
-**症状**:
-```
-{'status': 'error', 'error': '无法创建输出目录 /share/output: Permission denied'}
-```
-
-**诊断步骤**:
-```bash
-# 检查目录权限
-docker exec indextts_service ls -la /share/
-
-# 检查磁盘空间
-docker exec indextts_service df -h
-
-# 尝试手动创建目录
-docker exec indextts_service mkdir -p /share/workflows/output/test
-```
-
-**解决方案**:
-```bash
-# 修复目录权限
-docker exec indextts_service chmod -R 755 /share/workflows/
-
-# 确保目录可写
-docker exec indextts_service touch /share/workflows/output/.write_test
-```
-
-#### 错误信息: 模型文件不存在
-
-**症状**:
-```
-FileNotFoundError: [Errno 2] No such file or directory: '/models/indextts/checkpoints/config.yaml'
-```
-
-**诊断步骤**:
-```bash
-# 检查模型目录
-docker exec indextts_service ls -la /models/indextts/
-
-# 检查检查点目录
-docker exec indextts_service ls -la /models/indextts/checkpoints/
-
-# 检查模型文件完整性
-docker exec indextts_service find /models/indextts/ -name "*.yaml" -o -name "*.pt" | head -10
-```
-
-**解决方案**:
-```bash
-# 重新下载模型（如果需要）
-# 这通常需要重新构建容器或手动下载模型文件
-
-# 检查Docker卷挂载
-docker volume ls | grep indextts
-docker volume inspect yivideo_indextts_models_volume
-```
-
-### 错误类型4: 网络和服务错误
-
-#### 错误信息: Redis连接失败
-
-**症状**:
-```
-ConnectionError: Error 111 connecting to redis:6379
-```
-
-**诊断步骤**:
-```bash
-# 检查Redis服务状态
-docker-compose ps | grep redis
-
-# 测试Redis连接
-docker exec redis redis-cli ping
-
-# 检查网络连接
-docker exec indextts_service ping redis
-```
-
-**解决方案**:
-```bash
-# 重启Redis服务
-docker-compose restart redis
-
-# 检查网络配置
-docker network ls | grep wionch
-```
-
-#### 错误信息: 任务超时
-
-**症状**:
-```
-TaskTimeoutError: Task indextts.generate_speech timed out after 1800 seconds
-```
-
-**诊断步骤**:
-```bash
-# 检查任务状态
-docker exec indextts_service python3 -c "
-from services.common.locks import SmartGpuLockManager
-manager = SmartGpuLockManager()
-print('当前锁状态:', manager.get_lock_info())
-"
-
-# 检查GPU使用情况
-docker exec indextts_service nvidia-smi
-```
-
-**解决方案**:
-```yaml
-# 增加超时时间
-# 在 celery_app.conf.update 中调整
-task_soft_time_limit: 3600  # 60分钟软超时
-task_time_limit: 4200       # 70分钟硬超时
-```
-
-## 性能问题诊断
-
-### 处理速度慢
-
-**症状**: 任务执行时间过长
-
-**诊断步骤**:
-```bash
-# 1. 检查GPU利用率
-watch -n 2 "docker exec indextts_service nvidia-smi"
-
-# 2. 检查系统资源
-docker stats indextts_service
-
-# 3. 查看详细日志
-docker-compose logs indextts_service | grep -E "(处理时间|GPU|memory)"
-```
-
-**优化建议**:
-```yaml
-indextts_service:
-  use_fp16: true                    # 启用FP16
-  max_text_tokens_per_segment: 80  # 减少分段长度
-  enable_monitoring: true            # 启用监控
-```
-
-### 内存使用过高
-
-**症状**: 内存占用持续增长
-
-**诊断步骤**:
-```bash
-# 检查内存使用
-docker stats indextts_service --no-stream
-
-# 检查Python进程内存
-docker exec indextts_service python3 -c "
-import psutil
-p = psutil.Process()
-print(f'内存使用: {p.memory_info().rss / 1024 / 1024:.2f} MB')
-"
-
-# 检查GPU内存
-docker exec indextts_service nvidia-smi --query-gpu=memory.used,memory.total --format=csv
-```
-
-**解决方案**:
-```python
-# 在任务完成后强制清理GPU内存
-import torch
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
-```
-
-## 配置问题
-
-### 配置文件不生效
-
-**症状**: 修改配置后没有生效
-
-**诊断步骤**:
-```bash
-# 1. 验证配置文件语法
-python3 -c "
-import yaml
-with open('/app/config.yml', 'r') as f:
-    config = yaml.safe_load(f)
-    print('indextts_service配置:', config.get('indextts_service', 'NOT_FOUND'))
-"
-
-# 2. 检查服务是否加载了新配置
-docker-compose logs indextts_service | grep -E "(配置|config|Configuration)"
-
-# 3. 重启服务
-docker-compose restart indextts_service
-```
-
-### 环境变量冲突
-
-**症状**: 环境变量设置不正确
-
-**诊断步骤**:
-```bash
-# 检查环境变量
-docker exec indextts_service env | grep INDEX_TTS
-
-# 检查配置优先级
-docker exec indextts_service python3 -c "
-from services.common.config_loader import get_config
-config = get_config()
-print('use_fp16:', config.get('indextts_service', {}).get('use_fp16'))
-print('环境变量use_fp16:', config.get('use_fp16', 'NOT_SET'))
-"
-```
-
-## 日志分析
-
-### 常用日志命令
-
-```bash
-# 查看最近的错误
-docker-compose logs --tail=50 indextts_service | grep -i error
-
-# 查看GPU相关日志
-docker-compose logs indextts_service | grep -i gpu
-
-# 查看任务执行日志
-docker-compose logs indextts_service | grep "开始执行\|完成\|失败"
-
-# 查看性能相关日志
-docker-compose logs indextts_service | grep -E "(时间|秒|分钟|性能)"
-```
-
-### 日志分析技巧
-
-1. **时间戳匹配**: 找到特定任务的时间戳
-2. **错误模式**: 识别重复出现的错误模式
-3. **性能指标**: 提取处理时间、内存使用等指标
-
-## 恢复操作
-
-### 服务重启
-
-```bash
-# 软重启
-docker-compose restart indextts_service
-
-# 强制重启
-docker-compose stop indextts_service
-docker-compose start indextts_service
-
-# 重建容器
-docker-compose up -d --force-recreate indextts_service
-```
-
-### 数据恢复
-
-```bash
-# 备份重要数据
-docker exec indextts_service tar -czf /share/backup/indextts_backup_$(date +%Y%m%d).tar.gz /share/workflows/ /share/reference/
-
-# 清理临时文件
-docker exec indextts_service find /tmp -name "*.tmp" -delete
-docker exec indextts_service find /share/tmp -name "*.wav" -delete
-```
-
-### 重置配置
-
-```bash
-# 恢复默认配置
-docker exec indextts_service cp /app/config.yml.backup /app/config.yml
-
-# 重新加载配置
-docker-compose restart indextts_service
-```
-
-## 监控和预防
-
-### 定期检查脚本
-
-```bash
-#!/bin/bash
-# health_check.sh
-
-echo "=== IndexTTS2 健康检查 ==="
-
-# 检查服务状态
-if docker-compose ps | grep indextts_service | grep -q "Up"; then
-    echo "✅ IndexTTS2 服务运行正常"
-else
-    echo "❌ IndexTTS2 服务未运行"
-    exit 1
-fi
-
-# 检查GPU状态
-if docker exec indextts_service nvidia-smi &>/dev/null; then
-    echo "✅ GPU 可用"
-else
-    echo "❌ GPU 不可用"
-    exit 1
-fi
-
-# 检查Redis连接
-if docker exec indextts_service python3 -c "import redis; r=redis.Redis(host='redis', port=6379, db=2); r.ping()" &>/dev/null; then
-    echo "✅ Redis 连接正常"
-else
-    echo "❌ Redis 连接失败"
-    exit 1
-fi
-
-# 检查磁盘空间
-disk_usage=$(docker exec indextts_service df /share | awk 'NR==2 {print $5}')
-if [[ ${disk_usage%?} -lt 90 ]]; then
-    echo "✅ 磁盘空间充足 (${disk_usage})"
-else
-    echo "⚠️ 磁盘空间不足 (${disk_usage})"
-fi
-
-echo "=== 健康检查完成 ==="
-```
-
-### 性能监控脚本
-
-```bash
-#!/bin/bash
-# performance_monitor.sh
-
-echo "=== IndexTTS2 性能监控 ==="
-
-# GPU使用率
-echo "GPU使用率:"
-docker exec indextts_service nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits
-
-# 内存使用
-echo "内存使用:"
-docker stats indextts_service --no-stream | awk 'NR==2 {print $4}'} | sed 's/MiB/MB/'
-
-# 活跃任务数
-echo "活跃任务数:"
-docker exec indextts_service python3 -c "
-from services.common.locks import SmartGpuLockManager
-try:
-    manager = SmartGpuLockManager()
-    status = manager.get_lock_info()
-    if status:
-        print('GPU被占用')
-    else:
-        print('GPU空闲')
-except:
-    print('无法获取GPU状态')
-"
-
-echo "=== 性能监控完成 ==="
-```
-
-## 联系支持
-
-如果以上解决方案都无法解决您的问题，请：
-
-1. **收集日志**:
-   ```bash
-   docker-compose logs indextts_service > indextts_debug.log 2>&1
-   ```
-
-2. **收集系统信息**:
-   ```bash
-   docker exec indextts_service python3 -c "
-   import torch
-   import sys
-   print('Python版本:', sys.version)
-   print('PyTorch版本:', torch.__version__)
-   print('CUDA版本:', torch.version.cuda)
-   print('GPU数量:', torch.cuda.device_count())
-   if torch.cuda.is_available():
-       print('GPU名称:', torch.cuda.get_device_name(0))
-   "
-   ```
-
-3. **提供详细错误信息**:
-   - 完整的错误堆栈
-   - 重现步骤
-   - 使用的配置和参数
-
-将这些信息提交给技术支持团队以获得进一步的帮助。
+*最后更新: 2025-11-09 | 文档版本: 1.1*

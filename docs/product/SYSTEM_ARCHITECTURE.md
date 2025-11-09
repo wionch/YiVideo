@@ -63,11 +63,13 @@ graph TD
   - `pyannote_audio_service`: 说话人分离。
   - `paddleocr_service`: 光学字符识别（OCR）。
   - `llm_service`: (新) 与大语言模型交互（校对、翻译）。
-  - `indextts_service` / `gptsovits_service`: 文本转语音（TTS）。
+  - `indextts_service` / `gptsovits_service`: (可选) 文本转语音（TTS）。
+  - `inpainting_service`: (可选) 视频修复/去字幕。
 
 - **基础设施 (Infrastructure)**:
   - **Celery Broker (Redis)**: 任务消息队列。
   - **State Store (Redis)**: 集中化的工作流JSON状态存储。
+  - **注意**: 在 `docker-compose.yml` 中，Redis 网络通常配置为 `external: true`，表明它被视为一个外部依赖，而不是由项目本身启动和管理。
   - **共享存储**: 存放所有视频、音频、图片等文件。
 
 ---

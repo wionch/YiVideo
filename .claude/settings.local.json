@@ -78,7 +78,14 @@
       "Bash(/tmp/fixed_final.txt)",
       "Bash(/tmp/final_doc.txt)",
       "Bash(/tmp/final_doc_v2.txt)",
-      "Bash(git stash show:*)"
+      "Bash(git stash show:*)",
+      "Bash(tree:*)",
+      "Bash(for:*)",
+      "Bash(do:*)",
+      "Bash(if:*)",
+      "Bash(then:*)",
+      "Bash(else)",
+      "Bash(fi)"
     ],
     "deny": [
       "Bash(docker build:*)"

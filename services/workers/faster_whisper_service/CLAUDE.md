@@ -4,15 +4,15 @@
 
 ## 服务概述
 
-Faster Whisper Service是基于faster-whisper高版本的语音识别(ASR)服务，提供GPU加速的实时语音转文字功能。该服务专注于GPU推理，仅负责语音转录，生成带词级时间戳的转录数据。
+Faster Whisper Service 是一个**纯粹的音频转录服务**，基于 `faster-whisper` 提供GPU加速的语音识别（ASR）功能。
+
+该服务的**唯一职责**是接收音频文件，并输出高精度的、带词级时间戳的转录数据。所有后续的字幕处理、合并、校正等非GPU密集型任务均已剥离，由 `wservice` 负责。
 
 ## 核心功能
 
-- **语音识别**: 将音频转换为文字（GPU加速）
-- **词级时间戳**: 提供精确的词级别时间戳
-- **GPU加速**: 使用faster-whisper实现高速推理
-- **模型管理**: 自动下载、缓存和管理模型
-- **内存优化**: GPU显存管理和优化
+- **语音识别**: 将音频高效转换为文字（GPU加速）。
+- **词级时间戳**: 提供精确到单词级别的时间戳。
+- **模型管理**: 自动下载、缓存和管理 Whisper 模型。
 
 ## 架构设计：子进程隔离推理模型
 
@@ -34,13 +34,16 @@ Faster Whisper Service是基于faster-whisper高版本的语音识别(ASR)服务
 - **纯净的资源管理**: 每个推理任务都在一个独立的进程中运行，任务结束后进程完全退出，确保了GPU显存等资源的彻底释放，避免了内存泄漏的风险。
 - **依赖解耦**: 将核心的推理逻辑与任务调度逻辑（Celery）完全解耦，使得两部分可以独立维护和升级。
 
-## 迁移说明
+## 迁移与职责划分
 
-非GPU字幕处理功能已迁移至`wservice`服务，包括：
-- 字幕文件生成
-- 说话人片段合并
-- 词级时间戳合并
-- 字幕AI校正
+**重要**: 本服务已完成职责重构，**所有非GPU密集型的后处理功能均已移除**。
+
+- **已移除功能**:
+  - `speaker_word_matcher.py`: 说话人匹配逻辑
+  - `subtitle_merger.py`: 字幕合并逻辑
+  - `tts_merger.py`: TTS字幕准备逻辑
+- **功能归属**: 以上所有功能现已统一整合进 `wservice`。
+- **当前职责**: `faster_whisper_service` **只负责一件事**：音频到带词级时间戳的文本转录。
 
 ## 目录结构
 
@@ -48,11 +51,8 @@ Faster Whisper Service是基于faster-whisper高版本的语音识别(ASR)服务
 services/workers/faster_whisper_service/
 ├── app/
 │   ├── celery_app.py           # Celery应用配置
-│   ├── faster_whisper_infer.py # Whisper推理引擎
+│   ├── faster_whisper_infer.py # Whisper推理引擎（子进程）
 │   ├── model_manager.py        # 模型管理器
-│   ├── speaker_word_matcher.py # 说话人词匹配器
-│   ├── subtitle_merger.py      # 字幕合并器
-│   ├── tts_merger.py          # TTS合并器
 │   └── tasks.py               # Celery任务定义
 ├── Dockerfile
 └── requirements.txt
@@ -62,32 +62,16 @@ services/workers/faster_whisper_service/
 
 ### tasks.py
 - **主要任务**:
-  - `transcribe_audio()`: 语音识别任务（GPU推理）
-  - 使用GPU锁装饰器保护GPU资源
-  - 支持词级时间戳生成
-  - 输出标准化转录数据供后续字幕处理使用
+  - `transcribe_audio()`: 唯一的服务任务，执行GPU语音识别。
+  - **职责**: 调用 `faster_whisper_infer.py` 子进程，处理输入输出，管理任务状态。
 
 ### faster_whisper_infer.py
-- **功能**: Whisper推理引擎
-- **特性**:
-  - 模型加载和管理
-  - GPU内存优化
-  - 批处理支持
+- **功能**: 核心Whisper推理引擎，在隔离的子进程中运行。
+- **特性**: 模型加载、GPU内存优化、批处理支持。
 
 ### model_manager.py
-- **功能**: 模型生命周期管理
-- **特性**:
-  - 模型下载和缓存
-  - 模型版本管理
-  - 内存管理
-
-### subtitle_merger.py
-- **功能**: 字幕合并和优化
-- **类**:
-  - `SubtitleMerger`: 通用字幕合并
-  - `WordLevelMerger`: 词级合并器
-  - `create_subtitle_merger()`: 创建合并器工厂
-  - `validate_speaker_segments()`: 验证说话人片段
+- **功能**: 模型生命周期管理。
+- **特性**: 模型下载、缓存和版本管理。
 
 ## 依赖
 

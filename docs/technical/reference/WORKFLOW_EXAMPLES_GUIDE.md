@@ -8,7 +8,7 @@
 
 ```bash
 # API基础URL
-API_BASE_URL="http://localhost:8000"
+API_BASE_URL="http://localhost:8788"
 
 # 视频文件路径
 VIDEO_PATH="/share/videos/666.mp4"
@@ -277,13 +277,13 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
 
 ## 高级工作流
 
-### 1. 带TTS参考音合并的字幕生成
+### 1. 为TTS准备参考片段的工作流
 
-这个工作流在完整的说话人分离流程后，增加了一个 `merge_for_tts` 步骤，专门为后续的语音合成（TTS）任务准备符合时长要求的参考音频片段。
+这个工作流在生成字幕后，增加了一个 `prepare_tts_segments` 步骤，它会根据全局配置（`config.yml`中的`wservice.tts_merger_settings`）对字幕片段进行智能合并与分割，为后续的语音合成（TTS）任务准备符合时长要求的参考音频片段。
 
 1.  ...
 2.  (转录数据 + 说话人时间戳) → 带说话人标签的字幕文件
-3.  带说话人标签的字幕文件 → **符合TTS要求的、合并优化后的字幕文件**
+3.  字幕文件 → **符合TTS要求的、合并优化后的字幕片段**
 
 ```bash
 curl -X POST "${API_BASE_URL}/v1/workflows" \
@@ -297,13 +297,8 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "faster_whisper.transcribe_audio",
         "pyannote_audio.diarize_speakers",
         "wservice.generate_subtitle_files",
-        "wservice.merge_for_tts"
+        "wservice.prepare_tts_segments"
       ]
-    },
-    "wservice.merge_for_tts": {
-      "subtitle_path": "${{ stages.wservice.generate_subtitle_files.output.speaker_json_path }}",
-      "max_duration": 10.0,
-      "max_gap": 1.0
     }
   }'
 ```
@@ -540,14 +535,18 @@ curl -X GET "${API_BASE_URL}/v1/workflows/list"
 ### GPU 锁监控
 ```bash
 # 检查 GPU 锁状态
-curl http://localhost:8000/api/v1/monitoring/gpu-lock/health
+curl http://localhost:8788/api/v1/monitoring/gpu-lock/health
 
 # 查看任务心跳状态
-curl http://localhost:8000/api/v1/monitoring/heartbeat/all
+curl http://localhost:8788/api/v1/monitoring/heartbeat/all
 ```
 
 ### 系统统计
 ```bash
 # 获取系统统计信息
-curl http://localhost:8000/api/v1/monitoring/statistics
+curl http://localhost:8788/api/v1/monitoring/statistics
 ```
+
+---
+
+*最后更新: 2025-11-09 | 文档版本: 1.2*

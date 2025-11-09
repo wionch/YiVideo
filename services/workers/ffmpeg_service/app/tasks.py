@@ -392,7 +392,7 @@ def split_audio_segments(self: Task, context: dict) -> dict:
             priority_order = subtitle_config.get('priority_order', ["speaker_srt_path", "subtitle_path", "speaker_json_path"])
 
             for source_type in priority_order:
-                subtitle_stage = workflow_context.stages.get('faster_whisper.generate_subtitle_files')
+                subtitle_stage = workflow_context.stages.get('wservice.generate_subtitle_files')
                 if subtitle_stage and subtitle_stage.status in ['SUCCESS', 'COMPLETED'] and subtitle_stage.output:
                     if source_type == "speaker_srt_path" and subtitle_stage.output.get('speaker_srt_path'):
                         subtitle_path = subtitle_stage.output['speaker_srt_path']

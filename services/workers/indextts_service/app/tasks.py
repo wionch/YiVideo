@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 config = get_config()
 
 # 从 app.py 导入 celery_app
-from .app import celery_app, gpu_lock_manager
+from .celery_app import celery_app, gpu_lock_manager
 
 # 导入新的子进程隔离 TTS 引擎
 from .tts_engine import MultiProcessTTSEngine

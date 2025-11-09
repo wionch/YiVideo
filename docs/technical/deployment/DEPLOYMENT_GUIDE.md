@@ -1,4 +1,4 @@
-# WhisperX 生产环境部署指南
+# YiVideo 生产环境部署指南
 
 ## 目录
 
@@ -190,7 +190,7 @@ REDIS_PORT=6379
 CUDA_VISIBLE_DEVICES=0
 NVIDIA_VISIBLE_DEVICES=0
 
-# WhisperX 配置 (新增)
+# YiVideo 配置 (新增)
 HF_TOKEN=hf_your_huggingface_token_here
 HF_HOME=/app/.cache/huggingface
 # 模型缓存目录现在通过 config.yml 进行配置
@@ -234,22 +234,12 @@ docker-compose up -d
 docker-compose ps
 ```
 
-### 5. 监控系统部署
-
-```bash
-# 部署监控系统
-docker-compose -f docker-compose.monitoring.yml up -d
-
-# 验证监控服务
-curl http://localhost:9090/targets
-curl http://localhost:3000/api/health
-```
 
 ---
 
 ## 配置优化
 
-### 1. WhisperX 配置优化
+### 1. YiVideo 配置优化
 
 ```yaml
 # config.yml
@@ -407,10 +397,10 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "WhisperX 执行时间过长"
+          summary: "YiVideo 执行时间过长"
           description: "执行时间超过 5 分钟: {{ $value }}s"
 
-      - alert: WhisperxGpuMemoryHigh
+      - alert: YiVideoGpuMemoryHigh
         expr: gpu_memory_used_gb > 8
         for: 5m
         labels:
@@ -574,7 +564,7 @@ sudo crontab -e
 cat > /opt/yivideo/scripts/restart_services.sh << 'EOF'
 #!/bin/bash
 
-echo "重启 WhisperX 服务..."
+echo "重启 YiVideo 服务..."
 
 # 停止服务
 docker-compose down
@@ -693,6 +683,6 @@ curl http://localhost:3000/api/health
 
 ## 总结
 
-本部署指南提供了 WhisperX 系统在生产环境中的完整部署方案。请严格按照本指南执行部署操作，并确保所有安全和性能要求都得到满足。
+本部署指南提供了 YiVideo 系统在生产环境中的完整部署方案。请严格按照本指南执行部署操作，并确保所有安全和性能要求都得到满足。
 
 定期进行系统维护和监控，确保系统的稳定运行。如遇到问题，请参考故障恢复部分进行处理。
