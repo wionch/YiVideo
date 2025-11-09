@@ -29,15 +29,17 @@ services/workers/indextts_service/
 
 ### tasks.py
 - **主要任务**:
-  - `text_to_speech()`: 文本转语音任务
-  - 使用`@gpu_lock`装饰器
+  - `generate_speech()`: **核心任务**。基于提供的文本和参考音频（音色）生成语音。它使用`@gpu_lock`并以子进程模式运行，确保稳定性。
+  - `list_voice_presets()`: 列出所有可用的语音预设。这是一个非GPU任务，用于查询配置。
+  - `get_model_info()`: 获取当前TTS模型的技术信息和能力。这是一个非GPU任务。
 
 ### tts_engine.py
-- **功能**: TTS推理引擎
+- **功能**: TTS推理引擎 (子进程模式)
+- **类**: `MultiProcessTTSEngine`
 - **特性**:
-  - 模型加载和管理
-  - 音频生成
-  - 后处理优化
+  - 在独立的子进程中加载和运行模型，与主Celery进程隔离。
+  - 懒加载机制，只在首次需要时初始化。
+  - 通过命令行参数传递配置，确保进程间解耦。
 
 ## 依赖
 
@@ -60,21 +62,35 @@ pydantic
 
 ### 标准任务接口
 ```python
-@celery_app.task(bind=True)
-@gpu_lock(timeout=1800, poll_interval=0.5)
-def text_to_speech(self, context):
+@celery_app.task(bind=True, base=IndexTTSTask, name='indextts.generate_speech')
+@gpu_lock()
+def generate_speech(self, context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    文本转语音任务
+    IndexTTS语音生成任务 (子进程隔离)
 
     Args:
-        context: 工作流上下文，包含:
-            - text: 要转换的文字
-            - speaker_id: 说话人ID
-            - language: 语言代码
-            - speed: 语速
+        context (Dict[str, Any]): 任务上下文，核心参数包括:
+            - text: 要转换的文本
+            - output_path: 输出音频文件路径
+            - spk_audio_prompt: 必需，说话人参考音频路径
+            - emo_audio_prompt: (可选) 情感参考音频路径
 
     Returns:
-        更新后的context，包含生成的音频路径
+        Dict[str, Any]: 包含生成音频路径及状态的任务执行结果
+    """
+    pass
+
+@celery_app.task(bind=True, name='indextts.list_voice_presets')
+def list_voice_presets(self) -> Dict[str, Any]:
+    """
+    列出可用的语音预设
+    """
+    pass
+
+@celery_app.task(bind=True, name='indextts.get_model_info')
+def get_model_info(self) -> Dict[str, Any]:
+    """
+    获取模型信息
     """
     pass
 ```

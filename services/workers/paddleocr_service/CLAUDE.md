@@ -41,25 +41,27 @@ services/workers/paddleocr_service/
 ## 核心文件
 
 ### tasks.py
-- **主要任务**:
-  - `ocr_extraction()`: OCR提取任务
-  - `keyframe_detection()`: 关键帧检测
+- **主要任务**: 本服务的核心逻辑被拆分为一个四阶段的OCR流水线，以提高处理效率和鲁棒性。
+  - `detect_subtitle_area()`: **1. 字幕区域检测**。分析来自`ffmpeg_service`的关键帧，自动定位视频中字幕的精确位置（边界框）。
+  - `create_stitched_images()`: **2. 图像拼接**。根据检测到的字幕区域，从视频中裁剪出每一帧的字幕条，并将它们并发地拼接成若干张大图，为批量OCR做准备。
+  - `perform_ocr()`: **3. 执行OCR**。在拼接后的大图上运行PaddleOCR引擎，高效地识别所有文字内容。
+  - `postprocess_and_finalize()`: **4. 后处理与生成**。对原始OCR结果进行清理、排序和格式化，应用时间戳，最终生成标准的SRT和JSON格式的字幕文件。
 
 ### modules/
-**keyframe_detector.py**: 关键帧检测器
-- 变化检测
-- 文字出现检测
-- 时间间隔分析
+**area_detector.py**: 区域检测器
+- 文字区域定位
+- 边界框生成
+- 置信度评估
 
 **ocr.py**: OCR核心引擎
 - 文字检测
 - 文字识别
 - 后处理优化
 
-**area_detector.py**: 区域检测器
-- 文字区域定位
-- 边界框生成
-- 置信度评估
+**postprocessor.py**: 后处理器
+- OCR结果格式化
+- 时间戳计算
+- 字幕合并与排序
 
 ## 依赖
 
@@ -80,24 +82,25 @@ pydantic
 
 ## 任务接口
 
-### 标准任务接口
-```python
-@celery_app.task(bind=True)
-def ocr_extraction(self, context):
-    """
-    OCR提取任务
+### 工作流调用
+此服务的任务通常作为一个序列链在工作流中被调用，而不是单个独立任务。一个典型的`paddleocr`工作流配置如下：
 
-    Args:
-        context: 工作流上下文，包含:
-            - video_path: 视频文件路径
-            - languages: 语言列表
-            - use_gpu: 是否使用GPU
-
-    Returns:
-        更新后的context，包含ocr_results
-    """
-    pass
+```yaml
+# 在工作流配置文件中的示例
+workflow_chain:
+  # ... 其他前置任务 ...
+  - task: paddleocr.detect_subtitle_area
+    params: {}
+  - task: paddleocr.create_stitched_images
+    params: {}
+  - task: paddleocr.perform_ocr
+    params: {}
+  - task: paddleocr.postprocess_and_finalize
+    params: {}
+  # ... 其他后置任务 ...
 ```
+
+每个任务都接收标准的`context`字典，并将其处理结果注入上下文，供下一个任务使用。
 
 ## 输出格式
 

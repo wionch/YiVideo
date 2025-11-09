@@ -250,6 +250,40 @@ services:
     networks:
       - wionch
 
+  # --- WService (字幕AI优化服务) ---
+  wservice:
+    container_name: wservice
+    build:
+      context: .
+      dockerfile: ./services/workers/wservice/Dockerfile
+    volumes:
+      - ./services:/app/services
+      - ./videos:/app/videos
+      - ./locks:/app/locks
+      - ./tmp:/app/tmp
+      - ./share:/share
+      - ./config.yml:/app/config.yml
+      - ./config:/app/config
+      - ./scripts:/app/scripts
+      - ~/.ssh:/root/.ssh
+      - ~/.gemini:/root/.gemini
+    restart: always
+    user: "0:0"
+    entrypoint: ""
+    command: ["celery", "-A", "services.workers.wservice.app.celery_app", "worker", "-l", "info", "-Q", "wservice_queue"]
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      # AI服务相关环境变量
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY}
+      - VOLCENGINE_API_KEY=${VOLCENGINE_API_KEY}
+      - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY}
+    networks:
+      - wionch
+
   # --- IndexTTS Service (IndexTTS2 文本转语音服务) ---
   indextts_service:
     container_name: indextts_service

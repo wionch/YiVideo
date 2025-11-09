@@ -516,6 +516,67 @@ pyannote_audio_service:
   # 是否记录详细的处理日志
   verbose_processing: false
 
+# 16. WService (字幕AI优化服务) 配置 (新增)
+# WService专注于字幕处理和AI优化，从faster_whisper_service迁移了所有非GPU功能
+wservice:
+  # === 基础配置 ===
+  # 是否启用性能监控
+  enable_monitoring: true
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+  # 是否记录详细的处理日志
+  verbose_processing: false
+
+  # === 字幕处理配置 ===
+  # 字幕文件生成格式
+  subtitle_formats: ["srt", "vtt", "ass"]
+  # 字幕编码格式
+  subtitle_encoding: "utf-8"
+  # 字幕时间戳精度（小数点后位数）
+  timestamp_precision: 3
+
+  # === 说话人合并配置 ===
+  # 启用词级时间戳匹配
+  enable_word_timestamps: true
+  # 说话人边界检测阈值（0-1）
+  speaker_boundary_threshold: 0.5
+  # 词级匹配容差（秒）
+  word_matching_tolerance: 0.1
+  # 最小字幕片段时长（秒）
+  min_subtitle_duration: 0.5
+  # 最大字幕片段时长（秒）
+  max_subtitle_duration: 10.0
+
+  # === AI优化配置 ===
+  # 默认AI服务提供商
+  default_ai_provider: deepseek
+  # AI优化批次大小
+  batch_size: 5
+  # 最大重试次数
+  max_retry_attempts: 3
+  # 重试延迟时间（秒）
+  retry_delay: 2.0
+  # API请求超时时间（秒）
+  api_timeout: 300
+
+  # === 性能优化 ===
+  # 并发处理工作进程数
+  worker_processes: 2
+  # 是否启用缓存
+  enable_cache: true
+  # 缓存过期时间（小时）
+  cache_ttl_hours: 24
+  # 是否启用批量处理
+  enable_batch_processing: true
+
+  # === 文件管理 ===
+  # 临时文件目录
+  temp_dir: "/tmp/wservice"
+  # 是否自动清理临时文件
+  cleanup_temp_files: true
+  # 文件保留时间（小时）
+  file_retention_hours: 24
+
 # 15. 字幕校正服务配置 (新增)
 # 基于AI的字幕校正功能，支持多个AI服务提供商进行字幕质量优化
 subtitle_correction:

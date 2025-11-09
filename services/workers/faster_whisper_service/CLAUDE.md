@@ -14,6 +14,26 @@ Faster Whisper Service是基于faster-whisper高版本的语音识别(ASR)服务
 - **模型管理**: 自动下载、缓存和管理模型
 - **内存优化**: GPU显存管理和优化
 
+## 架构设计：子进程隔离推理模型
+
+为了确保系统的高稳定性和健壮性，本服务采用了一种**子进程隔离（Subprocess Isolation）**的架构来执行GPU推理任务。
+
+### 设计原因
+该设计的核心目标是解决在生产环境中常见的 **Celery prefork模型与CUDA初始化之间的冲突**。在Celery的多进程工作池中直接加载CUDA模型可能会导致不可预测的错误，例如进程死锁、显存泄漏或CUDA初始化失败。通过将推理任务隔离到独立的子进程中，可以完全规避这些问题。
+
+### 工作流程
+1.  **任务接收**: Celery worker（在`tasks.py`中）接收到`transcribe_audio`任务请求。
+2.  **子进程调用**: 主进程不直接加载模型，而是通过Python的`subprocess.run()`模块，调用一个专用的推理脚本`faster_whisper_infer.py`。
+3.  **参数传递**: 所有推理所需的参数（如音频文件路径、模型大小、语言、计算类型等）都通过命令行参数安全地传递给子进程。
+4.  **独立推理**: `faster_whisper_infer.py`脚本在一个全新的、干净的进程中加载模型、执行推理，并将结果（包括词级时间戳）写入一个临时的JSON文件。
+5.  **结果回收**: 主进程等待子进程执行完成。成功后，主进程读取临时JSON文件以获取转录结果，然后清理临时文件。
+6.  **错误处理**: 如果子进程执行失败或超时，主进程会捕获异常，记录详细的`stderr`输出，并将任务标记为失败，从而不会影响到Celery worker本身。
+
+### 主要优势
+- **极高的稳定性**: 彻底隔离了CUDA环境。即使GPU推理过程中发生致命错误，也只会导致子进程退出，而不会使整个Celery服务崩溃。
+- **纯净的资源管理**: 每个推理任务都在一个独立的进程中运行，任务结束后进程完全退出，确保了GPU显存等资源的彻底释放，避免了内存泄漏的风险。
+- **依赖解耦**: 将核心的推理逻辑与任务调度逻辑（Celery）完全解耦，使得两部分可以独立维护和升级。
+
 ## 迁移说明
 
 非GPU字幕处理功能已迁移至`wservice`服务，包括：
@@ -94,21 +114,20 @@ aiohttp
 
 ### 标准任务接口
 ```python
-@celery_app.task(bind=True)
-@gpu_lock(timeout=1800, poll_interval=0.5)
-def speech_recognition(self, context):
+@celery_app.task(bind=True, name='faster_whisper.transcribe_audio')
+def transcribe_audio(self, context: dict) -> dict:
     """
-    语音识别任务
+    语音识别任务 (独立转录节点)
+
+    通过子进程隔离模型执行语音转录，支持CUDA和CPU模式。
+    是否使用GPU锁由服务内部根据配置和设备状态动态决定。
 
     Args:
-        context: 工作流上下文，包含:
-            - audio_path: 音频文件路径
-            - language: 语言代码
-            - model_size: 模型大小
-            - compute_type: 计算类型
+        context (dict): 工作流上下文。音频文件路径等参数会从
+                      前置任务(如 audio_separator 或 ffmpeg)的输出中自动获取。
 
     Returns:
-        更新后的context
+        dict: 更新后的工作流上下文。
     """
     pass
 ```

@@ -32,19 +32,14 @@ services/workers/audio_separator_service/
 
 ### tasks.py
 - **主要任务**:
-  - `separate_audio()`: 音频分离任务
-  - 使用`@gpu_lock`装饰器
-
-### audio_separator_infer.py
-- **功能**: 音频分离推理引擎
-- **模型**: 基于深度学习的音频分离模型
+  - `separate_vocals()`: **核心任务**。从音频中分离出人声和背景音。该任务使用`@gpu_lock`装饰器，并通过`model_manager`以子进程模式执行推理，确保了稳定性和资源隔离。
+  - `health_check()`: 一个不使用GPU的健康检查任务，用于监控服务状态。
 
 ### model_manager.py
-- **功能**: 模型下载和管理
+- **功能**: 模型下载、管理和推理执行。
 - **特性**:
-  - 自动下载预训练模型
-  - 模型版本管理
-  - 内存优化
+  - `separate_audio_subprocess()`: 核心方法，通过`subprocess`调用独立的推理脚本，将推理过程与Celery worker主进程解耦。
+  - 自动下载和缓存预训练模型。
 
 ## 依赖
 
@@ -67,19 +62,20 @@ pydantic
 
 ### 标准任务接口
 ```python
-@celery_app.task(bind=True)
-@gpu_lock(timeout=1800, poll_interval=0.5)
-def separate_audio(self, context):
+@celery_app.task(bind=True, name='audio_separator.separate_vocals')
+@gpu_lock()
+def separate_vocals(self, context: dict) -> dict:
     """
-    音频分离任务
+    [工作流任务] 分离音频中的人声和背景音
 
     Args:
-        context: 工作流上下文，包含:
-            - audio_path: 音频文件路径
-            - quality: 分离质量 (high/medium/low)
+        context (dict): 工作流上下文。将自动从上下文中寻找合适的音频源
+                      （如 `ffmpeg.extract_audio` 的输出）。也可以通过
+                      `input_params.audio_separator_config` 传递质量模式等参数。
 
     Returns:
-        更新后的context，包含分离后的轨道
+        dict: 更新后的工作流上下文，output中包含 `vocal_audio` 和 `instrumental`
+              等分离后文件的路径。
     """
     pass
 ```

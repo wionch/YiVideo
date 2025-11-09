@@ -34,9 +34,10 @@ services/workers/ffmpeg_service/
 
 ### tasks.py
 - **主要任务**:
-  - `extract_audio()`: 音频提取
-  - `decode_video()`: 视频解码
-  - `split_audio()`: 音频分割
+  - `extract_keyframes()`: 抽取视频关键帧，为后续如字幕区域检测等任务提供图像样本。
+  - `extract_audio()`: 提取完整音轨，并转换为ASR模型所需的标准格式（如16kHz WAV）。
+  - `crop_subtitle_images()`: 结合OCR检测到的字幕区域，从视频中并发解码并裁剪出字幕图像。
+  - `split_audio_segments()`: 依据字幕时间戳，将音频精确分割成与每条字幕对应的片段。
 
 ### executor_decode_video.py
 - **功能**: 视频解码执行器

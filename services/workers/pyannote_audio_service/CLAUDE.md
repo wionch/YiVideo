@@ -30,7 +30,7 @@ services/workers/pyannote_audio_service/
 
 ### tasks.py
 - **主要任务**:
-  - `speaker_diarization()`: 说话人分离任务
+  - `diarize_speakers()`: 说话人分离任务
   - 使用`@gpu_lock`装饰器
   - 输出JSON格式的说话人片段
 
@@ -62,19 +62,19 @@ pydantic
 
 ### 标准任务接口
 ```python
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, name='pyannote_audio.diarize_speakers')
 @gpu_lock(timeout=1800, poll_interval=0.5)
-def speaker_diarization(self, context):
+def diarize_speakers(self, context: dict) -> dict:
     """
-    说话人分离任务
+    说话人分离任务 (子进程隔离模式)
+
+    通过调用独立的推理脚本来执行说话人分离，以确保稳定性。
 
     Args:
-        context: 工作流上下文，包含:
-            - audio_path: 音频文件路径
-            - num_speakers: 说话人数量（可选）
+        context (dict): 工作流上下文，将自动从中寻找合适的音频源。
 
     Returns:
-        更新后的context，包含speaker_segments
+        dict: 更新后的工作流上下文，包含指向分离结果文件(.json)的路径。
     """
     pass
 ```

@@ -186,18 +186,36 @@ GET /v1/workflows/status/{workflow_id}
 
 **响应**: 返回完整的工作流上下文状态
 
-#### 3. 监控端点
-```http
-GET /v1/monitoring/gpu-locks/status
-GET /v1/monitoring/heartbeats
-GET /v1/monitoring/timeouts
-```
+#### 3. 监控与健康检查端点
 
-#### 4. 健康检查
-```http
-GET /health
-GET /
-```
+所有监控端点都位于 `/api/v1/monitoring` 前缀下。
+
+##### GPU锁管理
+- `GET /gpu-lock/status`: 获取指定GPU锁的详细状态。
+- `GET /gpu-lock/health`: 获取GPU锁系统的整体健康状况摘要。
+- `POST /lock/release`: 手动释放一个指定的GPU锁。
+
+##### 监控器管理
+- `GET /monitor/status`: 获取GPU锁监控器的当前状态、统计和配置。
+- `GET /monitor/health`: 获取监控器的健康状态，包括任何检测到的问题。
+- `POST /monitor/start`: 启动后台GPU锁监控器。
+- `POST /monitor/stop`: 停止后台GPU锁监控器。
+
+##### 任务心跳管理
+- `GET /heartbeat/task/{task_id}`: 获取指定任务的心跳状态。
+- `GET /heartbeat/all`: 获取所有活动、死亡和孤立任务的心跳状态概览。
+- `POST /heartbeat/task/{task_id}/start`: 为指定任务手动启动心跳。
+- `DELETE /heartbeat/task/{task_id}`: 停止指定任务的心跳。
+- `POST /heartbeat/cleanup`: 执行清理操作，移除死亡和孤立的心跳记录。
+
+##### 超时管理
+- `GET /timeout/status`: 获取超时管理器的状态，包括统计和历史记录。
+- `GET /timeout/config`: 获取当前的超时配置。
+- `POST /timeout/check`: 手动触发对指定锁的超时检查。
+
+##### 综合统计与健康检查
+- `GET /statistics`: 获取所有监控组件（GPU锁、监控器、心跳、超时）的综合统计信息。
+- `GET /health`: 获取整个监控服务的聚合健康状态。 **注意**: 此端点的完整路径是 `/api/v1/monitoring/health`。
 
 ## 关键流程
 
