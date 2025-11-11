@@ -85,7 +85,10 @@
       "Bash(if:*)",
       "Bash(then:*)",
       "Bash(else)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "mcp__serena__write_memory"
     ],
     "deny": [
       "Bash(docker build:*)"
