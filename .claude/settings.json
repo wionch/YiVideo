@@ -51,7 +51,7 @@
         "PreToolUse": [
             {
                 "name": "Enforce Serena for Code Analysis",
-                "matcher": "^(Bash|Read|Grep)$",
+                "matcher": "^(Bash|Read|Grep|Glob|Search)$",
                 "hooks": [
                     {
                         "type": "command",
