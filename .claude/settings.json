@@ -1,74 +1,74 @@
 {
-    "hooks": {
-        "PostToolUse": [
-            {
-                "name": "Mark Sequential Thinking Complete",
-                "matcher": "^(sequential_thinking|explore_sequential)$",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "python3 .claude/hooks/session_manager.py complete"
-                    }
-                ]
-            }
-        ],
-        "SessionStart": [
-            {
-                "name": "Initialize Session",
-                "matcher": "",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "python3 .claude/hooks/session_manager.py start"
-                    }
-                ]
-            }
-        ],
-        "SessionEnd": [
-            {
-                "name": "Cleanup Session",
-                "matcher": "",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "python3 .claude/hooks/session_manager.py end"
-                    }
-                ]
-            }
-        ],
-        "UserPromptSubmit": [
-            {
-                "name": "Sequential Thinking Reminder",
-                "matcher": "",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "python3 .claude/hooks/trigger_sequential_thinking.py"
-                    }
-                ]
-            }
-        ],
-        "PreToolUse": [
-            {
-                "name": "Enforce Serena for Code Analysis",
-                "matcher": "^(Bash|Read|Grep|Glob|Search)$",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "python3 .claude/hooks/block_non_serena.py"
-                    }
-                ]
-            },
-            {
-                "name": "Enforce Context7 for Library Docs",
-                "matcher": "^(WebSearch|WebFetch)$",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "python3 .claude/hooks/block_non_context7.py"
-                    }
-                ]
-            }
-        ]
-    }
+    // "hooks": {
+    //     "PostToolUse": [
+    //         {
+    //             "name": "Mark Sequential Thinking Complete",
+    //             "matcher": "^(sequential_thinking|explore_sequential)$",
+    //             "hooks": [
+    //                 {
+    //                     "type": "command",
+    //                     "command": "python3 .claude/hooks/session_manager.py complete"
+    //                 }
+    //             ]
+    //         }
+    //     ],
+    //     "SessionStart": [
+    //         {
+    //             "name": "Initialize Session",
+    //             "matcher": "",
+    //             "hooks": [
+    //                 {
+    //                     "type": "command",
+    //                     "command": "python3 .claude/hooks/session_manager.py start"
+    //                 }
+    //             ]
+    //         }
+    //     ],
+    //     "SessionEnd": [
+    //         {
+    //             "name": "Cleanup Session",
+    //             "matcher": "",
+    //             "hooks": [
+    //                 {
+    //                     "type": "command",
+    //                     "command": "python3 .claude/hooks/session_manager.py end"
+    //                 }
+    //             ]
+    //         }
+    //     ],
+    //     "UserPromptSubmit": [
+    //         {
+    //             "name": "Sequential Thinking Reminder",
+    //             "matcher": "",
+    //             "hooks": [
+    //                 {
+    //                     "type": "command",
+    //                     "command": "python3 .claude/hooks/trigger_sequential_thinking.py"
+    //                 }
+    //             ]
+    //         }
+    //     ],
+    //     "PreToolUse": [
+    //         {
+    //             "name": "Enforce Serena for Code Analysis",
+    //             "matcher": "^(Bash|Read|Grep|Glob|Search)$",
+    //             "hooks": [
+    //                 {
+    //                     "type": "command",
+    //                     "command": "python3 .claude/hooks/block_non_serena.py"
+    //                 }
+    //             ]
+    //         },
+    //         {
+    //             "name": "Enforce Context7 for Library Docs",
+    //             "matcher": "^(WebSearch|WebFetch)$",
+    //             "hooks": [
+    //                 {
+    //                     "type": "command",
+    //                     "command": "python3 .claude/hooks/block_non_context7.py"
+    //                 }
+    //             ]
+    //         }
+    //     ]
+    // }
 }

@@ -35,6 +35,10 @@ services:
       - PYTHONPATH=/app
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
     networks:
       - wionch
 
@@ -65,6 +69,11 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
     deploy:
       resources:
         reservations:
@@ -101,6 +110,11 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
     deploy:
       resources:
         reservations:
@@ -140,6 +154,11 @@ services:
       - PYTHONPATH=/app
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
       - HF_TOKEN=${HF_TOKEN}
       - HF_HOME=/app/.cache/huggingface
       - HF_HUB_ENABLE_HF_TRANSFER=0
@@ -189,6 +208,11 @@ services:
       - PYTHONPATH=/app
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
       - HF_TOKEN=${HF_TOKEN}
       - HF_HOME=/app/.cache/huggingface
       - HF_HUB_ENABLE_HF_TRANSFER=0
@@ -238,6 +262,11 @@ services:
       - PYTHONPATH=/app
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_VISIBLE_DEVICES=0
     deploy:
@@ -275,6 +304,11 @@ services:
       - PYTHONPATH=/app
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
       # AI服务相关环境变量
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
@@ -318,6 +352,11 @@ services:
       - PYTHONPATH=/app
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
+      - MINIO_HOST=${MINIO_HOST}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
 
       # GPU 配置
       - NVIDIA_VISIBLE_DEVICES=all

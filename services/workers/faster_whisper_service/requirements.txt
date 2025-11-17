@@ -8,3 +8,5 @@ pydantic
 librosa
 psutil
 aiohttp
+minio>=7.0.0
+requests>=2.30.0

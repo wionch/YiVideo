@@ -21,6 +21,7 @@ from .model_manager import get_model_manager
 # 导入新的通用配置加载器
 from services.common.config_loader import CONFIG
 from services.common.parameter_resolver import resolve_parameters
+from services.common.file_service import get_file_service
 
 # 配置日志
 logger = get_logger('audio_separator.tasks')
@@ -95,6 +96,9 @@ def separate_vocals(self, context: dict) -> dict:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
 
+        # --- 文件下载准备 ---
+        file_service = get_file_service()
+        
         # 1. 音频源选择逻辑：优先使用已提取的音频文件
         audio_path = None
         audio_source = ""
@@ -110,7 +114,7 @@ def separate_vocals(self, context: dict) -> dict:
 
         # 如果没有已提取音频，回退到 input_params 中的文件
         if not audio_path:
-            audio_path = workflow_context.input_params.get("audio_path") or workflow_context.input_params.get("video_path")
+            audio_path = workflow_context.input_params.get("input_data", {}).get("audio_path") or workflow_context.input_params.get("input_data", {}).get("video_path")
             if audio_path:
                 audio_source = "原始输入文件"
                 logger.info(f"[{stage_name}] 回退到原始文件: {audio_path}")
@@ -122,6 +126,12 @@ def separate_vocals(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 选择的音频源: {audio_source}")
         logger.info(f"[{stage_name}] 音频文件路径: {audio_path}")
         logger.info(f"[{stage_name}] =================================")
+        
+        # --- 文件下载 ---
+        if audio_path and not os.path.exists(audio_path):
+            logger.info(f"[{stage_name}] 开始下载音频文件: {audio_path}")
+            audio_path = file_service.resolve_and_download(audio_path, workflow_context.shared_storage_path)
+            logger.info(f"[{stage_name}] 音频文件下载完成: {audio_path}")
 
         logger.info(f"[{stage_name}] 开始音频分离任务")
 

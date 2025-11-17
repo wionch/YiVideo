@@ -1,6 +1,6 @@
 # services/api_gateway/requirements.txt
 #
-# api-gateway的最小依赖集
+# api-gateway的依赖集
 
 fastapi
 uvicorn
@@ -9,3 +9,5 @@ celery
 redis
 pyyaml
 requests
+minio
+python-multipart

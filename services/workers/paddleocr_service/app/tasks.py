@@ -41,6 +41,7 @@ from services.common.context import WorkflowContext
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
 from services.common.parameter_resolver import resolve_parameters
+from services.common.file_service import get_file_service
 
 # --- 日志配置 ---
 # 日志已统一管理，使用 services.common.logger
@@ -477,7 +478,7 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
         with open(ocr_results_path, 'r', encoding='utf-8') as f:
             ocr_results = json.load(f)
 
-        video_path = workflow_context.input_params.get("video_path")
+        video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
         if not video_path:
             raise ValueError("上下文中缺少 'video_path' 信息，无法获取FPS。")
 

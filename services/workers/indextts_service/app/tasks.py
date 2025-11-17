@@ -22,6 +22,7 @@ try:
     from services.common.logger import get_logger
     from services.common.locks import gpu_lock, SmartGpuLockManager
     from services.common.parameter_resolver import resolve_parameters
+    from services.common.file_service import get_file_service
 except ImportError as e:
     print(f"导入共享模块失败: {e}")
     sys.exit(1)
@@ -176,10 +177,30 @@ def generate_speech(
     logger.info(f"开始执行IndexTTS2任务 {task_id}")
     logger.info(f"工作流ID: {workflow_id}")
     logger.info(f"文本长度: {len(text)} 字符")
+    
+    # --- 文件下载 ---
+    file_service = get_file_service()
+    shared_storage_path = workflow_context.shared_storage_path
+    
+    # 下载音色参考音频
     if reference_audio:
         logger.info(f"音色参考: {reference_audio}")
+        if not os.path.exists(reference_audio):
+            logger.info(f"开始下载音色参考音频: {reference_audio}")
+            reference_audio = file_service.resolve_and_download(reference_audio, shared_storage_path)
+            context['reference_audio'] = reference_audio
+            context['spk_audio_prompt'] = reference_audio
+            logger.info(f"音色参考音频下载完成: {reference_audio}")
+    
+    # 下载情感参考音频
     if emotion_reference:
         logger.info(f"情感参考: {emotion_reference}")
+        if not os.path.exists(emotion_reference):
+            logger.info(f"开始下载情感参考音频: {emotion_reference}")
+            emotion_reference = file_service.resolve_and_download(emotion_reference, shared_storage_path)
+            context['emotion_reference'] = emotion_reference
+            context['emo_audio_prompt'] = emotion_reference
+            logger.info(f"情感参考音频下载完成: {emotion_reference}")
 
     # 参数验证
     if not text:

@@ -32,6 +32,7 @@ from services.common.locks import gpu_lock
 from services.common import state_manager
 from services.common.context import StageExecution, WorkflowContext
 from services.common.parameter_resolver import resolve_parameters
+from services.common.file_service import get_file_service
 
 config = get_config()
 logger = get_logger(__name__)
@@ -114,6 +115,9 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
 
         workflow_id = workflow_context.workflow_id
         logger.info(f"[{workflow_id}] 开始说话人分离任务 (subprocess模式)")
+        
+        # --- 文件下载准备 ---
+        file_service = get_file_service()
 
         # 步骤1: 获取音频文件路径（与其他服务保持一致）
         audio_path = None
@@ -143,7 +147,7 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         # 如果没有来自其他任务的音频，回退到 input_params 中的文件
         if not audio_path:
             # 优先使用 audio_path，否则使用 video_path（支持直接处理音频文件或视频文件）
-            audio_path = workflow_context.input_params.get("audio_path") or workflow_context.input_params.get("video_path")
+            audio_path = workflow_context.input_params.get("input_data", {}).get("audio_path") or workflow_context.input_params.get("input_data", {}).get("video_path")
             if audio_path:
                 audio_source = "原始输入文件"
                 logger.info(f"[{workflow_id}] 回退到原始文件: {audio_path}")
@@ -151,14 +155,21 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         if not audio_path:
             raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 或 audio_separator.separate_vocals 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
 
+        logger.info(f"[{workflow_id}] ========== 音频源选择结果 ==========")
+        logger.info(f"[{workflow_id}] 选择的音频源: {audio_source}")
+        logger.info(f"[{workflow_id}] 音频文件路径: {audio_path}")
+        
+        # --- 文件下载 ---
+        if audio_path and not os.path.exists(audio_path):
+            logger.info(f"[{workflow_id}] 开始下载音频文件: {audio_path}")
+            audio_path = file_service.resolve_and_download(audio_path, workflow_context.shared_storage_path)
+            logger.info(f"[{workflow_id}] 音频文件下载完成: {audio_path}")
+        
         # 检查音频文件是否存在
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
-        logger.info(f"[{workflow_id}] ========== 音频源选择结果 ==========")
-        logger.info(f"[{workflow_id}] 选择的音频源: {audio_source}")
-        logger.info(f"[{workflow_id}] 音频文件路径: {audio_path}")
-        logger.info(f"[{workflow_id}] ======================================")
+        logger.info(f"[{workflow_id}] ========== 音频文件验证完成 ==========")
 
         # 创建工作流输出目录
         workflow_output_dir = Path(workflow_context.shared_storage_path) / "diarization"

@@ -28,6 +28,7 @@ from services.common.context import WorkflowContext
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
 from services.common.parameter_resolver import resolve_parameters
+from services.common.file_service import get_file_service
 
 # 导入该服务内部的核心视频处理逻辑模块
 from .modules.video_decoder import extract_random_frames
@@ -109,14 +110,23 @@ def extract_audio(self: Task, context: dict) -> dict:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
                 workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
-        video_path = workflow_context.input_params.get("video_path")
-        if not video_path or not os.path.exists(video_path):
+        # --- 文件下载 ---
+        file_service = get_file_service()
+        video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
+        if not video_path:
+            raise ValueError("缺少必需参数: video_path")
+        
+        logger.info(f"[{stage_name}] 开始下载视频文件: {video_path}")
+        video_path = file_service.resolve_and_download(video_path, workflow_context.shared_storage_path)
+        workflow_context.input_params["video_path"] = video_path
+        logger.info(f"[{stage_name}] 视频文件下载完成: {video_path}")
+        
+        if not os.path.exists(video_path):
             raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
         # 在共享存储中创建音频目录
@@ -133,12 +143,12 @@ def extract_audio(self: Task, context: dict) -> dict:
         # 使用 ffmpeg 提取音频
         command = [
             "ffmpeg",
-            "-i", video_path,  # 输入视频文件
-            "-vn",            # 不包含视频
-            "-acodec", "pcm_s16le",  # 16-bit PCM 编码
-            "-ar", "16000",   # 采样率 16kHz (ASR 模型推荐的采样率)
-            "-ac", "1",       # 单声道
-            "-y",             # 覆盖输出文件
+            "-i", video_path,
+            "-vn",
+            "-acodec", "pcm_s16le",
+            "-ar", "16000",
+            "-ac", "1",
+            "-y",
             audio_path
         ]
 
@@ -148,7 +158,6 @@ def extract_audio(self: Task, context: dict) -> dict:
             if result.stderr:
                 logger.warning(f"[{stage_name}] ffmpeg 有 stderr 输出:\n{result.stderr.strip()}")
 
-            # 验证输出文件
             if not os.path.exists(audio_path):
                 raise RuntimeError(f"音频提取失败：输出文件不存在 {audio_path}")
 
@@ -158,7 +167,6 @@ def extract_audio(self: Task, context: dict) -> dict:
 
             logger.info(f"[{stage_name}] 音频提取完成：{audio_path} (大小: {file_size} 字节)")
 
-            # 返回音频文件路径
             output_data = {"audio_path": audio_path}
             workflow_context.stages[stage_name].status = 'SUCCESS'
             workflow_context.stages[stage_name].output = output_data

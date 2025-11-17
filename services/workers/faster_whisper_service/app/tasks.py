@@ -25,6 +25,7 @@ from services.common.config_loader import CONFIG
 # 导入GPU锁装饰器
 from services.common.locks import gpu_lock
 from services.common.parameter_resolver import resolve_parameters
+from services.common.file_service import get_file_service
 
 logger = get_logger('tasks')
 
@@ -451,6 +452,9 @@ def transcribe_audio(self, context: dict) -> dict:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
 
+        # --- 文件下载准备 ---
+        file_service = get_file_service()
+        
         # 从前一个任务的输出中获取音频文件路径
         audio_path = None
         audio_source = ""
@@ -501,6 +505,15 @@ def transcribe_audio(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 选择的音频源: {audio_source}")
         logger.info(f"[{stage_name}] 音频文件路径: {audio_path}")
         logger.info(f"[{stage_name}] =================================")
+        
+        # --- 文件下载 ---
+        logger.info(f"[{stage_name}] 开始下载音频文件: {audio_path}")
+        audio_path = file_service.resolve_and_download(audio_path, workflow_context.shared_storage_path)
+        logger.info(f"[{stage_name}] 音频文件下载完成: {audio_path}")
+        
+        # 验证音频文件存在
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
         # 加载服务配置
         service_config = CONFIG.get('faster_whisper_service', {})

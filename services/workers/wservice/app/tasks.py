@@ -18,6 +18,7 @@ from services.common.logger import get_logger
 from services.common import state_manager
 from services.common.context import StageExecution, WorkflowContext
 from services.common.config_loader import CONFIG
+from services.common.file_service import get_file_service
 
 # 导入 wservice 自己的 Celery app (将在下一步创建)
 from .celery_app import celery_app

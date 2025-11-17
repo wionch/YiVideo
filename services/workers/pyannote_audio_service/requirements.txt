@@ -9,6 +9,9 @@ pydantic>=2.0.0
 soundfile>=0.12.1
 # torchcodec
 
+minio>=7.0.0
+requests>=2.30.0
+
 # # 音频处理依赖
 # torchaudio>=2.8.0
 

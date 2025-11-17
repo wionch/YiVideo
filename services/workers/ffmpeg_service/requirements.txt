@@ -3,3 +3,5 @@ redis
 numpy
 pydantic
 PyYAML
+minio
+requests
