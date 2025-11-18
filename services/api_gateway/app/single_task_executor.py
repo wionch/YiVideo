@@ -348,7 +348,7 @@ class SingleTaskExecutor:
         def extract_paths_recursive(obj):
             if isinstance(obj, dict):
                 for key, value in obj.items():
-                    if key in ['audio_path', 'video_path', 'subtitle_path', 'output_path', 
+                    if key in ['audio_path', 'video_path', 'subtitle_path', 'output_path',
                               'keyframe_dir', 'audio_segments_dir', 'cropped_images_path']:
                         if isinstance(value, str) and os.path.exists(value):
                             file_paths.append(value)
@@ -361,7 +361,7 @@ class SingleTaskExecutor:
         logger.info(f"开始提取文件路径，result keys: {list(result.keys())}")
         extract_paths_recursive(result)
         logger.info(f"提取到 {len(file_paths)} 个文件路径: {file_paths}")
-        return list(set(file_paths))  # 去重  # 去重  # 去重
+        return list(set(file_paths))  # 去重
     
     def _get_file_type(self, filename: str) -> str:
         """根据文件名获取文件类型"""

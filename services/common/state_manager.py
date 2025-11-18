@@ -74,8 +74,8 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
             if stage.status != 'SUCCESS' or not stage.output:
                 continue
             
-            # 检查输出中的文件路径字段
-            file_keys = ['audio_path', 'video_path', 'subtitle_path', 'output_path']
+            # 检查输出中的文件路径字段 - 优先处理转录结果文件
+            file_keys = ['segments_file', 'transcribe_data_file', 'audio_path', 'video_path', 'subtitle_path', 'output_path']
             
             for key in file_keys:
                 if key not in stage.output:

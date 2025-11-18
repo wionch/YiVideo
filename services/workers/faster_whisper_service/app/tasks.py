@@ -455,51 +455,55 @@ def transcribe_audio(self, context: dict) -> dict:
         # --- 文件下载准备 ---
         file_service = get_file_service()
         
-        # 从前一个任务的输出中获取音频文件路径
-        audio_path = None
-        audio_source = ""
+        # 优先从 input_data 中直接获取音频路径（单任务模式）
+        audio_path = workflow_context.input_params.get('input_data', {}).get('audio_path')
+        audio_source = "直接参数传入"
 
-        logger.info(f"[{stage_name}] ========== 音频源选择逻辑 ==========")
-        logger.info(f"[{stage_name}] 当前工作流阶段数量: {len(workflow_context.stages)}")
-        logger.info(f"[{stage_name}] 可用阶段列表: {list(workflow_context.stages.keys())}")
+        if audio_path:
+            logger.info(f"[{stage_name}] 从输入参数获取音频文件: {audio_path}")
+        else:
+            # 兼容传统工作流模式：从 stages 中获取前序阶段输出
+            logger.info(f"[{stage_name}] ========== 音频源选择逻辑 ==========")
+            logger.info(f"[{stage_name}] 当前工作流阶段数量: {len(workflow_context.stages)}")
+            logger.info(f"[{stage_name}] 可用阶段列表: {list(workflow_context.stages.keys())}")
 
-        # 优先检查 audio_separator.separate_vocals 阶段的人声音频输出
-        audio_separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
-        logger.debug(f"[{stage_name}] 检查 audio_separator.separate_vocals 阶段: 状态={audio_separator_stage.status if audio_separator_stage else 'None'}")
+            # 优先检查 audio_separator.separate_vocals 阶段的人声音频输出
+            audio_separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
+            logger.debug(f"[{stage_name}] 检查 audio_separator.separate_vocals 阶段: 状态={audio_separator_stage.status if audio_separator_stage else 'None'}")
 
-        if audio_separator_stage and audio_separator_stage.status in ['SUCCESS', 'COMPLETED']:
-            logger.debug(f"[{stage_name}] audio_separator 阶段输出类型: {type(audio_separator_stage.output)}")
-            logger.debug(f"[{stage_name}] audio_separator 输出内容: {audio_separator_stage.output}")
+            if audio_separator_stage and audio_separator_stage.status in ['SUCCESS', 'COMPLETED']:
+                logger.debug(f"[{stage_name}] audio_separator 阶段输出类型: {type(audio_separator_stage.output)}")
+                logger.debug(f"[{stage_name}] audio_separator 输出内容: {audio_separator_stage.output}")
 
-            # 直接检查 vocal_audio 字段
-            if (audio_separator_stage.output and
-                isinstance(audio_separator_stage.output, dict) and
-                audio_separator_stage.output.get('vocal_audio')):
-                audio_path = audio_separator_stage.output['vocal_audio']
-                audio_source = "人声音频 (audio_separator)"
-                logger.info(f"[{stage_name}] 成功获取人声音频: {audio_path}")
+                # 直接检查 vocal_audio 字段
+                if (audio_separator_stage.output and
+                    isinstance(audio_separator_stage.output, dict) and
+                    audio_separator_stage.output.get('vocal_audio')):
+                    audio_path = audio_separator_stage.output['vocal_audio']
+                    audio_source = "人声音频 (audio_separator)"
+                    logger.info(f"[{stage_name}] 成功获取人声音频: {audio_path}")
 
-        # 如果没有人声音频，回退到 ffmpeg.extract_audio 的默认音频
-        if not audio_path:
-            ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
-            logger.debug(f"[{stage_name}] 检查 ffmpeg.extract_audio 阶段: 状态={ffmpeg_stage.status if ffmpeg_stage else 'None'}")
+            # 如果没有人声音频，回退到 ffmpeg.extract_audio 的默认音频
+            if not audio_path:
+                ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
+                logger.debug(f"[{stage_name}] 检查 ffmpeg.extract_audio 阶段: 状态={ffmpeg_stage.status if ffmpeg_stage else 'None'}")
 
-            if ffmpeg_stage and ffmpeg_stage.status in ['SUCCESS', 'COMPLETED']:
-                logger.debug(f"[{stage_name}] ffmpeg 阶段输出类型: {type(ffmpeg_stage.output)}")
-                logger.debug(f"[{stage_name}] ffmpeg 输出内容: {ffmpeg_stage.output}")
+                if ffmpeg_stage and ffmpeg_stage.status in ['SUCCESS', 'COMPLETED']:
+                    logger.debug(f"[{stage_name}] ffmpeg 阶段输出类型: {type(ffmpeg_stage.output)}")
+                    logger.debug(f"[{stage_name}] ffmpeg 输出内容: {ffmpeg_stage.output}")
 
-                # 尝试从字典中获取 audio_path
-                if (ffmpeg_stage.output and
-                    isinstance(ffmpeg_stage.output, dict) and
-                    ffmpeg_stage.output.get('audio_path')):
-                    audio_path = ffmpeg_stage.output['audio_path']
-                    audio_source = "默认音频 (ffmpeg)"
-                    logger.info(f"[{stage_name}] 成功获取默认音频: {audio_path}")
+                    # 尝试从字典中获取 audio_path
+                    if (ffmpeg_stage.output and
+                        isinstance(ffmpeg_stage.output, dict) and
+                        ffmpeg_stage.output.get('audio_path')):
+                        audio_path = ffmpeg_stage.output['audio_path']
+                        audio_source = "默认音频 (ffmpeg)"
+                        logger.info(f"[{stage_name}] 成功获取默认音频: {audio_path}")
 
-        if not audio_path:
-            error_msg = "无法获取音频文件路径：请确保 ffmpeg.extract_audio 或 audio_separator.separate_vocals 任务已成功完成"
-            logger.error(f"[{stage_name}] {error_msg}")
-            raise ValueError(error_msg)
+            if not audio_path:
+                error_msg = "无法获取音频文件路径：请确保提供了 audio_path 参数，或 ffmpeg.extract_audio / audio_separator.separate_vocals 任务已成功完成"
+                logger.error(f"[{stage_name}] {error_msg}")
+                raise ValueError(error_msg)
 
         logger.info(f"[{stage_name}] ========== 音频源选择结果 ==========")
         logger.info(f"[{stage_name}] 选择的音频源: {audio_source}")

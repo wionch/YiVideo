@@ -26,6 +26,62 @@
 
 - **全局配置 (Global Configuration)**: 这些参数定义在项目的根 `config.yml` 文件中，由所有服务共享。它们提供了系统级的默认行为。例如，Redis的主机地址或默认的GPU锁超时时间。`services.common.config_loader` 模块负责加载这些配置。
 
+### 单任务模式支持
+
+YiVideo系统支持**单任务模式**和**传统工作流模式**两种调用方式：
+
+#### 单任务模式
+- **特点**: 每个任务都是独立的请求，使用独立的 `workflow_id`
+- **参数来源**: 直接从 `input_data` 中获取，无需依赖前置任务
+- **调用方式**: 通过 `/v1/tasks` 接口调用
+
+```json
+{
+    "task_name": "ffmpeg.extract_audio",
+    "task_id": "unique-task-id",
+    "callback": "https://client.example.com/callback",
+    "input_data": {
+        "video_path": "https://minio.example.com/yivideo/task-123/video.mp4"
+    }
+}
+```
+
+#### 传统工作流模式
+- **特点**: 多个任务在同一个 `workflow_id` 下运行，任务间可以共享状态
+- **参数来源**: 从前序任务的输出中获取，或通过动态引用
+- **调用方式**: 通过 `/v1/workflows` 接口调用
+
+```json
+{
+    "workflow_config": {
+        "workflow_chain": [
+            "ffmpeg.extract_audio",
+            "faster_whisper.transcribe_audio"
+        ]
+    },
+    "video_path": "/share/video.mp4"
+}
+```
+
+### 智能源选择逻辑
+
+为了支持单任务模式，大多数节点都实现了**智能源选择逻辑**，能够自动从不同位置查找输入参数：
+
+#### 音频相关任务的优先级（以 `faster_whisper.transcribe_audio` 为例）：
+1. **input_data.audio_path** （单任务模式优先）
+2. **audio_separator.separate_vocals 输出** （传统工作流模式）
+3. **ffmpeg.extract_audio 输出** （传统工作流模式）
+
+#### 视频相关任务的优先级（以 `paddleocr.detect_subtitle_area` 为例）：
+1. **input_data.video_path** （单任务模式优先）
+2. **全局 video_path** 参数 （传统工作流模式）
+
+#### 字幕相关任务的优先级（以 `wservice.generate_subtitle_files` 为例）：
+1. **节点参数 segments_file** （显式指定）
+2. **faster_whisper.transcribe_audio 输出** （智能检测）
+
+> **重要提示**: 单任务模式优先从 `input_data` 获取参数，确保在调用单任务接口时需要明确提供所有必需的输入参数。
+
 ### 参数解析机制
 
 YiVideo 工作流系统实现了强大的参数解析和动态引用机制，通过 `resolve_parameters` 函数实现：
