@@ -441,23 +441,49 @@ def transcribe_audio(self, context: dict) -> dict:
 
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录智能选择的输入源
+        if not recorded_input_params:
+            # 优先从 input_data 中直接获取音频路径（单任务模式）
+            audio_path_from_input_data = workflow_context.input_params.get('input_data', {}).get('audio_path')
+            if audio_path_from_input_data:
+                recorded_input_params['audio_source'] = 'input_data'
+                recorded_input_params['audio_path'] = audio_path_from_input_data
+            else:
+                # 记录智能选择的音频源
+                if audio_source == "人声音频 (audio_separator)":
+                    recorded_input_params['audio_source'] = 'audio_separator.separate_vocals'
+                elif audio_source == "默认音频 (ffmpeg)":
+                    recorded_input_params['audio_source'] = 'ffmpeg.extract_audio'
+                else:
+                    recorded_input_params['audio_source'] = 'unknown'
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         # --- 文件下载准备 ---
         file_service = get_file_service()
         
-        # 优先从 input_data 中直接获取音频路径（单任务模式）
-        audio_path = workflow_context.input_params.get('input_data', {}).get('audio_path')
-        audio_source = "直接参数传入"
+        # 优先从 resolved_params 获取参数
+        audio_path = resolved_params.get('audio_path')
+        audio_source = "节点参数传入"
+
+        if not audio_path:
+            # 其次从 input_data 中直接获取音频路径（单任务模式）
+            audio_path = workflow_context.input_params.get('input_data', {}).get('audio_path')
+            audio_source = "直接参数传入(input_data)"
 
         if audio_path:
             logger.info(f"[{stage_name}] 从输入参数获取音频文件: {audio_path}")
@@ -590,18 +616,18 @@ def transcribe_audio(self, context: dict) -> dict:
             logger.info(f"[{stage_name}] 处理速度: {audio_duration/transcribe_duration:.2f}x")
         logger.info(f"[{stage_name}] =================================")
 
-        # 构建输出数据 - Redis优化版本：精简segments数据，仅存储文件路径
+        # 构建精简的输出数据 - 移除冗余字段和输入参数
         output_data = {
-            # 优化：将segments数组替换为文件路径，大幅减少Redis内存占用
-            "segments_file": transcribe_data_file,  # 替代 "segments": transcribe_result.get('segments', [])
-            "audio_path": transcribe_result.get('audio_path', audio_path),
+            # 统一的文件引用：使用segments_file作为标准字段
+            "segments_file": transcribe_data_file,
+            
+            # 核心执行结果（不包含输入参数）
             "audio_duration": transcribe_result.get('audio_duration', 0),
             "language": transcribe_result.get('language', 'unknown'),
             "transcribe_duration": transcribe_result.get('transcribe_duration', 0),
             "model_name": transcribe_result.get('model_name', 'unknown'),
             "device": transcribe_result.get('device', 'unknown'),
             "enable_word_timestamps": enable_word_timestamps,
-            "transcribe_data_file": transcribe_data_file,
             "statistics": transcribe_data_content["statistics"],
 
             # 兼容性：保留segments_count用于快速统计

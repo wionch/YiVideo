@@ -18,7 +18,8 @@ from celery import Task
 
 # 导入共享模块
 try:
-    from services.common.config_loader import get_config, WorkflowContext
+    from services.common.config_loader import get_config
+    from services.common.context import WorkflowContext, StageExecution
     from services.common.logger import get_logger
     from services.common.locks import gpu_lock, SmartGpuLockManager
     from services.common.parameter_resolver import resolve_parameters
@@ -130,16 +131,21 @@ def generate_speech(
     # --- Parameter Resolution ---
     workflow_context = WorkflowContext(**context)
     stage_name = self.name
+    if stage_name not in workflow_context.stages:
+         workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+    
+    resolved_params = {}
     node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
     if node_params:
         try:
             resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
             logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-            # 将解析后的参数更新回 context 的顶层
-            context.update(resolved_params)
         except ValueError as e:
             logger.error(f"[{stage_name}] 参数解析失败: {e}")
             raise e
+    
+    # 保存到当前 stage 的 input_params，确保 resolved_params 始终被初始化
+    workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
 
     # 提取参数（兼容多种参数名称）
     text = context.get('text', '')
@@ -332,8 +338,11 @@ def list_voice_presets(self) -> Dict[str, Any]:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 更新 workflow_context 以便后续使用
-                workflow_context.input_params.update(resolved_params)
+                
+                # 保存到当前 stage 的 input_params
+                if stage_name not in workflow_context.stages:
+                     workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+                workflow_context.stages[stage_name].input_params = resolved_params
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
@@ -393,8 +402,11 @@ def get_model_info(self) -> Dict[str, Any]:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 更新 workflow_context 以便后续使用
-                workflow_context.input_params.update(resolved_params)
+                
+                # 保存到当前 stage 的 input_params
+                if stage_name not in workflow_context.stages:
+                     workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+                workflow_context.stages[stage_name].input_params = resolved_params
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e

@@ -560,7 +560,15 @@ def generate_subtitle_files(self, context: dict) -> dict:
                 end_str = f"{int(segment['end']//3600):02d}:{int((segment['end']%3600)//60):02d}:{int(segment['end']%60):02d},{int((segment['end']%1)*1000):03d}"
                 f.write(f"{i+1}\n{start_str} --> {end_str}\n{segment['text'].strip()}\n\n")
 
-        output_data = {"subtitle_path": subtitle_path, "subtitle_files": {"basic": subtitle_path}}
+        # 构建精简的输出数据，避免重复的路径信息
+        output_data = {
+            # 核心字幕文件：作为主要输出字段
+            "subtitle_path": subtitle_path,
+            # 统一文件引用：通过subtitle_files对象提供所有文件的统一访问
+            "subtitle_files": {
+                "basic": subtitle_path
+            }
+        }
 
         if has_speaker_info and speaker_enhanced_segments:
             speaker_srt_filename = f"{base_filename}_with_speakers.srt"
@@ -571,7 +579,7 @@ def generate_subtitle_files(self, context: dict) -> dict:
                     end_str = f"{int(segment['end']//3600):02d}:{int((segment['end']%3600)//60):02d}:{int(segment['end']%60):02d},{int((segment['end']%1)*1000):03d}"
                     speaker = segment.get("speaker", "UNKNOWN")
                     f.write(f"{i+1}\n{start_str} --> {end_str}\n[{speaker}] {segment['text'].strip()}\n\n")
-            output_data["speaker_srt_path"] = speaker_srt_path
+            # 移除重复的speaker_srt_path字段，统一通过subtitle_files访问
             output_data["subtitle_files"]["with_speakers"] = speaker_srt_path
 
         if enable_word_timestamps and segments:
@@ -580,7 +588,7 @@ def generate_subtitle_files(self, context: dict) -> dict:
             json_content = segments_to_word_timestamp_json(segments, include_segment_info=True)
             with open(word_timestamps_json_path, "w", encoding="utf-8") as f:
                 f.write(json_content)
-            output_data["word_timestamps_json_path"] = word_timestamps_json_path
+            # 移除重复的word_timestamps_json_path字段，统一通过subtitle_files访问
             output_data["subtitle_files"]["word_timestamps"] = word_timestamps_json_path
 
         workflow_context.stages[stage_name].status = 'SUCCESS'
@@ -678,7 +686,33 @@ def correct_subtitles(self, context: dict) -> dict:
     workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
     state_manager.update_workflow_state(workflow_context)
     try:
-        correction_params = workflow_context.input_params.get('params', {}).get('subtitle_correction', {})
+        # --- Parameter Resolution ---
+        resolved_params = {}
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                from services.common.parameter_resolver import resolve_parameters
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录依赖的前置阶段信息
+        if not recorded_input_params:
+            generate_stage = workflow_context.stages.get('wservice.generate_subtitle_files')
+            if generate_stage:
+                recorded_input_params['input_source'] = 'wservice.generate_subtitle_files'
+                recorded_input_params['subtitle_path'] = generate_stage.output.get('speaker_srt_path') or generate_stage.output.get('subtitle_path')
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+
+        # 优先从 resolved_params 获取参数，回退到 global params
+        correction_params = resolved_params.get('subtitle_correction', 
+                                              workflow_context.input_params.get('params', {}).get('subtitle_correction', {}))
         is_enabled = correction_params.get('enabled', False)
         if not is_enabled:
             workflow_context.stages[stage_name].status = 'SKIPPED'
@@ -740,6 +774,19 @@ def ai_optimize_subtitles(self, context: dict) -> dict:
         # 使用参数解析器处理动态引用
         from services.common.parameter_resolver import resolve_parameters
         resolved_params = resolve_parameters(stage_params, workflow_context.model_dump())
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录依赖的前置阶段信息
+        if not recorded_input_params:
+            generate_stage = workflow_context.stages.get('wservice.generate_subtitle_files')
+            if generate_stage:
+                recorded_input_params['input_source'] = 'wservice.generate_subtitle_files'
+                recorded_input_params['subtitle_path'] = generate_stage.output.get('speaker_srt_path') or generate_stage.output.get('subtitle_path')
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+        
         optimization_params = resolved_params.get('subtitle_optimization', optimization_params)
 
         is_enabled = optimization_params.get('enabled', False)

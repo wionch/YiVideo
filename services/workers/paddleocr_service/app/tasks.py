@@ -117,16 +117,27 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
     keyframe_dir = None
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录依赖的前置阶段信息
+        if not recorded_input_params:
+            prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
+            if prev_stage:
+                recorded_input_params['input_source'] = 'ffmpeg.extract_keyframes'
+                recorded_input_params['keyframe_dir'] = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
         prev_stage_output = prev_stage.output if prev_stage else {}
@@ -219,16 +230,27 @@ def create_stitched_images(self: Task, context: dict) -> dict:
     input_dir_str = None  # 用于清理的变量
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录依赖的前置阶段信息
+        if not recorded_input_params:
+            prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
+            if prev_stage:
+                recorded_input_params['input_source'] = 'ffmpeg.extract_keyframes'
+                recorded_input_params['keyframe_dir'] = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         # 1. 获取输入路径和字幕区域
         crop_stage = workflow_context.stages.get("ffmpeg.crop_subtitle_images")
@@ -329,16 +351,27 @@ def perform_ocr(self: Task, context: dict) -> dict:
     multi_frames_path = None  # 用于清理的变量
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录依赖的前置阶段信息
+        if not recorded_input_params:
+            prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
+            if prev_stage:
+                recorded_input_params['input_source'] = 'ffmpeg.extract_keyframes'
+                recorded_input_params['keyframe_dir'] = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         prev_stage = workflow_context.stages.get('paddleocr.create_stitched_images')
         prev_stage_output = prev_stage.output if prev_stage else {}
@@ -456,16 +489,27 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
 
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录依赖的前置阶段信息
+        if not recorded_input_params:
+            prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
+            if prev_stage:
+                recorded_input_params['input_source'] = 'ffmpeg.extract_keyframes'
+                recorded_input_params['keyframe_dir'] = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         prev_stage = workflow_context.stages.get('paddleocr.perform_ocr')
         prev_stage_output = prev_stage.output if prev_stage else {}
@@ -478,7 +522,10 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
         with open(ocr_results_path, 'r', encoding='utf-8') as f:
             ocr_results = json.load(f)
 
-        video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
+        # 优先从 resolved_params 获取参数
+        video_path = resolved_params.get("video_path")
+        if not video_path:
+             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
         if not video_path:
             raise ValueError("上下文中缺少 'video_path' 信息，无法获取FPS。")
 

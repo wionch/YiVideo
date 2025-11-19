@@ -102,16 +102,18 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError("工作流上下文必须为字典格式")
 
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 先初始化为空，稍后在音频源选择完成后记录
+        workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
 
         workflow_id = workflow_context.workflow_id
         logger.info(f"[{workflow_id}] 开始说话人分离任务 (subprocess模式)")
@@ -138,26 +140,25 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
                 # 优先使用vocal_audio，其次使用instrumental_audio
                 for audio_key in ['vocal_audio', 'instrumental_audio']:
                     potential_path = separator_stage.output.get(audio_key)
-                    if potential_path and os.path.exists(potential_path):
-                        audio_path = potential_path
-                        audio_source = f"audio_separator.separate_vocals.{audio_key}"
-                        logger.info(f"[{workflow_id}] 成功获取音频分离的音频: {audio_path}")
-                        break
-
-        # 如果没有来自其他任务的音频，回退到 input_params 中的文件
-        if not audio_path:
-            # 优先使用 audio_path，否则使用 video_path（支持直接处理音频文件或视频文件）
-            audio_path = workflow_context.input_params.get("input_data", {}).get("audio_path") or workflow_context.input_params.get("input_data", {}).get("video_path")
-            if audio_path:
-                audio_source = "原始输入文件"
-                logger.info(f"[{workflow_id}] 回退到原始文件: {audio_path}")
-
-        if not audio_path:
             raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 或 audio_separator.separate_vocals 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
 
         logger.info(f"[{workflow_id}] ========== 音频源选择结果 ==========")
         logger.info(f"[{workflow_id}] 选择的音频源: {audio_source}")
         logger.info(f"[{workflow_id}] 音频文件路径: {audio_path}")
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = workflow_context.stages[stage_name].input_params.copy()
+        
+        # 如果没有显式参数，记录智能选择的输入源
+        if not recorded_input_params:
+            if audio_source == "ffmpeg.extract_audio":
+                recorded_input_params['audio_source'] = 'ffmpeg.extract_audio'
+            elif audio_source == "audio_separator.separate_vocals":
+                recorded_input_params['audio_source'] = 'audio_separator.separate_vocals'
+            else:
+                recorded_input_params['audio_source'] = 'unknown'
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
         
         # --- 文件下载 ---
         if audio_path and not os.path.exists(audio_path):
@@ -351,16 +352,19 @@ def get_speaker_segments(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         # --- Parameter Resolution ---
         workflow_context = WorkflowContext(**context)
         stage_name = self.name
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 保存到当前 stage 的 input_params
+        workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+        workflow_context.stages[stage_name].input_params = resolved_params
         
         input_params = workflow_context.input_params
 
@@ -430,16 +434,19 @@ def validate_diarization(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         # --- Parameter Resolution ---
         workflow_context = WorkflowContext(**context)
         stage_name = self.name
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 保存到当前 stage 的 input_params
+        workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
+        workflow_context.stages[stage_name].input_params = resolved_params
         
         input_params = workflow_context.input_params
 

@@ -22,6 +22,7 @@ class StageExecution(BaseModel):
     代表工作流中单个阶段的执行状态和结果。
     """
     status: str = Field(..., description="阶段的执行状态 (e.g., PENDING, IN_PROGRESS, SUCCESS, FAILED)")
+    input_params: Dict[str, Any] = Field(default_factory=dict, description="该阶段执行时的输入参数快照")
     output: Dict[str, Any] = Field(default_factory=dict, description="阶段成功执行后的输出数据")
     error: Optional[str] = Field(None, description="如果阶段执行失败，记录错误信息")
     duration: float = Field(0.0, description="阶段执行耗时（秒）")

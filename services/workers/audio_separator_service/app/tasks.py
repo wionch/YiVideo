@@ -85,16 +85,18 @@ def separate_vocals(self, context: dict) -> dict:
 
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 先初始化为空，稍后在音频源选择完成后记录
+        workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
 
         # --- 文件下载准备 ---
         file_service = get_file_service()
@@ -114,7 +116,10 @@ def separate_vocals(self, context: dict) -> dict:
 
         # 如果没有已提取音频，回退到 input_params 中的文件
         if not audio_path:
-            audio_path = workflow_context.input_params.get("input_data", {}).get("audio_path") or workflow_context.input_params.get("input_data", {}).get("video_path")
+            # 优先从 resolved_params 获取参数
+            audio_path = resolved_params.get("audio_path")
+            if not audio_path:
+                audio_path = workflow_context.input_params.get("input_data", {}).get("audio_path") or workflow_context.input_params.get("input_data", {}).get("video_path")
             if audio_path:
                 audio_source = "原始输入文件"
                 logger.info(f"[{stage_name}] 回退到原始文件: {audio_path}")
@@ -135,6 +140,22 @@ def separate_vocals(self, context: dict) -> dict:
 
         logger.info(f"[{stage_name}] 开始音频分离任务")
 
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = workflow_context.stages[stage_name].input_params.copy()
+        
+        # 如果没有显式参数，记录智能选择的输入源
+        if not recorded_input_params:
+            if audio_source == "已提取音频 (ffmpeg.extract_audio)":
+                recorded_input_params['audio_source'] = 'ffmpeg.extract_audio'
+            elif audio_source == "原始输入文件":
+                recorded_input_params['audio_source'] = 'input_data'
+                # 记录实际使用的输入文件路径
+                input_audio = workflow_context.input_params.get("input_data", {}).get("audio_path") or workflow_context.input_params.get("input_data", {}).get("video_path")
+                if input_audio:
+                    recorded_input_params['audio_path'] = input_audio
+            else:
+                recorded_input_params['audio_source'] = 'unknown'
+        
         # 2. 从配置文件读取默认参数
         config = self.get_config()
         quality_mode = "default"
@@ -142,8 +163,9 @@ def separate_vocals(self, context: dict) -> dict:
         vocal_optimization_level = config.get('vocal_optimization_level')
         model_type = config.get('model_type')
         
-        # 从input_params中获取覆盖参数
-        audio_separator_config = workflow_context.input_params.get('audio_separator_config', {})
+        # 从input_params中获取覆盖参数 (优先使用 resolved_params)
+        audio_separator_config = resolved_params.get('audio_separator_config', 
+                                                   workflow_context.input_params.get('audio_separator_config', {}))
         quality_mode = audio_separator_config.get('quality_mode', quality_mode)
         use_vocal_optimization = audio_separator_config.get('use_vocal_optimization', use_vocal_optimization)
         vocal_optimization_level = audio_separator_config.get('vocal_optimization_level', vocal_optimization_level)
@@ -152,6 +174,17 @@ def separate_vocals(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 质量模式: {quality_mode}")
         logger.info(f"[{stage_name}] 使用人声优化: {use_vocal_optimization}")
         logger.info(f"[{stage_name}] 模型类型: {model_type}")
+
+        # 记录音频分离配置参数到input_params
+        if audio_separator_config or quality_mode != "default" or model_type:
+            recorded_input_params['quality_mode'] = quality_mode
+            recorded_input_params['model_type'] = model_type
+            if use_vocal_optimization:
+                recorded_input_params['use_vocal_optimization'] = True
+                if vocal_optimization_level:
+                    recorded_input_params['vocal_optimization_level'] = vocal_optimization_level
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         # 3. 验证输入文件
         if not Path(audio_path).exists():

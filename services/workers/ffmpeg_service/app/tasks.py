@@ -51,21 +51,36 @@ def extract_keyframes(self: Task, context: dict) -> dict:
 
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录全局输入参数
+        if not recorded_input_params:
+            input_data = workflow_context.input_params.get("input_data", {})
+            if input_data.get("video_path"):
+                recorded_input_params['video_path'] = input_data.get("video_path")
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         os.makedirs(workflow_context.shared_storage_path, exist_ok=True)
 
-        video_path = workflow_context.input_params.get("video_path")
-        num_frames = workflow_context.input_params.get("keyframe_sample_count", 100)
+        # 优先从 resolved_params 获取参数，回退到全局 input_data (兼容单步任务)
+        video_path = resolved_params.get("video_path")
+        if not video_path:
+             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
+
+        num_frames = resolved_params.get("keyframe_sample_count", 
+                                       workflow_context.input_params.get("keyframe_sample_count", 100))
         keyframes_dir = os.path.join(workflow_context.shared_storage_path, "keyframes")
 
         logger.info(f"[{stage_name}] 开始从 {video_path} 抽取 {num_frames} 帧...")
@@ -105,25 +120,41 @@ def extract_audio(self: Task, context: dict) -> dict:
 
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录全局输入参数
+        if not recorded_input_params:
+            input_data = workflow_context.input_params.get("input_data", {})
+            if input_data.get("video_path"):
+                recorded_input_params['video_path'] = input_data.get("video_path")
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+        
         # --- 文件下载 ---
         file_service = get_file_service()
-        video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
+        # 优先从 resolved_params 获取参数
+        video_path = resolved_params.get("video_path")
+        if not video_path:
+             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
+             
         if not video_path:
             raise ValueError("缺少必需参数: video_path")
         
         logger.info(f"[{stage_name}] 开始下载视频文件: {video_path}")
         video_path = file_service.resolve_and_download(video_path, workflow_context.shared_storage_path)
-        workflow_context.input_params["video_path"] = video_path
+        # 更新本地 input_params 中的 video_path 为下载后的本地路径
+        workflow_context.stages[stage_name].input_params["video_path"] = video_path
         logger.info(f"[{stage_name}] 视频文件下载完成: {video_path}")
         
         if not os.path.exists(video_path):
@@ -207,18 +238,30 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
 
     try:
         # --- Parameter Resolution ---
+        resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-                # 将解析后的参数更新回 input_params 的顶层
-                workflow_context.input_params.update(resolved_params)
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
-        video_path = workflow_context.input_params.get("video_path")
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录全局输入参数
+        if not recorded_input_params:
+            input_data = workflow_context.input_params.get("input_data", {})
+            if input_data.get("video_path"):
+                recorded_input_params['video_path'] = input_data.get("video_path")
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+        
+        video_path = resolved_params.get("video_path")
+        if not video_path:
+             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
         
         prev_stage = workflow_context.stages.get('paddleocr.detect_subtitle_area')
         prev_stage_output = prev_stage.output if prev_stage else {}
@@ -234,7 +277,7 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
         try:
             executor_script_path = os.path.join(os.path.dirname(__file__), "executor_decode_video.py")
             crop_area_json = json.dumps(crop_area)
-            num_processes = workflow_context.input_params.get("decode_processes", 10)
+            num_processes = resolved_params.get("decode_processes", 10)
 
             command = [
                 sys.executable,
@@ -327,6 +370,17 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         # 步骤0: 解析参数
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 如果没有显式参数，记录全局输入参数
+        if not recorded_input_params:
+            input_data = workflow_context.input_params.get("input_data", {})
+            if input_data.get("video_path"):
+                recorded_input_params['video_path'] = input_data.get("video_path")
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         logger.info(f"[{stage_name}] ========== 音频分割任务开始 ==========")
         logger.info(f"[{stage_name}] 配置加载完成")
