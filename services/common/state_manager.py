@@ -76,7 +76,9 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
             
             # 检查输出中的文件路径字段 - 优先处理转录结果文件
             file_keys = ['segments_file', 'transcribe_data_file', 'audio_path', 'video_path', 'subtitle_path', 'output_path']
+            directory_keys = ['keyframe_dir']  # 需要特殊处理的目录字段
             
+            # 处理普通文件字段
             for key in file_keys:
                 if key not in stage.output:
                     continue
@@ -105,6 +107,49 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
                         
                     except Exception as e:
                         logger.warning(f"上传文件失败: {file_path}, 错误: {e}", exc_info=True)
+            
+            # 处理目录字段（特殊处理）
+            for key in directory_keys:
+                if key not in stage.output:
+                    continue
+                
+                dir_path = stage.output[key]
+                
+                # 跳过已经是URL的路径
+                if isinstance(dir_path, str) and (dir_path.startswith('http://') or dir_path.startswith('https://')):
+                    logger.info(f"跳过已是URL的路径: {key} = {dir_path}")
+                    continue
+                
+                # 检查目录是否存在
+                if isinstance(dir_path, str) and os.path.exists(dir_path) and os.path.isdir(dir_path):
+                    try:
+                        # 特殊处理：使用目录上传模块
+                        from services.common.minio_directory_upload import upload_keyframes_directory
+                        
+                        logger.info(f"准备上传目录: {dir_path} (workflow_id: {context.workflow_id})")
+                        
+                        # 上传目录到MinIO
+                        upload_result = upload_keyframes_directory(
+                            local_dir=dir_path,
+                            workflow_id=context.workflow_id,
+                            delete_local=False  # 不删除本地目录
+                        )
+                        
+                        if upload_result["success"]:
+                            # 更新输出中的路径为MinIO基础URL
+                            stage.output[key] = upload_result["minio_base_url"]
+                            # 添加额外的元数据字段
+                            stage.output[f"{key}_files_count"] = len(upload_result["uploaded_files"])
+                            stage.output[f"{key}_uploaded_files"] = upload_result["uploaded_files"]
+                            logger.info(f"目录上传成功: {key} = {upload_result['minio_base_url']}, 文件数: {len(upload_result['uploaded_files'])}")
+                        else:
+                            logger.warning(f"目录上传失败: {dir_path}, 错误: {upload_result.get('error', '未知错误')}")
+                            # 即使上传失败也保留原始目录路径
+                            stage.output[f"{key}_upload_error"] = upload_result.get("error")
+                            
+                    except Exception as e:
+                        logger.warning(f"上传目录失败: {dir_path}, 错误: {e}", exc_info=True)
+                        stage.output[f"{key}_upload_error"] = str(e)
                         
     except Exception as e:
         logger.error(f"文件上传过程出错: {e}", exc_info=True)

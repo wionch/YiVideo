@@ -90,7 +90,46 @@ def extract_keyframes(self: Task, context: dict) -> dict:
         if not frame_paths:
             raise RuntimeError("核心函数 extract_random_frames 未能成功抽取任何帧。")
 
+        # 基础输出数据
         output_data = {"keyframe_dir": keyframes_dir}
+
+        # 检查是否需要上传关键帧目录到MinIO
+        upload_to_minio = resolved_params.get("upload_keyframes_to_minio", False)
+        delete_local_keyframes = resolved_params.get("delete_local_keyframes_after_upload", False)
+        
+        if upload_to_minio and frame_paths:
+            try:
+                # 导入目录上传模块
+                from services.common.minio_directory_upload import upload_keyframes_directory
+                
+                logger.info(f"[{stage_name}] 开始上传关键帧目录到MinIO...")
+                upload_result = upload_keyframes_directory(
+                    local_dir=keyframes_dir,
+                    workflow_id=workflow_context.workflow_id,
+                    delete_local=delete_local_keyframes
+                )
+                
+                if upload_result["success"]:
+                    output_data.update({
+                        "keyframe_minio_url": upload_result["minio_base_url"],
+                        "keyframe_files_count": len(upload_result["uploaded_files"]),
+                        "keyframe_uploaded_files": upload_result["uploaded_files"]
+                    })
+                    logger.info(f"[{stage_name}] 关键帧目录上传成功: {upload_result['total_files']} 个文件")
+                else:
+                    logger.warning(f"[{stage_name}] 关键帧目录上传失败: {upload_result.get('error', '未知错误')}")
+                    output_data.update({
+                        "keyframe_upload_error": upload_result.get("error"),
+                        "keyframe_files_count": upload_result["total_files"],
+                        "keyframe_uploaded_files": upload_result["uploaded_files"]
+                    })
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 关键帧目录上传过程出错: {e}", exc_info=True)
+                output_data.update({
+                    "keyframe_upload_error": str(e),
+                    "keyframe_files_count": len(frame_paths)
+                })
+        
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
         logger.info(f"[{stage_name}] 抽帧完成，产物目录: {keyframes_dir}。")
