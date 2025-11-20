@@ -128,6 +128,7 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
 
     keyframe_dir = None
     local_download_dir = None
+    execution_metadata = {} # [新增] 用于存储执行过程中的元数据，不污染 input_params
     try:
         # --- Parameter Resolution ---
         resolved_params = {}
@@ -140,7 +141,7 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
-        # 记录实际使用的输入参数到input_params
+        # [修复] 记录实际使用的输入参数到input_params，确保只保留原始传入参数
         recorded_input_params = resolved_params.copy() if resolved_params else {}
         
         # 如果没有显式参数，记录全局输入参数（兼容单任务模式）
@@ -151,7 +152,15 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                     recorded_input_params[key] = value
             logger.info(f"[{stage_name}] 从全局input_data获取参数: {recorded_input_params}")
         
-        workflow_context.stages[stage_name].input_params = recorded_input_params
+        # [关键修复] 确保input_params只包含原始参数，不包含任何执行过程中的数据
+        # 过滤掉可能的执行元数据，确保input_params纯净
+        filtered_input_params = {}
+        for key, value in recorded_input_params.items():
+            # 只保留原始参数，排除执行过程中的元数据
+            if key not in ['input_source', 'minio_download_result', 'total_files', 'downloaded_files_count', 'downloaded_local_dir']:
+                filtered_input_params[key] = value
+        
+        workflow_context.stages[stage_name].input_params = filtered_input_params
 
         # [新增] 记录GPU锁和设备信息
         logger.info(f"[{stage_name}] ========== 字幕区域检测设备信息 ==========")
@@ -184,8 +193,8 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
         if keyframe_dir and os.path.isdir(keyframe_dir):
             # 情况1: 参数中提供了本地关键帧目录
             logger.info(f"[{stage_name}] 使用参数指定的关键帧目录: {keyframe_dir}")
-            recorded_input_params['input_source'] = 'parameter_local'
-            recorded_input_params['keyframe_dir'] = keyframe_dir
+            execution_metadata['input_source'] = 'parameter_local'
+            # recorded_input_params['keyframe_dir'] = keyframe_dir # 保持原始参数不变
         elif keyframe_dir and keyframe_dir.startswith('minio://'):
             # 情况2: 参数中提供了MinIO关键帧目录URL (minio://格式)
             logger.info(f"[{stage_name}] 检测到MinIO关键帧目录URL: {keyframe_dir}")
@@ -212,13 +221,13 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                     if download_result["success"]:
                         keyframe_dir = local_download_dir
                         logger.info(f"[{stage_name}] MinIO目录下载成功: {download_result['total_files']} 个文件")
-                        recorded_input_params['input_source'] = 'parameter_minio'
+                        execution_metadata['input_source'] = 'parameter_minio'
                         # 注意：不修改原始的keyframe_dir，保持为MinIO URL
                         # 下载后的本地路径将在output中记录
-                        recorded_input_params['minio_download_result'] = {
+                        execution_metadata['minio_download_result'] = {
                             'total_files': download_result['total_files'],
                             'downloaded_files_count': len(download_result['downloaded_files']),
-                            'downloaded_local_dir': keyframe_dir  # 在input_params中记录本地路径
+                            'downloaded_local_dir': keyframe_dir  # 在output中记录本地路径
                         }
                     else:
                         raise RuntimeError(f"MinIO目录下载失败: {download_result.get('error', '未知错误')}")
@@ -267,13 +276,13 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                     if download_result["success"]:
                         keyframe_dir = local_download_dir
                         logger.info(f"[{stage_name}] MinIO目录下载成功: {download_result['total_files']} 个文件")
-                        recorded_input_params['input_source'] = 'parameter_http_minio'
+                        execution_metadata['input_source'] = 'parameter_http_minio'
                         # 注意：不修改原始的keyframe_dir，保持为HTTP URL
                         # 下载后的本地路径将在output中记录
-                        recorded_input_params['minio_download_result'] = {
+                        execution_metadata['minio_download_result'] = {
                             'total_files': download_result['total_files'],
                             'downloaded_files_count': len(download_result['downloaded_files']),
-                            'downloaded_local_dir': keyframe_dir  # 在input_params中记录本地路径
+                            'downloaded_local_dir': keyframe_dir  # 在output中记录本地路径
                         }
                     else:
                         raise RuntimeError(f"MinIO目录下载失败: {download_result.get('error', '未知错误')}")
@@ -289,8 +298,8 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                 prev_stage_output = prev_stage.output if prev_stage else {}
                 keyframe_dir = prev_stage_output.get("keyframe_dir")
                 if keyframe_dir:
-                    recorded_input_params['input_source'] = 'workflow_ffmpeg'
-                    recorded_input_params['keyframe_dir'] = keyframe_dir
+                    execution_metadata['input_source'] = 'workflow_ffmpeg'
+                    # recorded_input_params['keyframe_dir'] = keyframe_dir # 保持原始参数不变
                     
                     # 检查是否需要下载MinIO目录
                     keyframe_minio_url = prev_stage_output.get("keyframe_minio_url")
@@ -312,13 +321,13 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                             
                             if download_result["success"]:
                                 keyframe_dir = local_download_dir
-                                recorded_input_params['input_source'] = 'workflow_minio'
+                                execution_metadata['input_source'] = 'workflow_minio'
                                 # 注意：不修改原始的keyframe_dir，保持为从工作流获取的值
                                 # 下载后的本地路径将在output中记录
-                                recorded_input_params['minio_download_result'] = {
+                                execution_metadata['minio_download_result'] = {
                                     'total_files': download_result['total_files'],
                                     'downloaded_files_count': len(download_result['downloaded_files']),
-                                    'downloaded_local_dir': keyframe_dir  # 在input_params中记录本地路径
+                                    'downloaded_local_dir': keyframe_dir  # 在output中记录本地路径
                                 }
                                 logger.info(f"[{stage_name}] 工作流MinIO目录下载成功")
                             else:
@@ -327,7 +336,8 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                         except Exception as e:
                             logger.warning(f"[{stage_name}] 工作流MinIO目录下载过程出错: {e}，将使用原始本地目录")
         
-        workflow_context.stages[stage_name].input_params = recorded_input_params
+        # [修复] input_params已经在前面设置过了，这里不需要重复设置
+        # workflow_context.stages[stage_name].input_params = recorded_input_params
 
         # 验证关键帧目录
         if not keyframe_dir or not os.path.isdir(keyframe_dir):
@@ -374,6 +384,9 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                 output_data['downloaded_keyframes_dir'] = local_download_dir
                 logger.info(f"[{stage_name}] 已将下载后的本地路径添加到output: {local_download_dir}")
 
+            # [新增] 将执行元数据合并到output中
+            output_data.update(execution_metadata)
+
             # logger.info(f"[{stage_name}] 外部脚本完成字幕区域检测: {output_data.get('subtitle_area')}")
 
         except json.JSONDecodeError as e:
@@ -412,7 +425,7 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                     logger.warning(f"[{stage_name}] 清理下载关键帧目录失败: {e}")
             
             # 清理原始keyframes目录（如果是从工作流获取的）
-            if (recorded_input_params.get('input_source') == 'workflow_ffmpeg' and 
+            if (execution_metadata.get('input_source') == 'workflow_ffmpeg' and 
                 keyframe_dir and os.path.isdir(keyframe_dir)):
                 try:
                     shutil.rmtree(keyframe_dir)
@@ -445,17 +458,19 @@ def create_stitched_images(self: Task, context: dict) -> dict:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
-        # 记录实际使用的输入参数到input_params
+        # [修复] 记录实际使用的输入参数到input_params
         recorded_input_params = resolved_params.copy() if resolved_params else {}
         
-        # 如果没有显式参数，记录依赖的前置阶段信息
+        # 如果没有显式参数，只记录需要的参数到input_params
         if not recorded_input_params:
             prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
             if prev_stage:
-                recorded_input_params['input_source'] = 'ffmpeg.extract_keyframes'
-                recorded_input_params['keyframe_dir'] = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+                keyframe_dir = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+                if keyframe_dir:
+                    recorded_input_params['keyframe_dir'] = keyframe_dir
         
-        workflow_context.stages[stage_name].input_params = recorded_input_params
+        # [修复] 确保input_params只包含原始参数，不包含执行元数据
+        workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
 
         # 1. 获取输入路径和字幕区域
         crop_stage = workflow_context.stages.get("ffmpeg.crop_subtitle_images")
@@ -566,17 +581,19 @@ def perform_ocr(self: Task, context: dict) -> dict:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
-        # 记录实际使用的输入参数到input_params
+        # [修复] 记录实际使用的输入参数到input_params
         recorded_input_params = resolved_params.copy() if resolved_params else {}
         
-        # 如果没有显式参数，记录依赖的前置阶段信息
+        # 如果没有显式参数，只记录需要的参数到input_params
         if not recorded_input_params:
             prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
             if prev_stage:
-                recorded_input_params['input_source'] = 'ffmpeg.extract_keyframes'
-                recorded_input_params['keyframe_dir'] = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+                keyframe_dir = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+                if keyframe_dir:
+                    recorded_input_params['keyframe_dir'] = keyframe_dir
         
-        workflow_context.stages[stage_name].input_params = recorded_input_params
+        # [修复] 确保input_params只包含原始参数，不包含执行元数据
+        workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
 
         prev_stage = workflow_context.stages.get('paddleocr.create_stitched_images')
         prev_stage_output = prev_stage.output if prev_stage else {}
@@ -720,17 +737,19 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
-        # 记录实际使用的输入参数到input_params
+        # [修复] 记录实际使用的输入参数到input_params
         recorded_input_params = resolved_params.copy() if resolved_params else {}
         
-        # 如果没有显式参数，记录依赖的前置阶段信息
+        # 如果没有显式参数，只记录需要的参数到input_params
         if not recorded_input_params:
             prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
             if prev_stage:
-                recorded_input_params['input_source'] = 'ffmpeg.extract_keyframes'
-                recorded_input_params['keyframe_dir'] = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+                keyframe_dir = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
+                if keyframe_dir:
+                    recorded_input_params['keyframe_dir'] = keyframe_dir
         
-        workflow_context.stages[stage_name].input_params = recorded_input_params
+        # [修复] 确保input_params只包含原始参数，不包含执行元数据
+        workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
 
         prev_stage = workflow_context.stages.get('paddleocr.perform_ocr')
         prev_stage_output = prev_stage.output if prev_stage else {}
