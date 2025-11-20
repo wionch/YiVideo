@@ -26,6 +26,53 @@ from ..utils.progress_logger import create_stage_progress
 # --- Global variables for worker processes ---
 full_ocr_engine_process_global = None
 
+def _log_ocr_device_info(pid: int):
+    """
+    检测并记录OCR引擎实际使用的设备信息
+    """
+    try:
+        # 检测PyTorch GPU可用性
+        torch_gpu_available = torch.cuda.is_available()
+        torch_device_count = torch.cuda.device_count() if torch_gpu_available else 0
+        torch_device_name = torch.cuda.get_device_name(0) if torch_gpu_available and torch.cuda.device_count() > 0 else "N/A"
+
+        # 检测PaddlePaddle GPU可用性
+        try:
+            import paddle
+            paddle_gpu_available = paddle.device.is_compiled_with_cuda()
+        except:
+            paddle_gpu_available = False
+
+        # 尝试检测当前进程使用的设备
+        current_device = "unknown"
+        try:
+            if torch_gpu_available:
+                # 尝试获取当前张量设备
+                test_tensor = torch.tensor([1.0], device='cuda' if torch_gpu_available else 'cpu')
+                current_device = str(test_tensor.device)
+                del test_tensor
+        except Exception as e:
+            logger.debug(f"[PID: {pid}] 无法检测张量设备: {e}")
+
+        # 记录设备信息
+        logger.info(f"[PID: {pid}] ========== OCR设备检测 ==========")
+        logger.info(f"[PID: {pid}] PyTorch GPU可用: {torch_gpu_available}")
+        if torch_gpu_available:
+            logger.info(f"[PID: {pid}] PyTorch GPU设备数: {torch_device_count}")
+            logger.info(f"[PID: {pid}] PyTorch GPU设备名: {torch_device_name}")
+        logger.info(f"[PID: {pid}] PaddlePaddle GPU可用: {paddle_gpu_available}")
+        logger.info(f"[PID: {pid}] 当前计算设备: {current_device}")
+
+        # 总结性判断
+        if torch_gpu_available or paddle_gpu_available:
+            logger.info(f"[PID: {pid}] ✅ OCR任务使用GPU加速")
+        else:
+            logger.info(f"[PID: {pid}] ℹ️ OCR任务使用CPU模式")
+        logger.info(f"[PID: {pid}] ================================")
+
+    except Exception as e:
+        logger.warning(f"[PID: {pid}] 设备检测过程出错: {e}")
+
 class MultiProcessOCREngine:
     """
     V6: An optimized, multi-process OCR engine for full OCR tasks on stitched images.
@@ -192,6 +239,9 @@ def _full_ocr_worker_initializer(full_config: Dict):
         full_ocr_engine_process_global = PaddleOCR(**models_config)
         logger.info(f"[PID: {pid}] Full PaddleOCR engine initialized successfully.")
 
+        # [新增] 检测并记录实际使用的设备
+        _log_ocr_device_info(pid)
+
     except Exception as e:
         logger.error(f"[PID: {pid}] ❌ Full PaddleOCR engine initialization failed: {e}", exc_info=True)
         # 尝试使用最简配置作为fallback
@@ -203,6 +253,9 @@ def _full_ocr_worker_initializer(full_config: Dict):
             }
             full_ocr_engine_process_global = PaddleOCR(**fallback_config)
             logger.info(f"[PID: {pid}] PaddleOCR engine initialized successfully with fallback config.")
+
+            # [新增] 记录fallback模式的设备使用情况
+            _log_ocr_device_info(pid)
         except Exception as fallback_e:
             logger.error(f"[PID: {pid}] ❌ Fallback initialization also failed: {fallback_e}", exc_info=True)
             full_ocr_engine_process_global = None

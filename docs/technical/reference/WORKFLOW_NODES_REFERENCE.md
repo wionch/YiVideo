@@ -785,15 +785,69 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 
 ### 1. paddleocr.detect_subtitle_area
 
-通过关键帧分析检测视频中的字幕区域位置。
+通过关键帧分析检测视频中的字幕区域位置，支持多种输入模式。
 
-**功能描述**：分析视频关键帧，使用计算机视觉技术检测字幕通常出现的区域位置。
+**功能描述**：分析视频关键帧，使用计算机视觉技术检测字幕通常出现的区域位置。支持本地目录、远程MinIO目录等多种输入源，提供灵活的使用方式。
 
 **输入参数**：
-- 无直接参数，从工作流上下文自动获取关键帧
+- `keyframe_dir` (string, 节点可选): 直接指定关键帧目录路径，支持本地路径或MinIO URL（如 `minio://bucket/path/to/keyframes`）
+- `download_from_minio` (bool, 节点可选): 是否从MinIO下载关键帧，默认 false
+- `local_keyframe_dir` (string, 节点可选): 本地保存下载关键帧的目录，默认使用共享存储路径
+- `keyframe_sample_count` (int, 节点可选): 关键帧采样数量（保留参数，当前未使用）
+
+**配置来源说明**：
+- 所有列出的参数均为 **节点参数** (在请求体中的 `paddleocr.detect_subtitle_area` 对象内提供)。
+
+**智能输入源选择**（按优先级）：
+1. **参数指定目录** (`keyframe_dir`): 如果提供了 `keyframe_dir` 参数，将直接使用
+2. **MinIO URL**: 如果 `keyframe_dir` 是 MinIO URL 且 `download_from_minio=true`，将从 MinIO 下载
+3. **工作流上下文**: 如果未提供参数，将从 `ffmpeg.extract_keyframes` 输出获取
+
+**支持的三种输入模式**：
+
+#### 模式1：工作流模式（默认）
+从前置阶段自动获取关键帧目录，保持向后兼容性：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_keyframes",
+      "paddleocr.detect_subtitle_area"
+    ]
+  }
+}
+```
+
+#### 模式2：参数模式（直接指定本地目录）
+```json
+{
+  "workflow_config": {
+    "workflow_chain": ["paddleocr.detect_subtitle_area"]
+  },
+  "paddleocr.detect_subtitle_area": {
+    "keyframe_dir": "/local/path/to/keyframes"
+  }
+}
+```
+
+#### 模式3：远程模式（MinIO目录下载）
+```json
+{
+  "workflow_config": {
+    "workflow_chain": ["paddleocr.detect_subtitle_area"]
+  },
+  "paddleocr.detect_subtitle_area": {
+    "keyframe_dir": "minio://yivideo/workflow_123/keyframes",
+    "download_from_minio": true,
+    "local_keyframe_dir": "/shared/workflows/custom_dir"
+  }
+}
+```
 
 **前置依赖**：
-- `ffmpeg.extract_keyframes`
+- **工作流模式**: `ffmpeg.extract_keyframes`
+- **参数模式**: 无（直接指定目录）
+- **远程模式**: MinIO存储桶中有对应的关键帧目录
 
 **输出格式**：
 ```json
@@ -806,11 +860,26 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
   },
   "detection_confidence": 0.95,
   "keyframes_analyzed": 100,
-  "detection_method": "unified_bottom_detection"
+  "detection_method": "unified_bottom_detection",
+  "input_source": "parameter_local|parameter_minio|workflow_ffmpeg|workflow_minio",
+  "minio_download_result": {
+    "total_files": 50,
+    "downloaded_files": ["frame_001.jpg", "frame_002.jpg", ...]
+  }
 }
 ```
 
+**输出字段说明**：
+- `subtitle_area`: 检测到的字幕区域坐标
+- `detection_confidence`: 检测置信度
+- `keyframes_analyzed`: 分析的关键帧数量
+- `detection_method`: 使用的检测方法
+- `input_source`: 输入源类型，用于调试和监控
+- `minio_download_result`: MinIO下载结果（仅当从MinIO下载时）
+
 **使用示例**：
+
+**示例1：工作流模式（传统）**：
 ```json
 {
   "workflow_config": {
@@ -822,14 +891,86 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 }
 ```
 
+**示例2：参数模式（单任务）**：
+```json
+{
+  "task_name": "paddleocr.detect_subtitle_area",
+  "input_data": {
+    "paddleocr.detect_subtitle_area": {
+      "keyframe_dir": "/share/my_project/keyframes"
+    }
+  }
+}
+```
+
+**示例3：MinIO远程模式**：
+```json
+{
+  "task_name": "paddleocr.detect_subtitle_area", 
+  "input_data": {
+    "paddleocr.detect_subtitle_area": {
+      "keyframe_dir": "minio://yivideo/project-456/keyframes",
+      "download_from_minio": true,
+      "local_keyframe_dir": "/shared/workflows/downloaded_frames"
+    }
+  }
+}
+```
+
+**示例4：动态引用模式**：
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_keyframes",
+      "paddleocr.detect_subtitle_area"
+    ]
+  },
+  "paddleocr.detect_subtitle_area": {
+    "keyframe_dir": "${{ stages.ffmpeg.extract_keyframes.output.keyframe_dir }}"
+  }
+}
+```
+
 **依赖关系**：
-- `ffmpeg.extract_keyframes`
+- **默认模式**: `ffmpeg.extract_keyframes`
+- **参数模式**: 无（直接指定目录）
+- **MinIO模式**: 需要MinIO服务可用
+
+**新增特性**：
+
+#### 1. 自定义参数支持
+- 支持通过 `node_params` 传入自定义参数
+- 与工作流参数系统完全集成
+- 支持 `${{...}}` 动态引用语法
+
+#### 2. 远程目录下载
+- 支持从MinIO下载整个关键帧目录
+- 自动处理目录结构和文件匹配
+- 支持JPEG文件自动过滤
+- 下载失败时的优雅降级处理
+
+#### 3. 智能源选择
+- 三种输入模式的自动切换
+- 优先级明确，行为可预测
+- 完整的错误处理和日志记录
+
+#### 4. 向后兼容性
+- 完全兼容现有的工作流配置
+- 无需修改现有代码和配置
+- 新功能通过显式参数启用
 
 **检测原理**：
 - 分析多帧字幕位置分布
 - 识别字幕出现的规律区域
 - 计算最佳字幕区域坐标
 - 支持多种字幕位置检测
+
+**注意事项**：
+- MinIO模式需要确保MinIO服务可访问
+- 下载的临时目录会在任务完成后自动清理
+- 支持的文件格式：JPEG图片
+- 处理大量关键帧时建议适当采样
 
 ---
 
