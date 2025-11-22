@@ -22,7 +22,7 @@ try:
     from services.common.context import WorkflowContext, StageExecution
     from services.common.logger import get_logger
     from services.common.locks import gpu_lock, SmartGpuLockManager
-    from services.common.parameter_resolver import resolve_parameters
+    from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
     from services.common.file_service import get_file_service
 except ImportError as e:
     print(f"导入共享模块失败: {e}")
@@ -148,34 +148,51 @@ def generate_speech(
     workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
 
     # 提取参数（兼容多种参数名称）
-    text = context.get('text', '')
-    output_path = context.get('output_path', '')
+    text = get_param_with_fallback("text", resolved_params, workflow_context)
+    output_path = get_param_with_fallback("output_path", resolved_params, workflow_context)
 
-    # 音色参考音频 - 支持多种参数名
-    reference_audio = (
-        context.get('spk_audio_prompt') or  # 优先使用IndexTTS2官方参数名
-        context.get('reference_audio') or   # 兼容旧参数名
-        context.get('speaker_audio') or     # 兼容其他可能参数名
-        None
-    )
+    # 音色参考音频 - 支持多种参数名和上游回退
+    reference_audio = get_param_with_fallback("spk_audio_prompt", resolved_params, workflow_context)
+    if not reference_audio:
+        reference_audio = get_param_with_fallback("reference_audio", resolved_params, workflow_context)
+    if not reference_audio:
+        reference_audio = get_param_with_fallback("speaker_audio", resolved_params, workflow_context)
+    
+    # 如果参数中没有，尝试从上游节点获取
+    if not reference_audio:
+        # 尝试从 audio_separator 获取人声
+        reference_audio = get_param_with_fallback(
+            "vocal_audio", 
+            resolved_params, 
+            workflow_context, 
+            fallback_from_stage="audio_separator.separate_vocals",
+            fallback_from_input_data=False
+        )
+    if not reference_audio:
+        # 尝试从 ffmpeg 获取音频
+        reference_audio = get_param_with_fallback(
+            "audio_path", 
+            resolved_params, 
+            workflow_context, 
+            fallback_from_stage="ffmpeg.extract_audio",
+            fallback_from_input_data=False
+        )
 
     # 情感参考音频
-    emotion_reference = (
-        context.get('emo_audio_prompt') or  # 优先使用IndexTTS2官方参数名
-        context.get('emotion_reference') or # 兼容旧参数名
-        None
-    )
+    emotion_reference = get_param_with_fallback("emo_audio_prompt", resolved_params, workflow_context)
+    if not emotion_reference:
+        emotion_reference = get_param_with_fallback("emotion_reference", resolved_params, workflow_context)
 
     # 情感相关参数
-    emotion_alpha = float(context.get('emotion_alpha', 1.0))  # 修正默认值为1.0
-    emotion_vector = context.get('emotion_vector')
-    emotion_text = context.get('emotion_text')
-    use_emo_text = bool(context.get('use_emo_text', False))
-    use_random = bool(context.get('use_random', False))
+    emotion_alpha = float(get_param_with_fallback("emotion_alpha", resolved_params, workflow_context, default=1.0))
+    emotion_vector = get_param_with_fallback("emotion_vector", resolved_params, workflow_context)
+    emotion_text = get_param_with_fallback("emotion_text", resolved_params, workflow_context)
+    use_emo_text = bool(get_param_with_fallback("use_emo_text", resolved_params, workflow_context, default=False))
+    use_random = bool(get_param_with_fallback("use_random", resolved_params, workflow_context, default=False))
 
     # 技术参数
-    max_text_tokens_per_segment = int(context.get('max_text_tokens_per_segment', 120))
-    verbose = bool(context.get('verbose', False))
+    max_text_tokens_per_segment = int(get_param_with_fallback("max_text_tokens_per_segment", resolved_params, workflow_context, default=120))
+    verbose = bool(get_param_with_fallback("verbose", resolved_params, workflow_context, default=False))
 
     workflow_id = context.get('workflow_id', 'unknown')
     stage_name = context.get('stage_name', 'indextts.generate_speech')

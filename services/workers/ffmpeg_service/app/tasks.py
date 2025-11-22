@@ -27,7 +27,7 @@ from services.common.context import StageExecution
 from services.common.context import WorkflowContext
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
-from services.common.parameter_resolver import resolve_parameters
+from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
 from services.common.file_service import get_file_service
 
 # 导入该服务内部的核心视频处理逻辑模块
@@ -70,17 +70,23 @@ def extract_keyframes(self: Task, context: dict) -> dict:
             if input_data.get("video_path"):
                 recorded_input_params['video_path'] = input_data.get("video_path")
         
+        # MinIO上传参数
+        upload_to_minio = resolved_params.get("upload_cropped_images_to_minio", False)
+        delete_local_images = resolved_params.get("delete_local_cropped_images_after_upload", False)
+        
         workflow_context.stages[stage_name].input_params = recorded_input_params
 
         os.makedirs(workflow_context.shared_storage_path, exist_ok=True)
 
         # 优先从 resolved_params 获取参数，回退到全局 input_data (兼容单步任务)
-        video_path = resolved_params.get("video_path")
-        if not video_path:
-             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
-
-        num_frames = resolved_params.get("keyframe_sample_count", 
-                                       workflow_context.input_params.get("keyframe_sample_count", 100))
+        video_path = get_param_with_fallback("video_path", resolved_params, workflow_context)
+        
+        num_frames = get_param_with_fallback(
+            "keyframe_sample_count",
+            resolved_params,
+            workflow_context,
+            default=100
+        )
         keyframes_dir = os.path.join(workflow_context.shared_storage_path, "keyframes")
 
         logger.info(f"[{stage_name}] 开始从 {video_path} 抽取 {num_frames} 帧...")
@@ -94,8 +100,18 @@ def extract_keyframes(self: Task, context: dict) -> dict:
         output_data = {"keyframe_dir": keyframes_dir}
 
         # 检查是否需要上传关键帧目录到MinIO
-        upload_to_minio = resolved_params.get("upload_keyframes_to_minio", False)
-        delete_local_keyframes = resolved_params.get("delete_local_keyframes_after_upload", False)
+        upload_to_minio = get_param_with_fallback(
+            "upload_keyframes_to_minio",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        delete_local_keyframes = get_param_with_fallback(
+            "delete_local_keyframes_after_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
         
         if upload_to_minio and frame_paths:
             try:
@@ -177,6 +193,10 @@ def extract_audio(self: Task, context: dict) -> dict:
             input_data = workflow_context.input_params.get("input_data", {})
             if input_data.get("video_path"):
                 recorded_input_params['video_path'] = input_data.get("video_path")
+        
+        # MinIO上传参数
+        upload_to_minio = resolved_params.get("upload_cropped_images_to_minio", False)
+        delete_local_images = resolved_params.get("delete_local_cropped_images_after_upload", False)
         
         workflow_context.stages[stage_name].input_params = recorded_input_params
         
@@ -296,17 +316,34 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
             if input_data.get("video_path"):
                 recorded_input_params['video_path'] = input_data.get("video_path")
         
+        # MinIO上传参数
+        upload_to_minio = get_param_with_fallback(
+            "upload_cropped_images_to_minio",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        delete_local_images = get_param_with_fallback(
+            "delete_local_cropped_images_after_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        
         workflow_context.stages[stage_name].input_params = recorded_input_params
         
-        video_path = resolved_params.get("video_path")
-        if not video_path:
-             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
+        video_path = get_param_with_fallback("video_path", resolved_params, workflow_context)
         
-        prev_stage = workflow_context.stages.get('paddleocr.detect_subtitle_area')
-        prev_stage_output = prev_stage.output if prev_stage else {}
-        crop_area = prev_stage_output.get("subtitle_area")
+        # 智能字幕区域选择：优先使用传入参数(包括input_data)，其次从上游节点获取
+        crop_area = get_param_with_fallback(
+            "subtitle_area",
+            resolved_params,
+            workflow_context,
+            fallback_from_stage="paddleocr.detect_subtitle_area"
+        )
+        
         if not crop_area:
-            raise ValueError("上下文中缺少 'subtitle_area' (字幕区域) 信息，无法执行裁剪。")
+            raise ValueError("缺少字幕区域坐标信息：请通过 'subtitle_area' 参数传入，或确保 paddleocr.detect_subtitle_area 节点已成功完成并输出了字幕区域数据。")
 
         cropped_images_dir = os.path.join(workflow_context.shared_storage_path, "cropped_images")
 
@@ -316,7 +353,12 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
         try:
             executor_script_path = os.path.join(os.path.dirname(__file__), "executor_decode_video.py")
             crop_area_json = json.dumps(crop_area)
-            num_processes = resolved_params.get("decode_processes", 10)
+            num_processes = get_param_with_fallback(
+                "decode_processes",
+                resolved_params,
+                workflow_context,
+                default=10
+            )
 
             command = [
                 sys.executable,
@@ -355,6 +397,47 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
 
         final_frames_path = os.path.join(cropped_images_dir, "frames")
         output_data = {"cropped_images_path": final_frames_path}
+        
+        # 如果启用了 MinIO 上传
+        if upload_to_minio and os.path.exists(final_frames_path):
+            try:
+                # 导入通用目录上传模块
+                from services.common.minio_directory_upload import upload_directory_to_minio
+                
+                logger.info(f"[{stage_name}] 开始上传裁剪图片目录到MinIO...")
+                
+                # 构建裁剪图片在MinIO中的路径
+                minio_base_path = f"{workflow_context.workflow_id}/cropped_images"
+                
+                upload_result = upload_directory_to_minio(
+                    local_dir=final_frames_path,
+                    minio_base_path=minio_base_path,
+                    file_pattern="*.jpg,*.jpeg,*.png,*.bmp,*.tiff,*.gif",  # 支持多种图片格式
+                    delete_local=delete_local_images,
+                    preserve_structure=True
+                )
+                
+                if upload_result["success"]:
+                    output_data.update({
+                        "cropped_images_minio_url": upload_result["minio_base_url"],
+                        "cropped_images_files_count": len(upload_result["uploaded_files"]),
+                        "cropped_images_uploaded_files": upload_result["uploaded_files"]
+                    })
+                    logger.info(f"[{stage_name}] 裁剪图片目录上传成功: {upload_result['total_files']} 个文件")
+                else:
+                    logger.warning(f"[{stage_name}] 裁剪图片目录上传失败: {upload_result.get('error', '未知错误')}")
+                    output_data.update({
+                        "cropped_images_upload_error": upload_result.get("error"),
+                        "cropped_images_files_count": upload_result["total_files"],
+                        "cropped_images_uploaded_files": upload_result["uploaded_files"]
+                    })
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 裁剪图片目录上传过程出错: {e}", exc_info=True)
+                output_data.update({
+                    "cropped_images_upload_error": str(e),
+                    "cropped_images_files_count": len(os.listdir(final_frames_path)) if os.path.exists(final_frames_path) else 0
+                })
+        
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
         logger.info(f"[{stage_name}] 字幕条裁剪完成。")
@@ -419,6 +502,10 @@ def split_audio_segments(self: Task, context: dict) -> dict:
             if input_data.get("video_path"):
                 recorded_input_params['video_path'] = input_data.get("video_path")
         
+        # MinIO上传参数
+        upload_to_minio = resolved_params.get("upload_cropped_images_to_minio", False)
+        delete_local_images = resolved_params.get("delete_local_cropped_images_after_upload", False)
+        
         workflow_context.stages[stage_name].input_params = recorded_input_params
 
         logger.info(f"[{stage_name}] ========== 音频分割任务开始 ==========")
@@ -426,47 +513,32 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         logger.info(f"[{stage_name}] 解析后的节点参数: {resolved_params}")
 
         # 步骤1: 获取音频文件路径
-        audio_path = None
-        audio_source = ""
+        audio_path = get_param_with_fallback("audio_path", resolved_params, workflow_context)
+        audio_source = "参数传入"
 
-        # 检查是否通过参数传入音频文件（单步测试模式）
-        # 优先使用通过参数传入的音频文件路径
-        audio_path_param = resolved_params.get("audio_path")
-        if audio_path_param and os.path.exists(audio_path_param):
-            audio_path = audio_path_param
-            audio_source = "参数传入"
-            logger.info(f"[{stage_name}] 使用解析后的参数传入音频文件: {audio_path}")
-        else:
-            # 工作流模式：从上下文中自动获取音频文件
-            logger.info(f"[{stage_name}] 未提供音频路径参数，开始音频源选择逻辑...")
-            priority_order = audio_source_config.get('priority_order', ["vocal_audio", "audio_path"])
+        if not audio_path:
+            # 尝试从 audio_separator 获取人声
+            audio_path = get_param_with_fallback(
+                "vocal_audio", 
+                resolved_params, 
+                workflow_context, 
+                fallback_from_stage="audio_separator.separate_vocals",
+                fallback_from_input_data=False
+            )
+            if audio_path:
+                audio_source = "人声音频 (audio_separator)"
 
-            for source_type in priority_order:
-                if source_type == "vocal_audio":
-                    # 检查 audio_separator.separate_vocals 阶段的人声音频输出
-                    audio_separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
-                    if (audio_separator_stage and
-                        audio_separator_stage.status in ['SUCCESS', 'COMPLETED'] and
-                        audio_separator_stage.output and
-                        isinstance(audio_separator_stage.output, dict) and
-                        audio_separator_stage.output.get('vocal_audio')):
-                        audio_path = audio_separator_stage.output['vocal_audio']
-                        audio_source = "人声音频 (audio_separator)"
-                        logger.info(f"[{stage_name}] 成功获取人声音频: {audio_path}")
-                        break
-
-                elif source_type == "audio_path":
-                    # 检查 ffmpeg.extract_audio 阶段的默认音频输出
-                    ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
-                    if (ffmpeg_stage and
-                        ffmpeg_stage.status in ['SUCCESS', 'COMPLETED'] and
-                        ffmpeg_stage.output and
-                        isinstance(ffmpeg_stage.output, dict) and
-                        ffmpeg_stage.output.get('audio_path')):
-                        audio_path = ffmpeg_stage.output['audio_path']
-                        audio_source = "默认音频 (ffmpeg)"
-                        logger.info(f"[{stage_name}] 成功获取默认音频: {audio_path}")
-                        break
+        if not audio_path:
+            # 尝试从 ffmpeg 获取默认音频
+            audio_path = get_param_with_fallback(
+                "audio_path", 
+                resolved_params, 
+                workflow_context, 
+                fallback_from_stage="ffmpeg.extract_audio",
+                fallback_from_input_data=False
+            )
+            if audio_path:
+                audio_source = "默认音频 (ffmpeg)"
 
         # 验证音频文件
         if not audio_path or not os.path.exists(audio_path):
@@ -477,36 +549,44 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         logger.info(f"[{stage_name}] 音频源: {audio_source}, 路径: {audio_path}")
 
         # 步骤2: 获取字幕文件路径
-        subtitle_path = None
-        subtitle_source = ""
+        subtitle_path = get_param_with_fallback("subtitle_path", resolved_params, workflow_context)
+        subtitle_source = "参数传入"
 
-        # 检查是否通过参数传入字幕文件（单步测试模式）
-        # 优先使用通过参数传入的字幕文件路径
-        subtitle_path_param = resolved_params.get("subtitle_path")
-        if subtitle_path_param and os.path.exists(subtitle_path_param):
-            subtitle_path = subtitle_path_param
-            subtitle_source = "参数传入"
-            logger.info(f"[{stage_name}] 使用解析后的参数传入字幕文件: {subtitle_path}")
-        else:
-            # 工作流模式：从上下文中自动获取字幕文件
-            logger.info(f"[{stage_name}] 未提供字幕路径参数，开始字幕文件选择逻辑...")
-            priority_order = subtitle_config.get('priority_order', ["speaker_srt_path", "subtitle_path", "speaker_json_path"])
+        if not subtitle_path:
+            # 尝试从 wservice 获取带说话人SRT
+            subtitle_path = get_param_with_fallback(
+                "speaker_srt_path",
+                resolved_params,
+                workflow_context,
+                fallback_from_stage="wservice.generate_subtitle_files",
+                fallback_from_input_data=False
+            )
+            if subtitle_path:
+                subtitle_source = "带说话人信息SRT"
 
-            for source_type in priority_order:
-                subtitle_stage = workflow_context.stages.get('wservice.generate_subtitle_files')
-                if subtitle_stage and subtitle_stage.status in ['SUCCESS', 'COMPLETED'] and subtitle_stage.output:
-                    if source_type == "speaker_srt_path" and subtitle_stage.output.get('speaker_srt_path'):
-                        subtitle_path = subtitle_stage.output['speaker_srt_path']
-                        subtitle_source = "带说话人信息SRT"
-                        break
-                    elif source_type == "subtitle_path" and subtitle_stage.output.get('subtitle_path'):
-                        subtitle_path = subtitle_stage.output['subtitle_path']
-                        subtitle_source = "基础SRT"
-                        break
-                    elif source_type == "speaker_json_path" and subtitle_stage.output.get('speaker_json_path'):
-                        subtitle_path = subtitle_stage.output['speaker_json_path']
-                        subtitle_source = "带说话人信息JSON"
-                        break
+        if not subtitle_path:
+            # 尝试从 wservice 获取基础SRT
+            subtitle_path = get_param_with_fallback(
+                "subtitle_path",
+                resolved_params,
+                workflow_context,
+                fallback_from_stage="wservice.generate_subtitle_files",
+                fallback_from_input_data=False
+            )
+            if subtitle_path:
+                subtitle_source = "基础SRT"
+
+        if not subtitle_path:
+            # 尝试从 wservice 获取JSON
+            subtitle_path = get_param_with_fallback(
+                "speaker_json_path",
+                resolved_params,
+                workflow_context,
+                fallback_from_stage="wservice.generate_subtitle_files",
+                fallback_from_input_data=False
+            )
+            if subtitle_path:
+                subtitle_source = "带说话人信息JSON"
 
         # 验证字幕文件
         if not subtitle_path or not os.path.exists(subtitle_path):

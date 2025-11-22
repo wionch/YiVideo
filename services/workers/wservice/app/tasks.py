@@ -691,7 +691,7 @@ def correct_subtitles(self, context: dict) -> dict:
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
-                from services.common.parameter_resolver import resolve_parameters
+                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
             except ValueError as e:
@@ -701,27 +701,53 @@ def correct_subtitles(self, context: dict) -> dict:
         # 记录实际使用的输入参数到input_params
         recorded_input_params = resolved_params.copy() if resolved_params else {}
         
-        # 如果没有显式参数，记录依赖的前置阶段信息
-        if not recorded_input_params:
-            generate_stage = workflow_context.stages.get('wservice.generate_subtitle_files')
-            if generate_stage:
-                recorded_input_params['input_source'] = 'wservice.generate_subtitle_files'
-                recorded_input_params['subtitle_path'] = generate_stage.output.get('speaker_srt_path') or generate_stage.output.get('subtitle_path')
-        
-        workflow_context.stages[stage_name].input_params = recorded_input_params
-
         # 优先从 resolved_params 获取参数，回退到 global params
         correction_params = resolved_params.get('subtitle_correction', 
                                               workflow_context.input_params.get('params', {}).get('subtitle_correction', {}))
+        
+        # 获取待校正的字幕文件路径
+        subtitle_to_correct = get_param_with_fallback(
+            "subtitle_path", 
+            resolved_params, 
+            workflow_context
+        )
+        
+        # 如果参数中没有，尝试从上游节点获取
+        if not subtitle_to_correct:
+            # 尝试从 generate_subtitle_files 获取带说话人SRT
+            subtitle_to_correct = get_param_with_fallback(
+                "speaker_srt_path",
+                resolved_params,
+                workflow_context,
+                fallback_from_stage="wservice.generate_subtitle_files",
+                fallback_from_input_data=False
+            )
+        
+        if not subtitle_to_correct:
+            # 尝试从 generate_subtitle_files 获取基础SRT
+            subtitle_to_correct = get_param_with_fallback(
+                "subtitle_path",
+                resolved_params,
+                workflow_context,
+                fallback_from_stage="wservice.generate_subtitle_files",
+                fallback_from_input_data=False
+            )
+            
+        if subtitle_to_correct:
+            recorded_input_params['subtitle_path'] = subtitle_to_correct
+        
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+
         is_enabled = correction_params.get('enabled', False)
         if not is_enabled:
             workflow_context.stages[stage_name].status = 'SKIPPED'
             return workflow_context.model_dump()
+        
         provider = correction_params.get('provider', None)
-        generate_stage = workflow_context.stages.get('wservice.generate_subtitle_files')
-        subtitle_to_correct = generate_stage.output.get('speaker_srt_path') or generate_stage.output.get('subtitle_path')
+        
         if not subtitle_to_correct or not os.path.exists(subtitle_to_correct):
             raise FileNotFoundError(f"未找到可供校正的字幕文件")
+        
         corrector = SubtitleCorrector(provider=provider)
         corrected_filename = os.path.basename(subtitle_to_correct).replace('.srt', '_corrected_by_ai.srt')
         corrected_path = os.path.join(os.path.dirname(subtitle_to_correct), corrected_filename)

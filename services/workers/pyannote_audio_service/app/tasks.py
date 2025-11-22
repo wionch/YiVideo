@@ -31,7 +31,7 @@ from services.common.logger import get_logger
 from services.common.locks import gpu_lock
 from services.common import state_manager
 from services.common.context import StageExecution, WorkflowContext
-from services.common.parameter_resolver import resolve_parameters
+from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
 from services.common.file_service import get_file_service
 
 config = get_config()
@@ -122,24 +122,36 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         file_service = get_file_service()
 
         # 步骤1: 获取音频文件路径（与其他服务保持一致）
-        audio_path = None
+        # 优先从 parameters/input_data 获取
+        audio_path = get_param_with_fallback("audio_path", resolved_params, workflow_context)
         audio_source = ""
+        
+        if audio_path:
+            audio_source = "parameter/input_data"
+            logger.info(f"[{workflow_id}] 从参数/input_data获取音频: {audio_path}")
+        else:
+            # 其次检查工作流中是否有其他任务产生的音频文件
+            ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
+            if ffmpeg_stage and ffmpeg_stage.output and ffmpeg_stage.output.get('audio_path'):
+                audio_path = ffmpeg_stage.output.get('audio_path')
+                if audio_path and os.path.exists(audio_path):
+                    audio_source = "ffmpeg.extract_audio"
+                    logger.info(f"[{workflow_id}] 成功获取ffmpeg提取的音频: {audio_path}")
 
-        # 首先检查工作流中是否有其他任务产生的音频文件
-        ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
-        if ffmpeg_stage and ffmpeg_stage.output and ffmpeg_stage.output.get('audio_path'):
-            audio_path = ffmpeg_stage.output.get('audio_path')
-            if audio_path and os.path.exists(audio_path):
-                audio_source = "ffmpeg.extract_audio"
-                logger.info(f"[{workflow_id}] 成功获取ffmpeg提取的音频: {audio_path}")
-
-        # 如果没有ffmpeg提取的音频，检查音频分离服务
+            # 如果没有ffmpeg提取的音频，检查音频分离服务
+            if not audio_path:
+                separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
+                if separator_stage and separator_stage.output:
+                    # 优先使用vocal_audio，其次使用instrumental_audio
+                    for audio_key in ['vocal_audio', 'instrumental_audio']:
+                        potential_path = separator_stage.output.get(audio_key)
+                        if potential_path:
+                            audio_path = potential_path
+                            audio_source = "audio_separator.separate_vocals"
+                            logger.info(f"[{workflow_id}] 成功获取分离后的音频({audio_key}): {audio_path}")
+                            break
+        
         if not audio_path:
-            separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
-            if separator_stage and separator_stage.output:
-                # 优先使用vocal_audio，其次使用instrumental_audio
-                for audio_key in ['vocal_audio', 'instrumental_audio']:
-                    potential_path = separator_stage.output.get(audio_key)
             raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 或 audio_separator.separate_vocals 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
 
         logger.info(f"[{workflow_id}] ========== 音频源选择结果 ==========")

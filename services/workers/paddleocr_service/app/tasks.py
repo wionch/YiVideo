@@ -40,7 +40,7 @@ from services.common.context import StageExecution
 from services.common.context import WorkflowContext
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
-from services.common.parameter_resolver import resolve_parameters
+from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
 from services.common.file_service import get_file_service
 
 # --- 日志配置 ---
@@ -141,26 +141,10 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
         
-        # [修复] 记录实际使用的输入参数到input_params，确保只保留原始传入参数
+        # [修复] 记录实际使用的输入参数到input_params
         recorded_input_params = resolved_params.copy() if resolved_params else {}
         
-        # 如果没有显式参数，记录全局输入参数（兼容单任务模式）
-        if not recorded_input_params:
-            input_data = workflow_context.input_params.get("input_data", {})
-            for key, value in input_data.items():
-                if key not in recorded_input_params:
-                    recorded_input_params[key] = value
-            logger.info(f"[{stage_name}] 从全局input_data获取参数: {recorded_input_params}")
-        
-        # [关键修复] 确保input_params只包含原始参数，不包含任何执行过程中的数据
-        # 过滤掉可能的执行元数据，确保input_params纯净
-        filtered_input_params = {}
-        for key, value in recorded_input_params.items():
-            # 只保留原始参数，排除执行过程中的元数据
-            if key not in ['input_source', 'minio_download_result', 'total_files', 'downloaded_files_count', 'downloaded_local_dir']:
-                filtered_input_params[key] = value
-        
-        workflow_context.stages[stage_name].input_params = filtered_input_params
+        workflow_context.stages[stage_name].input_params = recorded_input_params
 
         # [新增] 记录GPU锁和设备信息
         logger.info(f"[{stage_name}] ========== 字幕区域检测设备信息 ==========")
@@ -178,23 +162,35 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
             logger.warning(f"[{stage_name}] 设备检测失败: {e}")
         logger.info(f"[{stage_name}] ======================================")
 
-        # 步骤1: 优先从参数中获取关键帧目录
-        keyframe_dir = recorded_input_params.get("keyframe_dir")
+        # 步骤1: 获取参数
+        # 优先从 resolved_params 获取，回退到 input_data，再回退到上游节点
+        keyframe_dir = get_param_with_fallback(
+            "keyframe_dir",
+            resolved_params,
+            workflow_context,
+            fallback_from_stage="ffmpeg.extract_keyframes"
+        )
+        
+        download_from_minio = get_param_with_fallback(
+            "download_from_minio",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        
+        local_download_dir = get_param_with_fallback(
+            "local_keyframe_dir",
+            resolved_params,
+            workflow_context
+        )
 
-        logger.info(f"[{stage_name}] === 关键帧目录获取调试 ===")
-        logger.info(f"[{stage_name}] recorded_input_params: {recorded_input_params}")
         logger.info(f"[{stage_name}] 获取到的keyframe_dir: {keyframe_dir}")
-        logger.info(f"[{stage_name}] 完整workflow_context.input_params: {workflow_context.input_params}")
-        # 优先从 resolved_params 获取，回退到 recorded_input_params
-        download_from_minio = resolved_params.get("download_from_minio") or recorded_input_params.get("download_from_minio", False)
-        local_download_dir = resolved_params.get("local_keyframe_dir") or recorded_input_params.get("local_keyframe_dir")
         logger.info(f"[{stage_name}] download_from_minio: {download_from_minio}")
         
         if keyframe_dir and os.path.isdir(keyframe_dir):
             # 情况1: 参数中提供了本地关键帧目录
             logger.info(f"[{stage_name}] 使用参数指定的关键帧目录: {keyframe_dir}")
             execution_metadata['input_source'] = 'parameter_local'
-            # recorded_input_params['keyframe_dir'] = keyframe_dir # 保持原始参数不变
         elif keyframe_dir and keyframe_dir.startswith('minio://'):
             # 情况2: 参数中提供了MinIO关键帧目录URL (minio://格式)
             logger.info(f"[{stage_name}] 检测到MinIO关键帧目录URL: {keyframe_dir}")
@@ -290,54 +286,41 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                 except Exception as e:
                     logger.error(f"[{stage_name}] MinIO目录下载过程出错: {e}")
                     raise RuntimeError(f"无法从MinIO下载关键帧目录: {e}")
-        elif not keyframe_dir:
-            # 情况4: 回退到工作流模式，从前置阶段获取
-            logger.info(f"[{stage_name}] 未提供关键帧目录参数，使用工作流模式")
-            prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
-            if prev_stage:
-                prev_stage_output = prev_stage.output if prev_stage else {}
-                keyframe_dir = prev_stage_output.get("keyframe_dir")
-                if keyframe_dir:
-                    execution_metadata['input_source'] = 'workflow_ffmpeg'
-                    # recorded_input_params['keyframe_dir'] = keyframe_dir # 保持原始参数不变
-                    
-                    # 检查是否需要下载MinIO目录
-                    keyframe_minio_url = prev_stage_output.get("keyframe_minio_url")
-                    if keyframe_minio_url and download_from_minio:
-                        logger.info(f"[{stage_name}] 前置阶段提供了MinIO关键帧目录，将下载到本地")
-                        try:
-                            from services.common.minio_directory_download import download_keyframes_directory
-                            
-                            if not local_download_dir:
-                                local_download_dir = os.path.join(workflow_context.shared_storage_path, "downloaded_keyframes")
-                            
-                            minio_url = f"minio://yivideo/{keyframe_minio_url.split('/yivideo/')[-1]}" if 'yivideo' in keyframe_minio_url else keyframe_minio_url
-                            
-                            download_result = download_keyframes_directory(
-                                minio_url=minio_url,
-                                workflow_id=workflow_context.workflow_id,
-                                local_dir=local_download_dir
-                            )
-                            
-                            if download_result["success"]:
-                                keyframe_dir = local_download_dir
-                                execution_metadata['input_source'] = 'workflow_minio'
-                                # 注意：不修改原始的keyframe_dir，保持为从工作流获取的值
-                                # 下载后的本地路径将在output中记录
-                                execution_metadata['minio_download_result'] = {
-                                    'total_files': download_result['total_files'],
-                                    'downloaded_files_count': len(download_result['downloaded_files']),
-                                    'downloaded_local_dir': keyframe_dir  # 在output中记录本地路径
-                                }
-                                logger.info(f"[{stage_name}] 工作流MinIO目录下载成功")
-                            else:
-                                logger.warning(f"[{stage_name}] 工作流MinIO目录下载失败，将使用原始本地目录")
-                                
-                        except Exception as e:
-                            logger.warning(f"[{stage_name}] 工作流MinIO目录下载过程出错: {e}，将使用原始本地目录")
-        
-        # [修复] input_params已经在前面设置过了，这里不需要重复设置
-        # workflow_context.stages[stage_name].input_params = recorded_input_params
+        else:
+             # 最后的尝试：检查前置阶段是否提供了MinIO URL (即使keyframe_dir本身可能为空)
+             # 这处理了 keyframe_dir 为空，但上游输出了 keyframe_minio_url 的情况
+             prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
+             if prev_stage and prev_stage.output:
+                 keyframe_minio_url = prev_stage.output.get("keyframe_minio_url")
+                 if keyframe_minio_url and download_from_minio:
+                    logger.info(f"[{stage_name}] 前置阶段提供了MinIO关键帧目录，将下载到本地")
+                    try:
+                        from services.common.minio_directory_download import download_keyframes_directory
+                        
+                        if not local_download_dir:
+                            local_download_dir = os.path.join(workflow_context.shared_storage_path, "downloaded_keyframes")
+                        
+                        minio_url = f"minio://yivideo/{keyframe_minio_url.split('/yivideo/')[-1]}" if 'yivideo' in keyframe_minio_url else keyframe_minio_url
+                        
+                        download_result = download_keyframes_directory(
+                            minio_url=minio_url,
+                            workflow_id=workflow_context.workflow_id,
+                            local_dir=local_download_dir
+                        )
+                        
+                        if download_result["success"]:
+                            keyframe_dir = local_download_dir
+                            execution_metadata['input_source'] = 'workflow_minio'
+                            execution_metadata['minio_download_result'] = {
+                                'total_files': download_result['total_files'],
+                                'downloaded_files_count': len(download_result['downloaded_files']),
+                                'downloaded_local_dir': keyframe_dir
+                            }
+                            logger.info(f"[{stage_name}] 工作流MinIO目录下载成功")
+                        else:
+                            logger.warning(f"[{stage_name}] 工作流MinIO目录下载失败")
+                    except Exception as e:
+                        logger.warning(f"[{stage_name}] 工作流MinIO目录下载过程出错: {e}")
 
         # 验证关键帧目录
         if not keyframe_dir or not os.path.isdir(keyframe_dir):
@@ -595,11 +578,19 @@ def perform_ocr(self: Task, context: dict) -> dict:
         # [修复] 确保input_params只包含原始参数，不包含执行元数据
         workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
 
-        prev_stage = workflow_context.stages.get('paddleocr.create_stitched_images')
-        prev_stage_output = prev_stage.output if prev_stage else {}
-
-        manifest_path = prev_stage_output.get("manifest_path")
-        multi_frames_path = prev_stage_output.get("multi_frames_path")
+        manifest_path = get_param_with_fallback(
+            "manifest_path",
+            resolved_params,
+            workflow_context,
+            fallback_from_stage="paddleocr.create_stitched_images"
+        )
+        
+        multi_frames_path = get_param_with_fallback(
+            "multi_frames_path",
+            resolved_params,
+            workflow_context,
+            fallback_from_stage="paddleocr.create_stitched_images"
+        )
 
         if not manifest_path or not os.path.exists(manifest_path):
             raise ValueError(f"上下文中缺少或无效的 'manifest_path' 信息: {manifest_path}")
@@ -751,10 +742,13 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
         # [修复] 确保input_params只包含原始参数，不包含执行元数据
         workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
 
-        prev_stage = workflow_context.stages.get('paddleocr.perform_ocr')
-        prev_stage_output = prev_stage.output if prev_stage else {}
-
-        ocr_results_path = prev_stage_output.get("ocr_results_path")
+        ocr_results_path = get_param_with_fallback(
+            "ocr_results_path",
+            resolved_params,
+            workflow_context,
+            fallback_from_stage="paddleocr.perform_ocr"
+        )
+        
         if not ocr_results_path or not os.path.exists(ocr_results_path):
             raise ValueError(f"上下文中缺少或无效的 'ocr_results_path' 信息: {ocr_results_path}")
         
@@ -763,9 +757,8 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
             ocr_results = json.load(f)
 
         # 优先从 resolved_params 获取参数
-        video_path = resolved_params.get("video_path")
-        if not video_path:
-             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
+        video_path = get_param_with_fallback("video_path", resolved_params, workflow_context)
+        
         if not video_path:
             raise ValueError("上下文中缺少 'video_path' 信息，无法获取FPS。")
 

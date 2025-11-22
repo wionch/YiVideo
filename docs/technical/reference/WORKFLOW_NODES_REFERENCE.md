@@ -135,6 +135,14 @@ ${{ stages.faster_whisper.transcribe_audio.output.segments_file }}
 - **动态引用**: 充分利用 `${{...}}` 语法实现任务间的数据传递
 - **健壮性**: 对于关键路径，建议同时提供智能检测和显式参数作为备选
 
+### 参数获取统一机制 (新增)
+
+在 v2.1 版本中，引入了统一的参数获取函数 `get_param_with_fallback`，标准化了所有节点的参数获取逻辑。这意味着：
+
+1.  **统一优先级**: `node_params` (工作流配置) > `input_data` (单任务输入) > `upstream_output` (上游节点) > `default` (默认值)。
+2.  **全面支持单任务**: 几乎所有节点现在都支持通过 `input_data` 直接传入关键参数（如 `subtitle_area`, `audio_path` 等），不再强依赖上游节点。
+3.  **动态引用增强**: `input_data` 中的参数值也支持 `${{...}}` 动态引用解析。
+
 所有工作流节点都遵循统一的接口规范：
 
 ### 标准任务签名
@@ -189,6 +197,8 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 **输入参数**：
 - `video_path` (string, 全局必需): 视频文件路径，在API请求的顶层提供。
 - `keyframe_sample_count` (int, 节点可选): 抽取帧数，默认 100。
+- `upload_keyframes_to_minio` (bool, 节点可选): 是否上传关键帧到MinIO，默认 false。
+- `delete_local_keyframes_after_upload` (bool, 节点可选): 上传后是否删除本地关键帧，默认 false。
 
 **配置来源说明**：
 - `video_path`: **全局参数** (在API请求的顶层 `video_path` 字段提供)
@@ -273,23 +283,43 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 **输入参数**：
 - `video_path` (string, 全局必需): 视频文件路径，在API请求的顶层提供。
+- `subtitle_area` (array, 节点可选): 字幕区域坐标，格式为 `[x1, y1, x2, y2]`（绝对像素坐标），支持 `${{...}}` 格式的参数引用。如果提供此参数，将优先使用，不再依赖上游节点。
 - `decode_processes` (int, 节点可选): 解码进程数，默认 10。
+- `upload_cropped_images_to_minio` (bool, 节点可选): 是否将裁剪的图片上传到MinIO，默认 false。
+- `delete_local_cropped_images_after_upload` (bool, 节点可选): 上传成功后是否删除本地裁剪图片，默认 false。此参数仅在 `upload_cropped_images_to_minio=true` 时生效。
 
 **配置来源说明**：
 - `video_path`: **全局参数** (在API请求的顶层 `video_path` 字段提供)
+- `subtitle_area`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供)。如果未提供，将从 `paddleocr.detect_subtitle_area` 输出自动获取。
 - `decode_processes`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供)
+- `upload_cropped_images_to_minio`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供)
+- `delete_local_cropped_images_after_upload`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供，仅在上传启用时生效)
+
+**智能参数选择**：
+- `subtitle_area` (按优先级)：1. 显式传入参数 2. `input_data` 中的参数 3. `paddleocr.detect_subtitle_area` 输出
 
 **前置依赖**：
-- `paddleocr.detect_subtitle_area` - 必须先完成字幕区域检测
+- 无（可选依赖 `paddleocr.detect_subtitle_area` - 如果未提供 `subtitle_area` 参数）
 
 **输出格式**：
 ```json
 {
-  "cropped_images_path": "/share/workflows/{workflow_id}/cropped_images/frames"
+  "cropped_images_path": "/share/workflows/{workflow_id}/cropped_images/frames",
+  "cropped_images_minio_url": "http://minio:9000/yivideo/{workflow_id}/cropped_images",
+  "cropped_images_files_count": 150,
+  "cropped_images_uploaded_files": ["frame_0001.jpg", "frame_0002.jpg", ...]
 }
 ```
 
+**输出字段说明**：
+- `cropped_images_path`: 本地裁剪图片目录路径
+- `cropped_images_minio_url`: MinIO中的裁剪图片目录URL（仅当启用上传时）
+- `cropped_images_files_count`: 裁剪图片文件数量
+- `cropped_images_uploaded_files`: 已上传到MinIO的文件列表（仅当启用上传时）
+
 **使用示例**：
+
+**示例1：依赖上游节点（传统方式）**
 ```json
 {
   "workflow_config": {
@@ -305,10 +335,64 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 }
 ```
 
+**示例2：直接传入字幕区域参数**
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_keyframes",
+      "ffmpeg.crop_subtitle_images"
+    ]
+  },
+  "ffmpeg.crop_subtitle_images": {
+    "subtitle_area": [0, 918, 1920, 1080],
+    "decode_processes": 8
+  }
+}
+```
+
+**示例3：启用MinIO上传功能**
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_keyframes",
+      "paddleocr.detect_subtitle_area",
+      "ffmpeg.crop_subtitle_images"
+    ]
+  },
+  "ffmpeg.crop_subtitle_images": {
+    "subtitle_area": [0, 918, 1920, 1080],
+    "decode_processes": 8,
+    "upload_cropped_images_to_minio": true,
+    "delete_local_cropped_images_after_upload": false
+  }
+}
+```
+
+**示例4：动态引用字幕区域**
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_keyframes",
+      "paddleocr.detect_subtitle_area",
+      "ffmpeg.crop_subtitle_images"
+    ]
+  },
+  "ffmpeg.crop_subtitle_images": {
+    "subtitle_area": "${{ stages.paddleocr.detect_subtitle_area.output.subtitle_area }}",
+    "decode_processes": 8
+  }
+}
+```
+
 **依赖关系**：
 - 需要 `paddleocr.detect_subtitle_area` 的输出 `subtitle_area`
 
 **技术特性**：
+- 支持多种图片格式上传（JPEG、PNG、BMP、TIFF、GIF等）
+- 灵活的删除控制：通过 `delete_local_cropped_images_after_upload` 参数控制
 - 并发解码处理，提高处理速度
 - GPU 加速（使用 GPU 锁保护）
 - 超时保护：1800秒
@@ -537,6 +621,8 @@ faster_whisper_service:
 - `ffmpeg.extract_audio` 或 `audio_separator.separate_vocals`
 
 **技术特性**：
+- 支持多种图片格式上传（JPEG、PNG、BMP、TIFF、GIF等）
+- 灵活的删除控制：通过 `delete_local_cropped_images_after_upload` 参数控制
 - GPU 加速（使用 GPU 锁保护）
 - 支持多种模型大小，平衡速度和精度
 - 自动语言检测
@@ -643,6 +729,8 @@ audio_separator_service:
 - `Drums`: 鼓声轨道
 
 **技术特性**：
+- 支持多种图片格式上传（JPEG、PNG、BMP、TIFF、GIF等）
+- 灵活的删除控制：通过 `delete_local_cropped_images_after_upload` 参数控制
 - GPU 加速处理（使用 GPU 锁保护）
 - 支持多种音频格式输入
 - 自动音量标准化
@@ -760,6 +848,8 @@ pyannote_audio_service:
 3. **GPU 推荐**: 虽然支持 CPU，但 GPU 处理速度更快
 
 **技术特性**：
+- 支持多种图片格式上传（JPEG、PNG、BMP、TIFF、GIF等）
+- 灵活的删除控制：通过 `delete_local_cropped_images_after_upload` 参数控制
 - GPU 加速处理（使用 GPU 锁保护）
 - 自动说话人数量检测
 - 高精度时间边界检测
@@ -852,12 +942,7 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 **输出格式**：
 ```json
 {
-  "subtitle_area": {
-    "x": 0,
-    "y": 0.85,
-    "width": 1.0,
-    "height": 0.15
-  },
+  "subtitle_area": [0, 918, 1920, 1080],
   "detection_confidence": 0.95,
   "keyframes_analyzed": 100,
   "detection_method": "unified_bottom_detection",
@@ -1076,6 +1161,8 @@ IndexTTS 服务提供基于 IndexTTS2 模型的高质量语音合成功能，支
 **依赖关系**：无
 
 **技术特性**：
+- 支持多种图片格式上传（JPEG、PNG、BMP、TIFF、GIF等）
+- 灵活的删除控制：通过 `delete_local_cropped_images_after_upload` 参数控制
 - 高质量音色克隆
 - 情感化语音合成
 - GPU 加速处理（使用 GPU 锁保护）
@@ -1470,7 +1557,7 @@ YiVideo 工作流系统中的各节点存在明确的依赖关系，理解这些
 | `wservice.correct_subtitles` | `wservice.generate_subtitle_files` | 无 | 需要已生成的字幕文件 |
 | `wservice.ai_optimize_subtitles` | `faster_whisper.transcribe_audio` | 无 | 需要转录数据 |
 | `paddleocr.detect_subtitle_area` | `ffmpeg.extract_keyframes` | 无 | 需要关键帧作为输入 |
-| `ffmpeg.crop_subtitle_images` | `paddleocr.detect_subtitle_area` | 无 | 需要字幕区域坐标 |
+| `ffmpeg.crop_subtitle_images` | 无 | `paddleocr.detect_subtitle_area` | 可选依赖：通过 `subtitle_area` 参数传入或从上游节点获取 |
 | `paddleocr.create_stitched_images` | `ffmpeg.crop_subtitle_images` | 无 | 需要裁剪的图像 |
 | `paddleocr.perform_ocr` | `paddleocr.create_stitched_images` | 无 | 需要拼接的图像 |
 | `paddleocr.postprocess_and_finalize` | `paddleocr.perform_ocr` | 无 | 需要OCR结果 |
