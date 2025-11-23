@@ -88,17 +88,23 @@ class MinioDirectoryUploader:
         
         try:
             # 查找所有匹配的文件
-            if preserve_structure:
-                # 保留目录结构，递归查找
-                search_pattern = os.path.join(local_dir, "**", file_pattern)
-                all_files = glob.glob(search_pattern, recursive=True)
-                # 过滤出文件（排除目录）
-                files_to_upload = [f for f in all_files if os.path.isfile(f)]
-            else:
-                # 不保留结构，只在顶层目录查找
-                search_pattern = os.path.join(local_dir, file_pattern)
-                all_files = glob.glob(search_pattern)
-                files_to_upload = [f for f in all_files if os.path.isfile(f)]
+            patterns = [p.strip() for p in file_pattern.split(',')]
+            all_files_set = set()
+            
+            for pattern in patterns:
+                if preserve_structure:
+                    # 保留目录结构，递归查找
+                    search_pattern = os.path.join(local_dir, "**", pattern)
+                    found_files = glob.glob(search_pattern, recursive=True)
+                else:
+                    # 不保留结构，只在顶层目录查找
+                    search_pattern = os.path.join(local_dir, pattern)
+                    found_files = glob.glob(search_pattern)
+                
+                all_files_set.update(found_files)
+            
+            # 过滤出文件（排除目录）
+            files_to_upload = [f for f in all_files_set if os.path.isfile(f)]
             
             result["total_files"] = len(files_to_upload)
             

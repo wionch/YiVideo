@@ -421,7 +421,7 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
                     output_data.update({
                         "cropped_images_minio_url": upload_result["minio_base_url"],
                         "cropped_images_files_count": len(upload_result["uploaded_files"]),
-                        "cropped_images_uploaded_files": upload_result["uploaded_files"]
+                        # "cropped_images_uploaded_files": upload_result["uploaded_files"]
                     })
                     logger.info(f"[{stage_name}] 裁剪图片目录上传成功: {upload_result['total_files']} 个文件")
                 else:
@@ -429,7 +429,7 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
                     output_data.update({
                         "cropped_images_upload_error": upload_result.get("error"),
                         "cropped_images_files_count": upload_result["total_files"],
-                        "cropped_images_uploaded_files": upload_result["uploaded_files"]
+                        # "cropped_images_uploaded_files": upload_result["uploaded_files"]
                     })
             except Exception as e:
                 logger.warning(f"[{stage_name}] 裁剪图片目录上传过程出错: {e}", exc_info=True)

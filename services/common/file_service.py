@@ -129,7 +129,7 @@ class UnifiedFileService:
         if bucket_name is None:
             bucket_name = self.default_bucket
         
-        logger.info(f"开始上传文件到MinIO: {local_file_path} -> {bucket_name}/{object_name}")
+        # logger.info(f"开始上传文件到MinIO: {local_file_path} -> {bucket_name}/{object_name}")
         
         self.minio_client.fput_object(bucket_name, object_name, local_file_path)
         
