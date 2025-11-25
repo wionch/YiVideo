@@ -42,6 +42,8 @@ from services.common.context import WorkflowContext
 from services.common.locks import gpu_lock
 from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
 from services.common.file_service import get_file_service
+from services.common.minio_directory_download import download_directory_from_minio
+from services.common.minio_directory_upload import upload_directory_to_minio
 
 # --- 日志配置 ---
 # 日志已统一管理，使用 services.common.logger
@@ -429,6 +431,8 @@ def create_stitched_images(self: Task, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     input_dir_str = None  # 用于清理的变量
+    local_download_dir = None # [新增] 记录下载的临时目录
+
     try:
         # --- Parameter Resolution ---
         resolved_params = {}
@@ -440,27 +444,85 @@ def create_stitched_images(self: Task, context: dict) -> dict:
             except ValueError as e:
                 logger.error(f"[{stage_name}] 参数解析失败: {e}")
                 raise e
-        
+
         # [修复] 记录实际使用的输入参数到input_params
         recorded_input_params = resolved_params.copy() if resolved_params else {}
-        
+
+        # 1. 获取输入路径和字幕区域（使用统一参数获取机制）
+        input_dir_str = get_param_with_fallback(
+            "cropped_images_path",
+            resolved_params,
+            workflow_context,
+            fallback_from_stage="ffmpeg.crop_subtitle_images"
+        )
+
+        subtitle_area = get_param_with_fallback(
+            "subtitle_area",
+            resolved_params,
+            workflow_context,
+            fallback_from_stage="paddleocr.detect_subtitle_area"
+        )
+
+        # [新增] 获取MinIO上传配置
+        upload_to_minio = get_param_with_fallback(
+            "upload_stitched_images_to_minio",
+            resolved_params,
+            workflow_context,
+            default=True
+        )
+        delete_local_images = get_param_with_fallback(
+            "delete_local_stitched_images_after_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+
         # 如果没有显式参数，只记录需要的参数到input_params
         if not recorded_input_params:
-            prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
-            if prev_stage:
-                keyframe_dir = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
-                if keyframe_dir:
-                    recorded_input_params['keyframe_dir'] = keyframe_dir
-        
+            if input_dir_str:
+                recorded_input_params['cropped_images_path'] = input_dir_str
+            if subtitle_area:
+                recorded_input_params['subtitle_area'] = subtitle_area
+
         # [修复] 确保input_params只包含原始参数，不包含执行元数据
         workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
 
-        # 1. 获取输入路径和字幕区域
-        crop_stage = workflow_context.stages.get("ffmpeg.crop_subtitle_images")
-        area_stage = workflow_context.stages.get("paddleocr.detect_subtitle_area")
+        # [新增] MinIO下载逻辑
+        if input_dir_str and (input_dir_str.startswith("http://") or input_dir_str.startswith("https://") or input_dir_str.startswith("minio://")):
+            logger.info(f"[{stage_name}] 检测到输入路径为URL，尝试从MinIO下载目录: {input_dir_str}")
+            # 创建一个临时目录用于存放下载的图片
+            local_download_dir = os.path.join(workflow_context.shared_storage_path, f"downloaded_cropped_{int(time.time())}")
+            
+            # 处理HTTP格式的URL转换为minio://格式
+            minio_url = input_dir_str
+            if input_dir_str.startswith("http://") or input_dir_str.startswith("https://"):
+                try:
+                    from urllib.parse import urlparse
+                    parsed_url = urlparse(input_dir_str)
+                    path_parts = parsed_url.path.strip('/').split('/', 1)  # 分割路径，取第一部分作为bucket
+                    if len(path_parts) < 2:
+                        raise ValueError(f"无法从HTTP URL中提取bucket和路径: {input_dir_str}")
 
-        input_dir_str = crop_stage.output.get('cropped_images_path') if crop_stage else None
-        subtitle_area = area_stage.output.get('subtitle_area') if area_stage else None
+                    bucket_name = path_parts[0]
+                    minio_path = path_parts[1] if len(path_parts) > 1 else ''
+                    minio_url = f"minio://{bucket_name}/{minio_path}"
+
+                    logger.info(f"[{stage_name}] HTTP URL转换: {input_dir_str} -> {minio_url}")
+                except Exception as e:
+                    logger.error(f"[{stage_name}] HTTP URL转换失败: {e}")
+                    raise ValueError(f"无法处理HTTP格式的MinIO URL: {input_dir_str}")
+            
+            download_result = download_directory_from_minio(
+                minio_url=minio_url,
+                local_dir=local_download_dir,
+                create_structure=True
+            )
+            
+            if not download_result["success"]:
+                raise RuntimeError(f"从MinIO下载目录失败: {download_result.get('error')}")
+            
+            input_dir_str = local_download_dir
+            logger.info(f"[{stage_name}] MinIO目录下载成功，使用本地路径: {input_dir_str}")
 
         if not input_dir_str or not Path(input_dir_str).is_dir():
             raise FileNotFoundError(f"输入目录不存在或无效: {input_dir_str}")
@@ -516,6 +578,30 @@ def create_stitched_images(self: Task, context: dict) -> dict:
             "multi_frames_path": str(output_root_dir / "multi_frames"),
             "manifest_path": str(output_root_dir / "multi_frames.json")
         }
+
+        # [新增] MinIO上传逻辑
+        if upload_to_minio and os.path.exists(output_data["multi_frames_path"]):
+            try:
+                logger.info(f"[{stage_name}] 开始上传拼接图片目录到MinIO...")
+                minio_base_path = f"{workflow_context.workflow_id}/stitched_images"
+                
+                upload_result = upload_directory_to_minio(
+                    local_dir=output_data["multi_frames_path"],
+                    minio_base_path=minio_base_path,
+                    delete_local=delete_local_images,
+                    preserve_structure=True
+                )
+                
+                if upload_result["success"]:
+                    output_data["multi_frames_minio_url"] = upload_result["minio_base_url"]
+                    logger.info(f"[{stage_name}] 拼接图片上传成功: {upload_result['minio_base_url']}")
+                else:
+                    output_data["multi_frames_upload_error"] = upload_result.get("error")
+                    logger.warning(f"[{stage_name}] 拼接图片上传失败: {upload_result.get('error')}")
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 上传过程异常: {e}", exc_info=True)
+                output_data["multi_frames_upload_error"] = str(e)
+
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
@@ -528,8 +614,20 @@ def create_stitched_images(self: Task, context: dict) -> dict:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
         
-        # 临时文件清理：只删除frames子目录（原始裁剪图片），保留multi_frames给下一个任务使用
-        if get_cleanup_temp_files_config() and input_dir_str and Path(input_dir_str).exists():
+        # 临时文件清理：
+        # 1. 清理下载的临时目录（如果存在）
+        if local_download_dir and os.path.exists(local_download_dir):
+             if get_cleanup_temp_files_config():
+                try:
+                    shutil.rmtree(local_download_dir)
+                    logger.info(f"[{stage_name}] 清理下载的临时目录: {local_download_dir}")
+                except Exception as e:
+                    logger.warning(f"[{stage_name}] 清理下载目录失败: {e}")
+        
+        # 2. 清理输入的input_dir_str (如果不是下载的临时目录，即原始的本地目录)
+        # 如果 input_dir_str 被指向了 local_download_dir，上面的代码已经清理了
+        # 所以这里只需要处理 input_dir_str != local_download_dir 的情况
+        elif get_cleanup_temp_files_config() and input_dir_str and Path(input_dir_str).exists():
             try:
                 # 只删除 frames 子目录，不删除整个 cropped_images 目录
                 shutil.rmtree(input_dir_str)

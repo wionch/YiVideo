@@ -6,29 +6,44 @@ wservice - Celery Application
 """
 
 from celery import Celery
-from services.common.config_loader import CONFIG
+from services.common.celery_config import BROKER_URL, BACKEND_URL
 
-# 从配置中获取服务名称、broker和backend
-service_name = 'wservice'
-celery_config = CONFIG.get_celery_config(service_name)
+# ========================================
+# Celery 配置
+# ========================================
 
-if not celery_config:
-    raise ValueError(f"无法在 config.yml 中找到 {service_name} 的 Celery 配置")
-
-app = Celery(
-    service_name,
-    broker=celery_config['broker'],
-    backend=celery_config['backend'],
-    include=[
-        'services.workers.wservice.app.tasks'
-    ]
+celery_app = Celery(
+    'wservice_tasks',
+    broker=BROKER_URL,
+    backend=BACKEND_URL,
+    include=['services.workers.wservice.app.tasks']
 )
 
-# 使用通用配置更新Celery实例
-app.conf.update(
+# ========================================
+# Celery 配置更新
+# ========================================
+celery_app.conf.update(
+    # 序列化配置
+    task_serializer='json',
+    accept_content=['json'],
+    result_serializer='json',
+
+    # 时区配置
+    timezone='Asia/Shanghai',
+    enable_utc=True,
+
+    # 任务执行配置
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
     task_track_started=True,
-    result_expires=3600,
+
+    # 结果过期时间（1天）
+    result_expires=86400,
+
+    # Worker 配置
+    worker_prefetch_multiplier=1,
+    worker_max_tasks_per_child=100,
 )
 
-# 设置为默认应用
-app.set_default()
+if __name__ == '__main__':
+    celery_app.start()

@@ -301,18 +301,25 @@ class SubtitleOptimizer:
                 'processing_time': time.time() - start_time
             }
 
-        self.file_generator.generate_optimized_file(
-            "dummy.json",  # 原始路径不重要，重要的是输出数据
-            merged_subtitles,
-            output_file_path,
-            optimization_info
-        )
+            self.file_generator.generate_optimized_file(
+                "dummy.json",  # 原始路径不重要，重要的是输出数据
+                merged_subtitles,
+                output_file_path,
+                optimization_info
+            )
 
-        return {
-            'file_path': output_file_path,
-            'commands_count': total_commands,
-            'batches_count': len(batches)
-        }
+            return {
+                'file_path': output_file_path,
+                'commands_count': total_commands,
+                'batches_count': len(batches)
+            }
+
+        except Exception as e:
+            logger.error(f"批处理失败: {e}", exc_info=True)
+            raise
+        finally:
+            # 确保事件循环被正确关闭
+            loop.close()
 
     def _call_ai_api(self, request: Dict[str, Any]) -> str:
         """调用AI API
