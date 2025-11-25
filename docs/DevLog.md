@@ -456,6 +456,80 @@
 
   分析并排查日志中的报错, 给出解决方案
 
+  ### 返回结果增加数据项
+
+  **返回结果**
+
+  ```
+  [
+    {
+      "headers": {
+        "host": "host.docker.internal:5678",
+        "user-agent": "YiVideo-API-Gateway/1.0",
+        "accept-encoding": "gzip, deflate",
+        "accept": "*/*",
+        "connection": "keep-alive",
+        "content-type": "application/json",
+        "content-length": "1068"
+      },
+      "params": {},
+      "query": {},
+      "body": {
+        "task_id": "task_id",
+        "status": "completed",
+        "result": {
+          "workflow_id": "task_id",
+          "create_at": "2025-11-25T15:21:31.310506",
+          "input_params": {
+            "task_name": "paddleocr.create_stitched_images",
+            "input_data": {
+              "cropped_images_path": "http://host.docker.internal:9000/yivideo/task_id/cropped_images",
+              "subtitle_area": [
+                0,
+                607,
+                1280,
+                679
+              ],
+              "upload_stitched_images_to_minio": true
+            },
+            "callback_url": "http://host.docker.internal:5678/webhook-waiting/1881/t3"
+          },
+          "shared_storage_path": "/share/single_tasks/task_id",
+          "stages": {
+            "paddleocr.create_stitched_images": {
+              "status": "SUCCESS",
+              "input_params": {
+                "cropped_images_path": "http://host.docker.internal:9000/yivideo/task_id/cropped_images",
+                "subtitle_area": [
+                  0,
+                  607,
+                  1280,
+                  679
+                ]
+              },
+              "output": {
+                "multi_frames_path": "/share/single_tasks/task_id/multi_frames",
+                "manifest_path": "/share/single_tasks/task_id/multi_frames.json",
+                "multi_frames_minio_url": "http://host.docker.internal:9000/yivideo/task_id/stitched_images"
+              },
+              "error": null,
+              "duration": 17.608853578567505
+            }
+          },
+          "error": null
+        },
+        "timestamp": "2025-11-25T15:21:49.003693Z"
+      },
+      "webhookUrl": "http://host.docker.internal:5678/webhook-test/t3",
+      "executionMode": "test"
+    }
+  ]
+  ```
+
+  **目标:**
+
+  `output`增加`manifest_minio_url`,  设置为`manifest_path`上传`minio`返回的链接
+
   ## {已解决}排查wservice启动报错
 
   **容器日志**:
@@ -492,4 +566,3 @@
   **目标:**
 
   请对比其他组件, 并分析排查日志中的报错, 给出解决方案
-

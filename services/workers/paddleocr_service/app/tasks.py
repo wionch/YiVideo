@@ -601,6 +601,27 @@ def create_stitched_images(self: Task, context: dict) -> dict:
             except Exception as e:
                 logger.warning(f"[{stage_name}] 上传过程异常: {e}", exc_info=True)
                 output_data["multi_frames_upload_error"] = str(e)
+        
+        # [新增] 上传manifest文件到MinIO
+        if upload_to_minio and os.path.exists(output_data["manifest_path"]):
+            try:
+                logger.info(f"[{stage_name}] 开始上传manifest文件到MinIO...")
+                file_service = get_file_service()
+                
+                # 构建manifest文件在MinIO中的路径
+                minio_manifest_path = f"{workflow_context.workflow_id}/manifest/multi_frames.json"
+                
+                manifest_minio_url = file_service.upload_to_minio(
+                    local_file_path=output_data["manifest_path"],
+                    object_name=minio_manifest_path
+                )
+                
+                output_data["manifest_minio_url"] = manifest_minio_url
+                logger.info(f"[{stage_name}] manifest文件上传成功: {manifest_minio_url}")
+                
+            except Exception as e:
+                logger.warning(f"[{stage_name}] manifest文件上传失败: {e}", exc_info=True)
+                output_data["manifest_upload_error"] = str(e)
 
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
