@@ -1289,29 +1289,48 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 
 将裁剪的字幕条图像并发拼接成大图，提高 OCR 识别效率。
 
-**功能描述**：将多个独立的字幕条图像拼接成一张大图，便于批量 OCR 处理。支持直接从MinIO下载裁剪图像目录，并支持将拼接后的结果上传回MinIO。
+**功能描述**：通过调用外部脚本 [`executor_stitch_images.py`](services/workers/paddleocr_service/app/executor_stitch_images.py)，将多个独立的字幕条图像并发拼接成一张大图，便于批量 OCR 处理。支持从本地目录或MinIO远程目录获取裁剪图像，并支持将拼接后的结果上传回MinIO。
 
 **输入参数**：
 
-* `cropped_images_path` (string, 节点可选): 裁剪图像的目录路径。支持本地路径或MinIO URL（如 `minio://...` 或 `http(s)://...`）。如果提供此参数，将优先使用。支持 `${{...}}` 格式的参数引用。
+* `cropped_images_path` (string, 节点可选): 裁剪图像的目录路径。支持以下三种格式：
+  - 本地路径：如 `/share/workflows/{workflow_id}/cropped_images/frames`
+  - MinIO URL格式：如 `minio://bucket/path/to/images`
+  - HTTP URL格式：如 `http://minio:9000/yivideo/task-123/cropped_images`
+  
+  如果提供此参数，将优先使用。支持 `${{...}}` 格式的参数引用。当提供HTTP或MinIO URL时，系统会自动下载到本地临时目录。
 
-* `subtitle_area` (array, 节点可选): 字幕区域坐标，格式为 `[x1, y1, x2, y2]`。如果提供此参数，将优先使用。支持 `${{...}}` 格式的参数引用。
+* `subtitle_area` (array, 节点可选): 字幕区域坐标，格式为 `[x1, y1, x2, y2]`（绝对像素坐标）。如果提供此参数，将优先使用。支持 `${{...}}` 格式的参数引用。此参数用于在拼接图像的元数据中记录x_offset（x1值），供后续OCR阶段使用。
 
-* `upload_stitched_images_to_minio` (bool, 节点可选): 是否将拼接后的大图上传到MinIO，默认 true。
+* `upload_stitched_images_to_minio` (bool, 节点可选): 是否将拼接后的大图目录上传到MinIO，默认 true。
 
-* `delete_local_stitched_images_after_upload` (bool, 节点可选): 上传成功后是否删除本地拼接大图，默认 false。
+* `delete_local_stitched_images_after_upload` (bool, 节点可选): 上传成功后是否删除本地拼接大图，默认 false。此参数仅在 `upload_stitched_images_to_minio=true` 时生效。
 
 **智能参数选择**：
 
-* `cropped_images_path` (按优先级)：1. 显式传入参数 (支持MinIO URL自动下载) 2. `input_data` 中的参数 3. `ffmpeg.crop_subtitle_images` 输出
+* `cropped_images_path` (按优先级)：
+  1. 显式传入的节点参数（支持MinIO URL自动下载）
+  2. `input_data` 中的参数
+  3. `ffmpeg.crop_subtitle_images` 输出的 `cropped_images_path`
 
-* `subtitle_area` (按优先级)：1. 显式传入参数 2. `input_data` 中的参数 3. `paddleocr.detect_subtitle_area` 输出
+* `subtitle_area` (按优先级)：
+  1. 显式传入的节点参数
+  2. `input_data` 中的参数
+  3. `paddleocr.detect_subtitle_area` 输出的 `subtitle_area`
 
 **配置来源说明**：
 
 * `cropped_images_path`, `subtitle_area`, `upload_stitched_images_to_minio`, `delete_local_stitched_images_after_upload`: **节点参数** (在请求体中的 `paddleocr.create_stitched_images` 对象内提供)。
 
-* **拼接参数**: 如 `concat_batch_size`, `stitching_workers` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。
+* **拼接参数**: 如 `concat_batch_size` (默认50), `stitching_workers` (默认10) 等，均为 **全局配置**，请在 `config.yml` 文件的 `pipeline` 部分修改。
+
+**全局配置示例 (config.yml)**:
+
+```yaml
+pipeline:
+  concat_batch_size: 50      # 每批拼接的图像数量
+  stitching_workers: 10      # 并发拼接的工作进程数
+```
 
 **前置依赖**：
 
@@ -1326,9 +1345,48 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
   "multi_frames_path": "/share/workflows/{workflow_id}/cropped_images/multi_frames",
   "manifest_path": "/share/workflows/{workflow_id}/cropped_images/multi_frames.json",
   "multi_frames_minio_url": "http://minio:9000/yivideo/{workflow_id}/stitched_images",
-  "multi_frames_upload_error": null
+  "manifest_minio_url": "http://minio:9000/yivideo/{workflow_id}/manifest/multi_frames.json",
+  "multi_frames_upload_error": null,
+  "manifest_upload_error": null
 }
 ```
+
+**输出字段说明**：
+
+* `multi_frames_path`: 本地拼接大图目录路径
+* `manifest_path`: 本地清单文件路径，包含拼接图像的元数据
+* `multi_frames_minio_url`: MinIO中的拼接图像目录URL（仅当启用上传时）
+* `manifest_minio_url`: MinIO中的清单文件URL（仅当启用上传时）
+* `multi_frames_upload_error`: 拼接图像上传错误信息（如果有）
+* `manifest_upload_error`: 清单文件上传错误信息（如果有）
+
+**Manifest文件格式**：
+
+清单文件（`multi_frames.json`）记录了每个拼接图像的元数据，格式如下：
+
+```json
+{
+  "mf_00000001.jpg": {
+    "stitched_height": 1620,
+    "sub_images": [
+      {
+        "frame_idx": 0,
+        "height": 162,
+        "y_offset": 0,
+        "x_offset": 0
+      },
+      {
+        "frame_idx": 1,
+        "height": 162,
+        "y_offset": 162,
+        "x_offset": 0
+      }
+    ]
+  }
+}
+```
+
+**使用示例**：
 
 **示例1：工作流模式（自动获取）**：
 
@@ -1360,6 +1418,68 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
   }
 }
 ```
+
+**示例3：动态引用模式**：
+
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_keyframes",
+      "paddleocr.detect_subtitle_area",
+      "ffmpeg.crop_subtitle_images",
+      "paddleocr.create_stitched_images"
+    ]
+  },
+  "paddleocr.create_stitched_images": {
+    "cropped_images_path": "${{ stages.ffmpeg.crop_subtitle_images.output.cropped_images_path }}",
+    "subtitle_area": "${{ stages.paddleocr.detect_subtitle_area.output.subtitle_area }}",
+    "upload_stitched_images_to_minio": true
+  }
+}
+```
+
+**技术特性**：
+
+* **并发处理**: 使用多进程并发拼接，提高处理速度
+* **外部脚本执行**: 通过subprocess调用独立脚本，避免Celery守护进程限制
+* **MinIO集成**: 支持从MinIO下载输入和上传输出
+* **自动清理**: 支持临时文件的自动清理
+* **超时保护**: 子进程执行超时时间为1800秒（30分钟）
+* **错误处理**: 完善的错误捕获和日志记录
+
+**MinIO下载逻辑**：
+
+当 `cropped_images_path` 为HTTP或MinIO URL时：
+
+1. 自动创建临时下载目录：`/share/workflows/{workflow_id}/downloaded_cropped_{timestamp}`
+2. 将HTTP URL转换为MinIO格式（如果需要）
+3. 使用 [`download_directory_from_minio`](services/common/minio_directory_download.py) 下载整个目录
+4. 下载成功后使用本地路径进行拼接
+5. 任务完成后自动清理临时下载目录（如果启用了清理配置）
+
+**MinIO上传逻辑**：
+
+当 `upload_stitched_images_to_minio=true` 时：
+
+1. 上传拼接图像目录到 `{workflow_id}/stitched_images`
+2. 上传清单文件到 `{workflow_id}/manifest/multi_frames.json`
+3. 根据 `delete_local_stitched_images_after_upload` 决定是否删除本地文件
+4. 上传失败时记录错误但不中断任务
+
+**注意事项**：
+
+* 拼接批次大小（`concat_batch_size`）影响内存使用和处理速度，建议根据图像大小调整
+* 并发工作进程数（`stitching_workers`）应根据CPU核心数合理设置
+* MinIO URL格式支持 `minio://bucket/path` 和 `http(s)://host:port/bucket/path`
+* 临时下载目录会在任务完成后自动清理（如果启用了 `cleanup_temp_files` 配置）
+* 拼接图像的元数据（包括x_offset）会保存在manifest文件中，供后续OCR阶段使用
+
+**依赖关系**：
+
+* **默认模式**: `ffmpeg.crop_subtitle_images` 和 `paddleocr.detect_subtitle_area`
+* **参数模式**: 无（直接指定所有必需参数）
+* **MinIO模式**: 需要MinIO服务可用
 
 ***
 
