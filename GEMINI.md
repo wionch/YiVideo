@@ -1,5 +1,7 @@
 # Gemini Development Guidelines for YiVideo
 
+
+
 ## Project Overview
 
 **YiVideo** is a one-stop, modular AI video processing and localization platform. Its primary goal is to automate the process of translating video content into multiple languages, including subtitle extraction, translation, and dubbing, to help content creators reach a global audience.
@@ -15,12 +17,14 @@ The system is designed as a **dynamic, configurable AI video processing workflow
 *   **AI Services**: The project is composed of several independent AI worker services, each running in its own Docker container:
     *   `api_gateway`: The "brain" of the system. It receives user requests, interprets the `workflow_config`, and dynamically constructs and dispatches the Celery task chain.
     *   `ffmpeg_service`: Handles fundamental video operations like decoding and frame extraction.
+    *   `audio_separator_service`: Separates audio tracks (e.g., vocals vs. background music) to improve transcription and dubbing quality.
     *   `paddleocr_service`: Performs Optical Character Recognition (OCR) to extract hardcoded subtitles from video frames.
     *   `faster_whisper_service`: Provides Automatic Speech Recognition (ASR) to transcribe audio into subtitles.
     *   `pyannote_audio_service`: Performs speaker diarization to identify who is speaking and when.
-    *   `llm_service`: Interacts with Large Language Models (e.g., Gemini, DeepSeek) for translation and subtitle refinement.
-    *   `inpainting_service`: (Future) Removes original hardcoded subtitles from the video.
-    *   `indextts_service` / `gptsovits_service`: (Future) Text-to-Speech (TTS) engines for generating dubbed audio.
+    *   `wservice` (formerly `llm_service`): The Subtitle AI Optimization Service. It interacts with Large Language Models (e.g., Gemini, DeepSeek) for translation, subtitle refinement, and logic handling.
+    *   `indextts_service`: Text-to-Speech (TTS) engine for generating dubbed audio.
+    *   `inpainting_service`: (Future/In Development) Removes original hardcoded subtitles from the video.
+    *   `gptsovits_service`: (Future/In Development) Alternative TTS engine.
 *   **Data Sharing**: Services share files (videos, frames, subtitles) via shared Docker volumes mounted to a common path (e.g., `/share`).
 
 ## Building and Running

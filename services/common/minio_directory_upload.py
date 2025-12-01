@@ -8,14 +8,26 @@ MinIO目录上传模块
 - 保留目录结构
 - 可选的本地目录清理
 - 错误处理和日志记录
+- 压缩包上传（新增）
+- 压缩前上传（新增）
 """
 
 import os
 import glob
+import tempfile
+import shutil
 from pathlib import Path
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Callable
 from services.common.logger import get_logger
 from services.common.file_service import get_file_service
+from services.common.directory_compression import (
+    DirectoryCompressor, 
+    CompressionFormat, 
+    CompressionLevel,
+    CompressionProgress,
+    compress_directory,
+    decompress_archive
+)
 
 logger = get_logger('minio_directory_upload')
 
@@ -30,6 +42,251 @@ class MinioDirectoryUploader:
             file_service: 文件服务实例（可选，默认使用全局实例）
         """
         self.file_service = file_service or get_file_service()
+        self.compressor = DirectoryCompressor()
+        
+    def upload_directory_compressed(self,
+                                   local_dir: str,
+                                   minio_base_path: str,
+                                   bucket_name: Optional[str] = None,
+                                   file_pattern: str = "*",
+                                   compression_format: CompressionFormat = CompressionFormat.ZIP,
+                                   compression_level: CompressionLevel = CompressionLevel.DEFAULT,
+                                   delete_local: bool = False,
+                                   preserve_structure: bool = True,
+                                   progress_callback: Optional[Callable[[CompressionProgress], None]] = None) -> Dict[str, Union[str, List[str], Dict]]:
+        """
+        压缩目录并上传到MinIO
+        
+        Args:
+            local_dir: 本地目录路径
+            minio_base_path: MinIO中的基础路径（不包含bucket）
+            bucket_name: 存储桶名称（默认使用default_bucket）
+            file_pattern: 文件匹配模式
+            compression_format: 压缩格式
+            compression_level: 压缩级别
+            delete_local: 上传成功后是否删除本地目录（默认False）
+            preserve_structure: 是否保留目录结构（默认True）
+            progress_callback: 压缩进度回调函数
+            
+        Returns:
+            Dict: 包含上传结果和压缩信息的字典
+            {
+                "success": True/False,
+                "minio_base_url": "http://minio:9000/bucket/path",
+                "archive_url": "http://minio:9000/bucket/path/archive.zip",
+                "compression_info": {
+                    "original_size": 450000000,
+                    "compressed_size": 150000000,
+                    "compression_ratio": 0.67,
+                    "files_count": 15230,
+                    "compression_time": 45.2,
+                    "checksum": "sha256:..."
+                },
+                "total_files": 15230,
+                "error": "错误信息（如果有）"
+            }
+        """
+        # 参数验证
+        if not os.path.exists(local_dir):
+            raise FileNotFoundError(f"本地目录不存在: {local_dir}")
+            
+        if not os.path.isdir(local_dir):
+            raise ValueError(f"路径不是目录: {local_dir}")
+            
+        if not minio_base_path or not minio_base_path.strip():
+            raise ValueError("minio_base_path 不能为空")
+            
+        bucket_name = bucket_name or self.file_service.default_bucket
+        
+        # 构建结果字典
+        result = {
+            "success": False,
+            "minio_base_url": "",
+            "archive_url": "",
+            "compression_info": {},
+            "total_files": 0,
+            "error": None
+        }
+        
+        # 临时压缩包路径
+        temp_archive_path = None
+        
+        try:
+            # 生成压缩包路径
+            import time
+            import uuid
+            
+            source_name = os.path.basename(local_dir) or "directory"
+            timestamp = int(time.time())
+            unique_id = str(uuid.uuid4())[:8]
+            temp_archive_path = os.path.join(
+                tempfile.gettempdir(),
+                f"{source_name}_compressed_{timestamp}_{unique_id}"
+            )
+            if compression_format == CompressionFormat.ZIP:
+                temp_archive_path += ".zip"
+            else:
+                temp_archive_path += ".tar.gz"
+
+            logger.info(f"开始压缩目录: {local_dir}")
+            logger.info(f"压缩格式: {compression_format.value}, 级别: {compression_level.name}")
+            
+            # 执行压缩
+            # 将逗号分隔的文件模式字符串转换为列表
+            file_patterns_list = None
+            if file_pattern != "*":
+                # 分割逗号分隔的模式字符串，并去除空格
+                file_patterns_list = [p.strip() for p in file_pattern.split(',') if p.strip()]
+
+            compression_result = self.compressor.compress_directory(
+                source_dir=local_dir,
+                output_path=temp_archive_path,
+                compression_format=compression_format,
+                compression_level=compression_level,
+                progress_callback=progress_callback,
+                file_patterns=file_patterns_list
+            )
+
+            if not compression_result.success:
+                result["error"] = f"压缩失败: {compression_result.error_message}"
+                return result
+
+            # 获取压缩包信息
+            archive_info = self.compressor.get_archive_info(temp_archive_path)
+
+            # 构建MinIO对象路径（压缩包路径）
+            archive_object_path = f"{minio_base_path.rstrip('/')}/{source_name}_compressed.{compression_format.value}"
+            
+            logger.info(f"开始上传压缩包: {temp_archive_path} -> {archive_object_path}")
+            
+            # 上传压缩包
+            minio_url = self.file_service.upload_to_minio(
+                temp_archive_path,
+                archive_object_path,
+                bucket_name
+            )
+            
+            # 构建基础URL（压缩包目录）
+            base_url = f"http://{self.file_service.minio_host}:{self.file_service.minio_port}/{bucket_name}/{minio_base_path.rstrip('/')}"
+            archive_url = f"http://{self.file_service.minio_host}:{self.file_service.minio_port}/{bucket_name}/{archive_object_path}"
+            
+            result.update({
+                "success": True,
+                "minio_base_url": base_url,
+                "archive_url": archive_url,
+                "compression_info": {
+                    "original_size": compression_result.original_size,
+                    "compressed_size": compression_result.compressed_size,
+                    "compression_ratio": compression_result.compression_ratio,
+                    "files_count": compression_result.files_count,
+                    "compression_time": compression_result.compression_time,
+                    "checksum": compression_result.checksum,
+                    "format": compression_format.value
+                },
+                "total_files": compression_result.files_count
+            })
+            
+            logger.info(f"压缩上传完成: {compression_result.compression_ratio:.1%} 压缩率, "
+                       f"{compression_result.files_count} 个文件")
+            
+            # 可选：删除本地目录和压缩包
+            if delete_local:
+                try:
+                    shutil.rmtree(local_dir)
+                    logger.info(f"已删除本地目录: {local_dir}")
+                except Exception as e:
+                    logger.warning(f"删除本地目录失败: {local_dir}, 错误: {e}")
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"压缩上传过程中发生错误: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            result["error"] = error_msg
+            return result
+            
+        finally:
+            # 清理临时压缩包
+            if temp_archive_path and os.path.exists(temp_archive_path):
+                try:
+                    os.remove(temp_archive_path)
+                    logger.debug(f"已清理临时压缩包: {temp_archive_path}")
+                except Exception as e:
+                    logger.warning(f"清理临时压缩包失败: {temp_archive_path}, 错误: {e}")
+    
+    def download_and_extract(self,
+                            minio_url: str,
+                            local_dir: str,
+                            auto_extract: bool = True,
+                            overwrite: bool = False,
+                            progress_callback: Optional[Callable[[CompressionProgress], None]] = None) -> Dict[str, Union[str, bool]]:
+        """
+        从MinIO下载压缩包并自动解压
+        
+        Args:
+            minio_url: MinIO压缩包URL
+            local_dir: 本地目标目录
+            auto_extract: 是否自动解压
+            overwrite: 是否覆盖已存在的文件
+            progress_callback: 解压进度回调函数
+            
+        Returns:
+            Dict: 下载和解压结果
+            {
+                "success": True/False,
+                "downloaded_file": "/tmp/downloaded.zip",
+                "extracted_dir": "/path/to/extracted/files",
+                "extracted_files": 15230,
+                "error": "错误信息（如果有）"
+            }
+        """
+        result = {
+            "success": False,
+            "downloaded_file": "",
+            "extracted_dir": "",
+            "extracted_files": 0,
+            "error": None
+        }
+        
+        # 下载压缩包
+        try:
+            downloaded_file = self.file_service.download_from_minio(minio_url, local_dir)
+            result["downloaded_file"] = downloaded_file
+            
+            if not auto_extract:
+                result["success"] = True
+                return result
+            
+            # 自动解压
+            extraction_dir = os.path.join(local_dir, "extracted")
+            os.makedirs(extraction_dir, exist_ok=True)
+            
+            logger.info(f"开始解压: {downloaded_file} -> {extraction_dir}")
+            
+            decompression_result = decompress_archive(
+                archive_path=downloaded_file,
+                output_dir=extraction_dir,
+                progress_callback=progress_callback,
+                overwrite=overwrite
+            )
+            
+            if decompression_result.success:
+                result.update({
+                    "success": True,
+                    "extracted_dir": extraction_dir,
+                    "extracted_files": decompression_result.extracted_files
+                })
+                logger.info(f"解压完成: {decompression_result.extracted_files} 个文件")
+            else:
+                result["error"] = f"解压失败: {decompression_result.error_message}"
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"下载解压过程中发生错误: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            result["error"] = error_msg
+            return result
         
     def upload_directory(self, 
                         local_dir: str, 
@@ -228,4 +485,136 @@ def upload_keyframes_directory(local_dir: str,
         file_pattern=file_pattern,
         delete_local=delete_local,
         preserve_structure=True
+    )
+
+def upload_directory_compressed(local_dir: str,
+                               minio_base_path: str,
+                               bucket_name: Optional[str] = None,
+                               file_pattern: str = "*",
+                               compression_format: Union[str, CompressionFormat] = "zip",
+                               compression_level: Union[str, CompressionLevel] = "default",
+                               delete_local: bool = False,
+                               progress_callback: Optional[Callable[[CompressionProgress], None]] = None) -> Dict[str, Union[str, List[str], Dict]]:
+    """
+    便捷函数：压缩目录并上传到MinIO
+
+    Args:
+        local_dir: 本地目录路径
+        minio_base_path: MinIO中的基础路径
+        bucket_name: 存储桶名称
+        file_pattern: 文件匹配模式
+        compression_format: 压缩格式 ("zip", "tar.gz")，也可以是枚举类型
+        compression_level: 压缩级别 ("store", "fast", "default", "maximum")，也可以是枚举类型
+        delete_local: 上传成功后是否删除本地目录
+        progress_callback: 压缩进度回调函数
+
+    Returns:
+        Dict: 包含压缩上传结果的字典
+    """
+    # 如果是字符串类型才转换；如果是枚举类型直接使用
+    if isinstance(compression_format, str):
+        format_enum = CompressionFormat(compression_format)
+    else:
+        format_enum = compression_format
+
+    # 压缩级别字符串到枚举值的映射
+    level_mapping = {
+        "store": CompressionLevel.STORE,
+        "fast": CompressionLevel.FAST,
+        "default": CompressionLevel.DEFAULT,
+        "maximum": CompressionLevel.MAXIMUM
+    }
+
+    # 如果是字符串类型才转换；如果是枚举类型直接使用
+    if isinstance(compression_level, str):
+        level_enum = level_mapping.get(compression_level.lower(), CompressionLevel.DEFAULT)
+    else:
+        level_enum = compression_level
+
+    uploader = MinioDirectoryUploader()
+    return uploader.upload_directory_compressed(
+        local_dir=local_dir,
+        minio_base_path=minio_base_path,
+        bucket_name=bucket_name,
+        file_pattern=file_pattern,
+        compression_format=format_enum,
+        compression_level=level_enum,
+        delete_local=delete_local,
+        progress_callback=progress_callback
+    )
+
+def upload_cropped_images_compressed(local_dir: str,
+                                    workflow_id: str,
+                                    delete_local: bool = False,
+                                    compression_format: str = "zip",
+                                    compression_level: Union[str, CompressionLevel] = "default",
+                                    progress_callback: Optional[Callable[[CompressionProgress], None]] = None) -> Dict[str, Union[str, List[str], Dict]]:
+    """
+    专门用于上传裁剪图片目录的便捷函数（压缩版本）
+    
+    Args:
+        local_dir: 裁剪图片本地目录路径
+        workflow_id: 工作流ID，用于构建MinIO路径
+        delete_local: 上传成功后是否删除本地目录
+        compression_format: 压缩格式
+        compression_level: 压缩级别（字符串或枚举）
+        progress_callback: 压缩进度回调函数
+        
+    Returns:
+        Dict: 包含压缩上传结果的字典
+    """
+    # 构建裁剪图片在MinIO中的路径
+    minio_base_path = f"{workflow_id}/cropped_images"
+    
+    # 支持多种图片格式
+    file_pattern = "*.jpg,*.jpeg,*.png,*.bmp,*.tiff,*.gif"
+    
+    # 如果已经是枚举类型，直接使用；否则转换为枚举
+    if isinstance(compression_level, CompressionLevel):
+        level_enum = compression_level
+    else:
+        # 压缩级别字符串到枚举值的映射
+        level_mapping = {
+            "store": CompressionLevel.STORE,
+            "fast": CompressionLevel.FAST,
+            "default": CompressionLevel.DEFAULT,
+            "maximum": CompressionLevel.MAXIMUM
+        }
+        level_enum = level_mapping.get(compression_level.lower(), CompressionLevel.DEFAULT)
+    
+    return upload_directory_compressed(
+        local_dir=local_dir,
+        minio_base_path=minio_base_path,
+        file_pattern=file_pattern,
+        compression_format=compression_format,
+        compression_level=level_enum,  # 传递转换后的枚举值
+        delete_local=delete_local,
+        progress_callback=progress_callback
+    )
+
+def download_and_extract_archive(minio_url: str,
+                                local_dir: str,
+                                auto_extract: bool = True,
+                                overwrite: bool = False,
+                                progress_callback: Optional[Callable[[CompressionProgress], None]] = None) -> Dict[str, Union[str, bool]]:
+    """
+    便捷函数：下载压缩包并自动解压
+    
+    Args:
+        minio_url: MinIO压缩包URL
+        local_dir: 本地目标目录
+        auto_extract: 是否自动解压
+        overwrite: 是否覆盖已存在的文件
+        progress_callback: 解压进度回调函数
+        
+    Returns:
+        Dict: 下载和解压结果
+    """
+    uploader = MinioDirectoryUploader()
+    return uploader.download_and_extract(
+        minio_url=minio_url,
+        local_dir=local_dir,
+        auto_extract=auto_extract,
+        overwrite=overwrite,
+        progress_callback=progress_callback
     )

@@ -14,19 +14,19 @@ services:
     container_name: api_gateway
     build:
       context: .
-      dockerfile: ./services/api_gateway/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/api_gateway/Dockerfile
     ports:
       - "8788:80" # Map host port 8788 to container port 80
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
-      - ./tests:/app/tests
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/share:/share
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
@@ -48,16 +48,17 @@ services:
     container_name: ffmpeg_service
     build:
       context: .
-      dockerfile: ./services/workers/ffmpeg_service/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/workers/ffmpeg_service/Dockerfile
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/share:/share
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
@@ -88,16 +89,17 @@ services:
     container_name: paddleocr_service
     build:
       context: .
-      dockerfile: ./services/workers/paddleocr_service/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/workers/paddleocr_service/Dockerfile
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/share:/share
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - paddle_models_volume:/root/.paddlex/official_models
@@ -132,16 +134,17 @@ services:
     runtime: nvidia
     build:
       context: .
-      dockerfile: ./services/workers/faster_whisper_service/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/workers/faster_whisper_service/Dockerfile
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/share:/share
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -186,16 +189,17 @@ services:
     runtime: nvidia
     build:
       context: .
-      dockerfile: ./services/workers/pyannote_audio_service/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/workers/pyannote_audio_service/Dockerfile
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/share:/share
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -239,17 +243,18 @@ services:
     runtime: nvidia
     build:
       context: .
-      dockerfile: ./services/workers/audio_separator_service/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/workers/audio_separator_service/Dockerfile
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/share:/share
       - audio_separator_models_volume:/models
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - huggingface_cache_volume:/app/.cache
@@ -284,16 +289,17 @@ services:
     container_name: wservice
     build:
       context: .
-      dockerfile: ./services/workers/wservice/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/workers/wservice/Dockerfile
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/share:/share
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
     restart: always
@@ -324,18 +330,19 @@ services:
     runtime: nvidia
     build:
       context: .
-      dockerfile: ./services/workers/indextts_service/Dockerfile
+      dockerfile: /opt/wionch/docker/yivideo/services/workers/indextts_service/Dockerfile
     ports:
       - "7860:7860"  # IndexTTS2 WebUI端口映射
     volumes:
-      - ./services:/app/services
-      - ./videos:/app/videos
-      - ./locks:/app/locks
-      - ./tmp:/app/tmp
-      - ./share:/share
-      - ./config.yml:/app/config.yml
-      - ./config:/app/config
-      - ./scripts:/app/scripts
+      - /opt/wionch/docker/yivideo/services:/app/services
+      - /opt/wionch/docker/yivideo/videos:/app/videos
+      - /opt/wionch/docker/yivideo/locks:/app/locks
+      - /opt/wionch/docker/yivideo/tmp:/app/tmp
+      - /opt/wionch/docker/yivideo/tests:/app/tests
+      - /opt/wionch/docker/yivideo/share:/share
+      - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
+      - /opt/wionch/docker/yivideo/config:/app/config
+      - /opt/wionch/docker/yivideo/scripts:/app/scripts
       - ~/.ssh:/root/.ssh
       - ~/.gemini:/root/.gemini
       - indextts_models_volume:/models/indextts

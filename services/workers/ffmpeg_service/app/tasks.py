@@ -71,8 +71,38 @@ def extract_keyframes(self: Task, context: dict) -> dict:
                 recorded_input_params['video_path'] = input_data.get("video_path")
         
         # MinIO上传参数
-        upload_to_minio = resolved_params.get("upload_cropped_images_to_minio", False)
-        delete_local_images = resolved_params.get("delete_local_cropped_images_after_upload", False)
+        upload_to_minio = get_param_with_fallback(
+            "upload_keyframes_to_minio",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        delete_local_keyframes = get_param_with_fallback(
+            "delete_local_keyframes_after_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        
+        # 压缩上传参数（新增）
+        compress_keyframes_before_upload = get_param_with_fallback(
+            "compress_keyframes_before_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        keyframe_compression_format = get_param_with_fallback(
+            "keyframe_compression_format",
+            resolved_params,
+            workflow_context,
+            default="zip"
+        )
+        keyframe_compression_level = get_param_with_fallback(
+            "keyframe_compression_level", 
+            resolved_params,
+            workflow_context,
+            default="default"
+        )
         
         workflow_context.stages[stage_name].input_params = recorded_input_params
 
@@ -80,7 +110,18 @@ def extract_keyframes(self: Task, context: dict) -> dict:
 
         # 优先从 resolved_params 获取参数，回退到全局 input_data (兼容单步任务)
         video_path = get_param_with_fallback("video_path", resolved_params, workflow_context)
-        
+
+        # --- 文件下载 ---
+        file_service = get_file_service()
+        logger.info(f"[{stage_name}] 开始下载视频文件: {video_path}")
+        video_path = file_service.resolve_and_download(video_path, workflow_context.shared_storage_path)
+        # 更新本地 input_params 中的 video_path 为下载后的本地路径
+        workflow_context.stages[stage_name].input_params["video_path"] = video_path
+        logger.info(f"[{stage_name}] 视频文件下载完成: {video_path}")
+
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+
         num_frames = get_param_with_fallback(
             "keyframe_sample_count",
             resolved_params,
@@ -90,7 +131,7 @@ def extract_keyframes(self: Task, context: dict) -> dict:
         keyframes_dir = os.path.join(workflow_context.shared_storage_path, "keyframes")
 
         logger.info(f"[{stage_name}] 开始从 {video_path} 抽取 {num_frames} 帧...")
-        
+
         frame_paths = extract_random_frames(video_path, num_frames, keyframes_dir)
 
         if not frame_paths:
@@ -113,38 +154,108 @@ def extract_keyframes(self: Task, context: dict) -> dict:
             default=False
         )
         
+        # 压缩上传参数（新增）
+        compress_keyframes_before_upload = get_param_with_fallback(
+            "compress_keyframes_before_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        keyframe_compression_format = get_param_with_fallback(
+            "keyframe_compression_format",
+            resolved_params,
+            workflow_context,
+            default="zip"
+        )
+        keyframe_compression_level = get_param_with_fallback(
+            "keyframe_compression_level", 
+            resolved_params,
+            workflow_context,
+            default="default"
+        )
+        
         if upload_to_minio and frame_paths:
             try:
-                # 导入目录上传模块
-                from services.common.minio_directory_upload import upload_keyframes_directory
-                
-                logger.info(f"[{stage_name}] 开始上传关键帧目录到MinIO...")
-                upload_result = upload_keyframes_directory(
-                    local_dir=keyframes_dir,
-                    workflow_id=workflow_context.workflow_id,
-                    delete_local=delete_local_keyframes
-                )
-                
-                if upload_result["success"]:
-                    output_data.update({
-                        "keyframe_minio_url": upload_result["minio_base_url"],
-                        "keyframe_files_count": len(upload_result["uploaded_files"]),
-                        "keyframe_uploaded_files": upload_result["uploaded_files"]
-                    })
-                    logger.info(f"[{stage_name}] 关键帧目录上传成功: {upload_result['total_files']} 个文件")
+                if compress_keyframes_before_upload:
+                    # 使用压缩上传
+                    from services.common.minio_directory_upload import upload_directory_compressed
+                    
+                    logger.info(f"[{stage_name}] 开始压缩并上传关键帧目录到MinIO...")
+                    logger.info(f"[{stage_name}] 压缩格式: {keyframe_compression_format}, 级别: {keyframe_compression_level}")
+                    
+                    # 构建关键帧在MinIO中的路径
+                    minio_base_path = f"{workflow_context.workflow_id}/keyframes"
+                    
+                    upload_result = upload_directory_compressed(
+                        local_dir=keyframes_dir,
+                        minio_base_path=minio_base_path,
+                        file_pattern="*.jpg",
+                        compression_format=keyframe_compression_format,
+                        compression_level=keyframe_compression_level,
+                        delete_local=delete_local_keyframes
+                    )
+                    
+                    if upload_result["success"]:
+                        compression_info = upload_result.get("compression_info", {})
+                        output_data.update({
+                            "keyframe_minio_url": upload_result["minio_base_url"],
+                            "keyframe_compressed_archive_url": upload_result["archive_url"],
+                            "keyframe_files_count": upload_result["total_files"],
+                            "keyframe_compression_info": {
+                                "original_size": compression_info.get("original_size", 0),
+                                "compressed_size": compression_info.get("compressed_size", 0),
+                                "compression_ratio": compression_info.get("compression_ratio", 0),
+                                "files_count": compression_info.get("files_count", 0),
+                                "compression_time": compression_info.get("compression_time", 0),
+                                "checksum": compression_info.get("checksum", ""),
+                                "format": compression_info.get("format", keyframe_compression_format)
+                            }
+                        })
+                        logger.info(f"[{stage_name}] 关键帧压缩上传成功: {compression_info.get('compression_ratio', 0):.1%} 压缩率, "
+                                   f"{upload_result['total_files']} 个文件")
+                    else:
+                        logger.warning(f"[{stage_name}] 关键帧压缩上传失败: {upload_result.get('error', '未知错误')}")
+                        output_data.update({
+                            "keyframe_upload_error": upload_result.get("error"),
+                            "keyframe_files_count": upload_result.get("total_files", 0)
+                        })
                 else:
-                    logger.warning(f"[{stage_name}] 关键帧目录上传失败: {upload_result.get('error', '未知错误')}")
-                    output_data.update({
-                        "keyframe_upload_error": upload_result.get("error"),
-                        "keyframe_files_count": upload_result["total_files"],
-                        "keyframe_uploaded_files": upload_result["uploaded_files"]
-                    })
+                    # 使用原有的单文件上传（向后兼容）
+                    from services.common.minio_directory_upload import upload_keyframes_directory
+                    
+                    logger.info(f"[{stage_name}] 开始上传关键帧目录到MinIO...")
+                    upload_result = upload_keyframes_directory(
+                        local_dir=keyframes_dir,
+                        workflow_id=workflow_context.workflow_id,
+                        delete_local=delete_local_keyframes
+                    )
+                    
+                    if upload_result["success"]:
+                        output_data.update({
+                            "keyframe_minio_url": upload_result["minio_base_url"],
+                            "keyframe_files_count": len(upload_result["uploaded_files"]),
+                            "keyframe_uploaded_files": upload_result["uploaded_files"]
+                        })
+                        logger.info(f"[{stage_name}] 关键帧目录上传成功: {upload_result['total_files']} 个文件")
+                    else:
+                        logger.warning(f"[{stage_name}] 关键帧目录上传失败: {upload_result.get('error', '未知错误')}")
+                        output_data.update({
+                            "keyframe_upload_error": upload_result.get("error"),
+                            "keyframe_files_count": upload_result["total_files"]
+                        })
             except Exception as e:
                 logger.warning(f"[{stage_name}] 关键帧目录上传过程出错: {e}", exc_info=True)
                 output_data.update({
                     "keyframe_upload_error": str(e),
                     "keyframe_files_count": len(frame_paths)
                 })
+                # 异常处理后直接返回，避免继续执行传统上传逻辑
+                workflow_context.stages[stage_name].status = 'FAILED' if compress_keyframes_before_upload else 'SUCCESS'
+                workflow_context.stages[stage_name].output = output_data
+                workflow_context.stages[stage_name].error = str(e) if compress_keyframes_before_upload else None
+                if compress_keyframes_before_upload:
+                    workflow_context.error = f"在阶段 {stage_name} 压缩上传过程中发生错误: {e}"
+                return workflow_context.model_dump()
         
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
@@ -195,8 +306,38 @@ def extract_audio(self: Task, context: dict) -> dict:
                 recorded_input_params['video_path'] = input_data.get("video_path")
         
         # MinIO上传参数
-        upload_to_minio = resolved_params.get("upload_cropped_images_to_minio", False)
-        delete_local_images = resolved_params.get("delete_local_cropped_images_after_upload", False)
+        upload_to_minio = get_param_with_fallback(
+            "upload_keyframes_to_minio",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        delete_local_keyframes = get_param_with_fallback(
+            "delete_local_keyframes_after_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        
+        # 压缩上传参数（新增）
+        compress_keyframes_before_upload = get_param_with_fallback(
+            "compress_keyframes_before_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        keyframe_compression_format = get_param_with_fallback(
+            "keyframe_compression_format",
+            resolved_params,
+            workflow_context,
+            default="zip"
+        )
+        keyframe_compression_level = get_param_with_fallback(
+            "keyframe_compression_level", 
+            resolved_params,
+            workflow_context,
+            default="default"
+        )
         
         workflow_context.stages[stage_name].input_params = recorded_input_params
         
@@ -330,10 +471,41 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
             default=False
         )
         
+        # 压缩上传参数（新增）
+        compress_before_upload = get_param_with_fallback(
+            "compress_directory_before_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        compression_format = get_param_with_fallback(
+            "compression_format",
+            resolved_params,
+            workflow_context,
+            default="zip"
+        )
+        compression_level = get_param_with_fallback(
+            "compression_level", 
+            resolved_params,
+            workflow_context,
+            default="default"
+        )
+        
         workflow_context.stages[stage_name].input_params = recorded_input_params
-        
+
         video_path = get_param_with_fallback("video_path", resolved_params, workflow_context)
-        
+
+        # --- 文件下载 ---
+        file_service = get_file_service()
+        logger.info(f"[{stage_name}] 开始下载视频文件: {video_path}")
+        video_path = file_service.resolve_and_download(video_path, workflow_context.shared_storage_path)
+        # 更新本地 input_params 中的 video_path 为下载后的本地路径
+        workflow_context.stages[stage_name].input_params["video_path"] = video_path
+        logger.info(f"[{stage_name}] 视频文件下载完成: {video_path}")
+
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+
         # 智能字幕区域选择：优先使用传入参数(包括input_data)，其次从上游节点获取
         crop_area = get_param_with_fallback(
             "subtitle_area",
@@ -341,7 +513,7 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
             workflow_context,
             fallback_from_stage="paddleocr.detect_subtitle_area"
         )
-        
+
         if not crop_area:
             raise ValueError("缺少字幕区域坐标信息：请通过 'subtitle_area' 参数传入，或确保 paddleocr.detect_subtitle_area 节点已成功完成并输出了字幕区域数据。")
 
@@ -395,48 +567,176 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
             logger.error(f"[{stage_name}] 视频解码子进程执行失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
             raise RuntimeError(f"Video decoding subprocess failed with exit code {e.returncode}.") from e
 
+        # 智能路径解析：支持带/不带 frames 子目录的两种模式
         final_frames_path = os.path.join(cropped_images_dir, "frames")
-        output_data = {"cropped_images_path": final_frames_path}
-        
-        # 如果启用了 MinIO 上传
-        if upload_to_minio and os.path.exists(final_frames_path):
+        if not os.path.exists(final_frames_path):
+            # 如果 frames 子目录不存在，直接使用 cropped_images 目录
+            if os.path.exists(cropped_images_dir):
+                logger.warning(f"[{stage_name}] frames 子目录不存在，使用上级目录: {cropped_images_dir}")
+                final_frames_path = cropped_images_dir
+            else:
+                final_frames_path = None
+
+        output_data = {"cropped_images_path": final_frames_path or cropped_images_dir}
+
+        # 如果启用了 MinIO 上传，且路径存在
+        if upload_to_minio and final_frames_path and os.path.exists(final_frames_path):
             try:
-                # 导入通用目录上传模块
-                from services.common.minio_directory_upload import upload_directory_to_minio
-                
-                logger.info(f"[{stage_name}] 开始上传裁剪图片目录到MinIO...")
-                
                 # 构建裁剪图片在MinIO中的路径
                 minio_base_path = f"{workflow_context.workflow_id}/cropped_images"
                 
-                upload_result = upload_directory_to_minio(
-                    local_dir=final_frames_path,
-                    minio_base_path=minio_base_path,
-                    file_pattern="*.jpg,*.jpeg,*.png,*.bmp,*.tiff,*.gif",  # 支持多种图片格式
-                    delete_local=delete_local_images,
-                    preserve_structure=True
-                )
-                
-                if upload_result["success"]:
-                    output_data.update({
-                        "cropped_images_minio_url": upload_result["minio_base_url"],
-                        "cropped_images_files_count": len(upload_result["uploaded_files"]),
-                        # "cropped_images_uploaded_files": upload_result["uploaded_files"]
-                    })
-                    logger.info(f"[{stage_name}] 裁剪图片目录上传成功: {upload_result['total_files']} 个文件")
+                if compress_before_upload:
+                    # 使用压缩上传
+                    from services.common.minio_directory_upload import upload_cropped_images_compressed
+                    
+                    logger.info(f"[{stage_name}] 开始压缩并上传裁剪图片目录到MinIO...")
+                    logger.info(f"[{stage_name}] 压缩格式: {compression_format}, 级别: {compression_level}")
+                    
+                    upload_result = upload_cropped_images_compressed(
+                        local_dir=final_frames_path,
+                        workflow_id=workflow_context.workflow_id,
+                        delete_local=delete_local_images,
+                        compression_format=compression_format,
+                        compression_level=compression_level
+                    )
+                    
+                    if upload_result["success"]:
+                        compression_info = upload_result.get("compression_info", {})
+                        output_data.update({
+                            "cropped_images_minio_url": upload_result["minio_base_url"],
+                            "compressed_archive_url": upload_result["archive_url"],
+                            "cropped_images_files_count": upload_result["total_files"],
+                            "compression_info": {
+                                "original_size": compression_info.get("original_size", 0),
+                                "compressed_size": compression_info.get("compressed_size", 0),
+                                "compression_ratio": compression_info.get("compression_ratio", 0),
+                                "files_count": compression_info.get("files_count", 0),
+                                "compression_time": compression_info.get("compression_time", 0),
+                                "checksum": compression_info.get("checksum", ""),
+                                "format": compression_info.get("format", compression_format)
+                            }
+                        })
+                        logger.info(f"[{stage_name}] 压缩上传成功: {compression_info.get('compression_ratio', 0):.1%} 压缩率, "
+                                   f"{upload_result['total_files']} 个文件")
+                    else:
+                        logger.warning(f"[{stage_name}] 压缩上传失败，回退到非压缩模式: {upload_result.get('error', '未知错误')}")
+
+                        # 回退到非压缩上传模式
+                        from services.common.minio_directory_upload import upload_directory_to_minio
+
+                        logger.info(f"[{stage_name}] 开始回退上传（不使用压缩）...")
+
+                        fallback_result = upload_directory_to_minio(
+                            local_dir=final_frames_path,
+                            minio_base_path=minio_base_path,
+                            file_pattern="*.jpg,*.jpeg,*.png,*.bmp,*.tiff,*.gif",
+                            delete_local=delete_local_images,
+                            preserve_structure=True
+                        )
+
+                        if fallback_result["success"]:
+                            output_data.update({
+                                "cropped_images_minio_url": fallback_result["minio_base_url"],
+                                "cropped_images_files_count": len(fallback_result["uploaded_files"]),
+                                "fallback_from_compression": True
+                            })
+                            logger.info(f"[{stage_name}] 回退上传成功: {fallback_result['total_files']} 个文件")
+                        else:
+                            logger.error(f"[{stage_name}] 回退上传也失败: {fallback_result.get('error', '未知错误')}")
+                            output_data.update({
+                                "cropped_images_upload_error": f"压缩失败: {upload_result.get('error')}, 回退也失败: {fallback_result.get('error')}",
+                                "cropped_images_files_count": upload_result.get("total_files", 0),
+                                "fallback_from_compression": True
+                            })
                 else:
-                    logger.warning(f"[{stage_name}] 裁剪图片目录上传失败: {upload_result.get('error', '未知错误')}")
-                    output_data.update({
-                        "cropped_images_upload_error": upload_result.get("error"),
-                        "cropped_images_files_count": upload_result["total_files"],
-                        # "cropped_images_uploaded_files": upload_result["uploaded_files"]
-                    })
+                    # 使用原有的单文件上传（向后兼容）
+                    from services.common.minio_directory_upload import upload_directory_to_minio
+                    
+                    logger.info(f"[{stage_name}] 开始上传裁剪图片目录到MinIO...")
+                    
+                    upload_result = upload_directory_to_minio(
+                        local_dir=final_frames_path,
+                        minio_base_path=minio_base_path,
+                        file_pattern="*.jpg,*.jpeg,*.png,*.bmp,*.tiff,*.gif",  # 支持多种图片格式
+                        delete_local=delete_local_images,
+                        preserve_structure=True
+                    )
+                    
+                    if upload_result["success"]:
+                        output_data.update({
+                            "cropped_images_minio_url": upload_result["minio_base_url"],
+                            "cropped_images_files_count": len(upload_result["uploaded_files"]),
+                            # "cropped_images_uploaded_files": upload_result["uploaded_files"]
+                        })
+                        logger.info(f"[{stage_name}] 裁剪图片目录上传成功: {upload_result['total_files']} 个文件")
+                    else:
+                        logger.warning(f"[{stage_name}] 裁剪图片目录上传失败: {upload_result.get('error', '未知错误')}")
+                        output_data.update({
+                            "cropped_images_upload_error": upload_result.get("error"),
+                            "cropped_images_files_count": upload_result["total_files"],
+                            # "cropped_images_uploaded_files": upload_result["uploaded_files"]
+                        })
+                        
             except Exception as e:
                 logger.warning(f"[{stage_name}] 裁剪图片目录上传过程出错: {e}", exc_info=True)
-                output_data.update({
-                    "cropped_images_upload_error": str(e),
-                    "cropped_images_files_count": len(os.listdir(final_frames_path)) if os.path.exists(final_frames_path) else 0
-                })
+
+                # 如果是压缩上传模式，尝试回退到非压缩模式
+                if compress_before_upload and final_frames_path and os.path.exists(final_frames_path):
+                    logger.info(f"[{stage_name}] 尝试回退上传（异常处理）...")
+
+                    try:
+                        from services.common.minio_directory_upload import upload_directory_to_minio
+
+                        fallback_result = upload_directory_to_minio(
+                            local_dir=final_frames_path,
+                            minio_base_path=minio_base_path,
+                            file_pattern="*.jpg,*.jpeg,*.png,*.bmp,*.tiff,*.gif",
+                            delete_local=delete_local_images,
+                            preserve_structure=True
+                        )
+
+                        if fallback_result["success"]:
+                            output_data.update({
+                                "cropped_images_minio_url": fallback_result["minio_base_url"],
+                                "cropped_images_files_count": len(fallback_result["uploaded_files"]),
+                                "fallback_from_compression": True,
+                                "original_error": str(e)
+                            })
+                            workflow_context.stages[stage_name].status = 'SUCCESS'
+                            workflow_context.stages[stage_name].error = None
+                            logger.info(f"[{stage_name}] 异常回退上传成功: {fallback_result['total_files']} 个文件")
+                        else:
+                            output_data.update({
+                                "cropped_images_upload_error": f"压缩异常: {str(e)}, 回退失败: {fallback_result.get('error')}",
+                                "cropped_images_files_count": fallback_result.get("total_files", 0),
+                                "fallback_from_compression": True
+                            })
+                            workflow_context.stages[stage_name].status = 'FAILED'
+                            workflow_context.stages[stage_name].error = f"压缩异常且回退失败: {str(e)}, 回退: {fallback_result.get('error')}"
+                            workflow_context.error = f"在阶段 {stage_name} 压缩上传异常且回退失败"
+                    except Exception as fallback_e:
+                        logger.error(f"[{stage_name}] 回退上传也出现异常: {fallback_e}", exc_info=True)
+                        output_data.update({
+                            "cropped_images_upload_error": f"压缩异常: {str(e)}, 回退异常: {str(fallback_e)}",
+                            "cropped_images_files_count": len(os.listdir(final_frames_path)) if os.path.exists(final_frames_path) else 0
+                        })
+                        workflow_context.stages[stage_name].status = 'FAILED'
+                        workflow_context.stages[stage_name].error = f"压缩异常且回退异常: {str(e)}, 回退: {str(fallback_e)}"
+                        workflow_context.error = f"在阶段 {stage_name} 压缩上传异常且回退也异常"
+
+                    workflow_context.stages[stage_name].output = output_data
+                    return workflow_context.model_dump()
+                else:
+                    # 非压缩模式或路径不存在，直接标记失败
+                    output_data.update({
+                        "cropped_images_upload_error": str(e),
+                        "cropped_images_files_count": len(os.listdir(final_frames_path)) if final_frames_path and os.path.exists(final_frames_path) else 0
+                    })
+                    workflow_context.stages[stage_name].status = 'FAILED'
+                    workflow_context.stages[stage_name].error = str(e)
+                    workflow_context.error = f"在阶段 {stage_name} 上传过程中发生错误: {e}"
+                    workflow_context.stages[stage_name].output = output_data
+                    return workflow_context.model_dump()
         
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
@@ -503,8 +803,38 @@ def split_audio_segments(self: Task, context: dict) -> dict:
                 recorded_input_params['video_path'] = input_data.get("video_path")
         
         # MinIO上传参数
-        upload_to_minio = resolved_params.get("upload_cropped_images_to_minio", False)
-        delete_local_images = resolved_params.get("delete_local_cropped_images_after_upload", False)
+        upload_to_minio = get_param_with_fallback(
+            "upload_keyframes_to_minio",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        delete_local_keyframes = get_param_with_fallback(
+            "delete_local_keyframes_after_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        
+        # 压缩上传参数（新增）
+        compress_keyframes_before_upload = get_param_with_fallback(
+            "compress_keyframes_before_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+        keyframe_compression_format = get_param_with_fallback(
+            "keyframe_compression_format",
+            resolved_params,
+            workflow_context,
+            default="zip"
+        )
+        keyframe_compression_level = get_param_with_fallback(
+            "keyframe_compression_level", 
+            resolved_params,
+            workflow_context,
+            default="default"
+        )
         
         workflow_context.stages[stage_name].input_params = recorded_input_params
 

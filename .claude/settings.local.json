@@ -89,7 +89,9 @@
       "mcp__context7__resolve-library-id",
       "mcp__context7__get-library-docs",
       "mcp__serena__write_memory",
-      "mcp__serena__edit_memory"
+      "mcp__serena__edit_memory",
+      "Bash(python3:*)",
+      "SlashCommand(/openspec:proposal:*)"
     ],
     "deny": [
       "Bash(docker build:*)"

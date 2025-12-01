@@ -76,7 +76,7 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
             
             # 检查输出中的文件路径字段 - 优先处理转录结果文件
             file_keys = ['segments_file', 'transcribe_data_file', 'audio_path', 'video_path', 'subtitle_path', 'output_path']
-            directory_keys = ['keyframe_dir']  # 需要特殊处理的目录字段
+            directory_keys = ['keyframe_dir', 'cropped_images_path']  # 需要特殊处理的目录字段
             
             # 处理普通文件字段
             for key in file_keys:
@@ -119,6 +119,20 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
                 if isinstance(dir_path, str) and (dir_path.startswith('http://') or dir_path.startswith('https://')):
                     logger.info(f"跳过已是URL的路径: {key} = {dir_path}")
                     continue
+                
+                # 检查是否已经被压缩上传
+                if key == 'keyframe_dir':
+                    # 检查是否有压缩上传的相关字段
+                    compressed_archive_url = stage.output.get('keyframe_compressed_archive_url')
+                    if compressed_archive_url:
+                        logger.info(f"检测到{key}已经通过压缩上传，跳过传统目录上传")
+                        continue
+                elif key == 'cropped_images_path':
+                    # 检查裁剪图片是否已经通过压缩上传
+                    compressed_archive_url = stage.output.get('compressed_archive_url')
+                    if compressed_archive_url:
+                        logger.info(f"检测到{key}已经通过压缩上传，跳过传统目录上传")
+                        continue
                 
                 # 检查目录是否存在
                 if isinstance(dir_path, str) and os.path.exists(dir_path) and os.path.isdir(dir_path):

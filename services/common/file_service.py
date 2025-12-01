@@ -5,6 +5,7 @@ import time
 from minio import Minio
 from urllib.parse import urlparse
 from services.common.logger import get_logger
+from services.common.minio_url_utils import is_minio_url, normalize_minio_url
 
 logger = get_logger('file_service')
 
@@ -25,6 +26,83 @@ class UnifiedFileService:
         self.minio_port = minio_port
         self.default_bucket = default_bucket
         self.max_retries = max_retries
+
+    def download_file(self, file_url: str, local_path: str, retries: int = None) -> str:
+        """
+        下载文件到指定的本地路径
+        
+        Args:
+            file_url: 文件URL (HTTP or MinIO)
+            local_path: 本地保存的完整路径
+            retries: 重试次数
+            
+        Returns:
+            str: 本地保存的完整路径
+        """
+        if retries is None:
+            retries = self.max_retries
+            
+        # 确保目标目录存在
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        
+        last_error = None
+        for attempt in range(retries):
+            try:
+                # 检查是否为MinIO URL
+                if is_minio_url(file_url):
+                    minio_url = normalize_minio_url(file_url)
+                    logger.info(f"下载MinIO文件: {file_url} -> {local_path}")
+                    
+                    # 解析bucket和object
+                    parsed_url = urlparse(minio_url)
+                    bucket_name = parsed_url.netloc
+                    object_name = parsed_url.path.lstrip('/')
+                    
+                    self.minio_client.fget_object(bucket_name, object_name, local_path)
+                    return local_path
+                    
+                elif file_url.startswith(('http://', 'https://')):
+                    logger.info(f"下载HTTP文件: {file_url} -> {local_path}")
+                    
+                    # 尝试作为MinIO URL处理 (兼容性)
+                    try:
+                        minio_url = normalize_minio_url(file_url)
+                        logger.info(f"识别为MinIO URL, 使用MinIO客户端下载: {minio_url}")
+                        
+                        parsed_url = urlparse(minio_url)
+                        bucket_name = parsed_url.netloc
+                        object_name = parsed_url.path.lstrip('/')
+                        
+                        self.minio_client.fget_object(bucket_name, object_name, local_path)
+                        return local_path
+                    except Exception:
+                        # 普通HTTP下载
+                        with requests.get(file_url, stream=True, timeout=300) as r:
+                            r.raise_for_status()
+                            with open(local_path, 'wb') as f:
+                                for chunk in r.iter_content(chunk_size=8192):
+                                    f.write(chunk)
+                        return local_path
+                        
+                else:
+                    # 默认为相对路径
+                    bucket_name = self.default_bucket
+                    object_name = file_url
+                    logger.info(f"下载相对路径文件: {bucket_name}/{object_name} -> {local_path}")
+                    
+                    self.minio_client.fget_object(bucket_name, object_name, local_path)
+                    return local_path
+                    
+            except Exception as e:
+                last_error = e
+                if attempt < retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"文件下载失败 (尝试 {attempt + 1}/{retries}): {file_url}, 错误: {e}, {wait_time}秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"文件下载失败，已达最大重试次数: {file_url}, 错误: {e}")
+        
+        raise FileNotFoundError(f"文件下载失败: {file_url}, 最后错误: {last_error}")
 
     def resolve_and_download(self, file_path: str, local_dir: str, retries: int = None) -> str:
         """
@@ -54,22 +132,60 @@ class UnifiedFileService:
         last_error = None
         for attempt in range(retries):
             try:
-                if file_path.startswith(('http://', 'https://')):
-                    return self._download_http_file(file_path, local_dir)
-                elif file_path.startswith('minio://'):
-                    return self._download_minio_file(file_path, local_dir)
+                # 检查是否为MinIO URL（支持http和minio://格式）
+                if is_minio_url(file_path):
+                    # 统一转换为minio://格式
+                    minio_url = normalize_minio_url(file_path)
+                    logger.info(f"检测到MinIO URL，使用MinIO客户端下载: {file_path} -> {minio_url}")
+                    return self._download_minio_file(minio_url, local_dir)
+                elif file_path.startswith(('http://', 'https://')):
+                    # 非MinIO的HTTP URL（例如公开网站），但先尝试作为MinIO URL处理
+                    logger.info(f"检测到HTTP URL，尝试智能识别是否为MinIO URL: {file_path}")
+                    try:
+                        # 先尝试强制当作MinIO URL处理
+                        minio_url = normalize_minio_url(file_path)
+                        logger.info(f"成功识别为MinIO URL，使用MinIO客户端下载: {file_path} -> {minio_url}")
+                        return self._download_minio_file(minio_url, local_dir)
+                    except Exception as minio_error:
+                        # 如果转换失败，说明不是MinIO URL，使用HTTP下载
+                        logger.info(f"不是MinIO URL，使用HTTP下载: {file_path}")
+                        return self._download_http_file(file_path, local_dir)
                 else:
                     # 默认为相对路径，相对于默认bucket
                     minio_url = f"minio://{self.default_bucket}/{file_path}"
+                    logger.info(f"检测到相对路径，转换为MinIO URL: {file_path} -> {minio_url}")
                     return self._download_minio_file(minio_url, local_dir)
             except Exception as e:
                 last_error = e
+                error_type = type(e).__name__
+                
+                # 如果是HTTP下载失败且URL可能是MinIO URL，尝试回退到MinIO客户端
+                if (file_path.startswith(('http://', 'https://')) and 
+                    attempt < retries - 1 and 
+                    '403' in str(e)):
+                    logger.warning(f"HTTP下载403错误，尝试使用MinIO客户端回退: {file_path}, 错误: {e}")
+                    try:
+                        # 尝试将其当作MinIO URL处理
+                        if is_minio_url(file_path):
+                            minio_url = normalize_minio_url(file_path)
+                            logger.info(f"回退使用MinIO客户端下载: {file_path} -> {minio_url}")
+                            return self._download_minio_file(minio_url, local_dir)
+                    except Exception as fallback_error:
+                        logger.warning(f"MinIO客户端回退也失败: {fallback_error}")
+                        last_error = fallback_error
+                        wait_time = 2 ** attempt
+                        time.sleep(wait_time)
+                        continue
+                
                 if attempt < retries - 1:
                     wait_time = 2 ** attempt  # 指数退避
-                    logger.warning(f"文件下载失败 (尝试 {attempt + 1}/{retries}): {file_path}, 错误: {e}, {wait_time}秒后重试...")
+                    logger.warning(f"文件下载失败 (尝试 {attempt + 1}/{retries}): {file_path}, 错误类型: {error_type}, 错误: {e}, {wait_time}秒后重试...")
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"文件下载失败，已达最大重试次数 ({retries}): {file_path}, 错误: {e}")
+                    logger.error(f"文件下载失败，已达最大重试次数 ({retries}): {file_path}, 错误类型: {error_type}, 错误: {e}")
+                    # 提供额外的诊断信息
+                    if '403' in str(e):
+                        logger.error(f"403错误诊断: 可能是权限不足、文件不存在或URL格式错误")
         
         # 所有重试都失败
         raise FileNotFoundError(f"文件下载失败: {file_path}, 最后错误: {last_error}")

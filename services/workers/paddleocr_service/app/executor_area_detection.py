@@ -62,7 +62,9 @@ def main():
     original_stderr = sys.stderr
 
     parser = argparse.ArgumentParser(description="Detect subtitle area from a list of keyframe paths.")
-    parser.add_argument("--keyframe-paths-json", required=True, help="A JSON string of a list of keyframe paths.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--keyframe-paths-json", help="A JSON string of a list of keyframe paths.")
+    group.add_argument("--keyframe-paths-file", help="Path to a JSON file containing a list of keyframe paths.")
     args = parser.parse_args()
 
     try:
@@ -70,7 +72,12 @@ def main():
         sys.stdout = original_stderr
         sys.stderr = original_stderr
 
-        keyframe_paths = json.loads(args.keyframe_paths_json)
+        if args.keyframe_paths_file:
+             with open(args.keyframe_paths_file, 'r', encoding='utf-8') as f:
+                 keyframe_paths = json.load(f)
+        else:
+             keyframe_paths = json.loads(args.keyframe_paths_json)
+
         if not keyframe_paths or not isinstance(keyframe_paths, list):
             raise ValueError("Invalid keyframe paths provided.")
 

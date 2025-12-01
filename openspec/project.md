@@ -2,155 +2,133 @@
 
 ## Purpose
 
-YiVideo 是一个基于动态工作流引擎的 AI 视频处理平台，采用微服务架构设计。
+YiVideo 是一个基于动态工作流引擎的AI视频处理平台，采用微服务架构设计。系统核心思想是"配置而非编码"，通过工作流配置文件动态构建AI处理链条，支持以下核心功能：
 
-**核心价值**:
-- **配置而非编码**: 通过工作流配置文件动态构建 AI 处理链条，无需修改代码
-- **灵活组合**: 支持语音识别、OCR、字幕处理、音频分离、文本转语音等多种 AI 功能的灵活组合
-- **资源优化**: 智能 GPU 资源管理，支持多任务并发和自动恢复
-
-**主要功能**:
-- 视频/音频处理和分割
-- 语音识别 (ASR) 和说话人分离
-- 光学字符识别 (OCR)
-- 人声/背景音分离
-- 文本转语音 (TTS) 和语音克隆
-- 字幕生成、合并、校正和 AI 优化
-- 图像修复 (Inpainting)
+- **语音识别 (ASR)**: 基于 Faster-Whisper 的高精度语音转文字
+- **说话人分离**: 基于 Pyannote-audio 的多说话人识别和分离
+- **光学字符识别 (OCR)**: 基于 PaddleOCR 的字幕区域检测和文字识别
+- **音频处理**: 人声/背景音分离、音频增强
+- **字幕处理**: AI驱动的字幕生成、校对、优化、合并
+- **文本转语音 (TTS)**: 多引擎支持的高质量语音合成
+- **视频处理**: 基于 FFmpeg 的视频编辑和格式转换
 
 ## Tech Stack
 
-### 核心框架
-- **Python 3.8+**: 主要开发语言
-- **Docker & Docker Compose**: 容器化部署和服务编排
-- **Redis**: 消息队列、状态存储、分布式锁、缓存（多数据库架构）
-- **Celery**: 分布式任务队列和工作流引擎
-- **FastAPI/Flask**: RESTful API 网关
+### 后端框架与服务
+- **Python 3.8+**: 主要编程语言
+- **FastAPI**: API Gateway 的 HTTP 服务框架
+- **Celery 5.x**: 分布式任务队列和工作流引擎
+- **Redis**: 多用途数据存储
+  - DB 0: Celery Broker (任务队列)
+  - DB 1: Celery Backend (结果存储)
+  - DB 2: 分布式锁系统
+  - DB 3: 工作流状态管理
 
-### AI/ML 框架
-- **Faster Whisper**: 语音识别 (ASR)
-- **Pyannote Audio**: 说话人分离和音频处理
-- **PaddleOCR**: 光学字符识别
-- **Audio Separator**: 人声/伴奏分离
-- **IndexTTS**: 文本转语音
-- **GPT-SoVITS**: 语音克隆
-- **FFmpeg**: 音视频编解码和处理
+### AI/ML 模型与库
+- **Faster-Whisper**: GPU加速语音识别
+- **Pyannote-audio**: 说话人分离和声纹识别
+- **PaddleOCR**: 中英文OCR识别
+- **Audio-Separator**: 音频源分离
+- **IndexTTS / GPT-SoVITS**: TTS引擎
+- **CUDA 11.x+**: GPU加速支持
 
 ### 基础设施
-- **CUDA 11.x+**: GPU 加速计算
-- **NVIDIA RTX 系列 GPU**: 推荐硬件
-- **Prometheus**: 指标收集
-- **Grafana**: 可视化监控面板
+- **Docker & Docker Compose**: 容器化部署
+- **FFmpeg**: 音视频处理
+- **MinIO**: 对象存储服务
+- **Prometheus + Grafana**: 监控和可视化
+- **共享存储**: `/share` 目录用于服务间文件交换
 
 ### 开发工具
-- **pytest**: 单元测试和集成测试
-- **black/flake8**: 代码格式化和检查
-- **mypy**: 静态类型检查
+- **Pytest**: 单元测试、集成测试、E2E测试
+- **Black / Flake8**: 代码格式化和linting
+- **Git**: 版本控制
 
 ## Project Conventions
 
 ### Code Style
 
-**命名规范**:
-- **文件名**: 使用 `snake_case`（如 `task_manager.py`）
-- **类名**: 使用 `PascalCase`（如 `WorkflowEngine`）
-- **函数/变量**: 使用 `snake_case`（如 `process_video`）
-- **常量**: 使用 `UPPER_SNAKE_CASE`（如 `MAX_RETRY_COUNT`）
+#### Python 代码规范
+- **格式化工具**: Black (line-length=100)
+- **Linting**: Flake8
+- **导入顺序**: 标准库 → 第三方库 → 本地模块
+- **命名约定**:
+  - 类名: `PascalCase` (例如: `StateManager`, `GPULockMonitor`)
+  - 函数/方法: `snake_case` (例如: `process_audio`, `get_workflow_status`)
+  - 常量: `UPPER_SNAKE_CASE` (例如: `MAX_RETRY_COUNT`, `DEFAULT_TIMEOUT`)
+  - 私有成员: 前缀下划线 `_private_method`
+- **文档字符串**: 使用 Google 风格的 docstring
+- **类型提示**: 优先使用 Python 3.8+ 类型注解
 
-**代码组织**:
-```
-services/
-├── api_gateway/          # API 网关服务
-├── workers/              # AI Worker 服务
-│   ├── faster_whisper_service/
-│   ├── pyannote_audio_service/
-│   └── ...
-└── common/               # 共享组件和工具
-    ├── locks.py         # GPU 锁管理
-    ├── state_manager.py # 状态管理
-    └── ...
-```
-
-**代码注释**:
-- 中文注释优先（与现有代码库保持一致）
-- 复杂逻辑必须添加解释性注释
-- 公共 API 必须包含 docstring
-
-**格式化**:
-- 使用 black 格式化工具
-- 行长度限制：100 字符
-- 使用 4 空格缩进
+#### 注释语言
+- **代码注释**: 与现有代码库保持一致(自动检测中英文)
+- **文档**: 主要使用中文,技术术语保留英文
 
 ### Architecture Patterns
 
-**微服务架构**:
-- 每个 AI 功能独立部署为 Celery Worker 服务
-- 服务间通过 Redis 消息队列通信
-- 使用共享存储 `/share` 进行文件交换
+#### 微服务架构
+- **API Gateway 模式**: 统一入口,负责请求路由和工作流编排
+- **Worker 模式**: 每个AI功能独立为 Celery Worker 服务
+- **共享存储**: 所有服务通过 `/share` 目录交换文件
+- **状态管理**: 集中式状态管理器 (StateManager)
 
-**工作流编排**:
-- 动态工作流引擎，通过 JSON 配置定义处理流程
-- 标准化任务接口：`def standard_task_interface(self: Task, context: dict) -> dict`
-- 工作流上下文在所有任务间传递统一的 JSON 字典
+#### 核心设计原则
+- **SOLID原则**: 单一职责、开闭原则、依赖倒置
+- **KISS (Keep It Simple)**: 追求简洁,拒绝过度设计
+- **DRY (Don't Repeat Yourself)**: 避免重复,提取共享组件
+- **YAGNI (You Aren't Gonna Need It)**: 仅实现当前所需功能
 
-**GPU 资源管理**:
-- 基于 Redis 的分布式 GPU 锁系统
-- 支持智能轮询、超时管理、自动恢复
-- 装饰器模式：`@gpu_lock(timeout=1800, poll_interval=0.5)`
-
-**状态管理**:
-- 集中式状态管理器（StateManager）
-- Redis 存储工作流状态，支持 TTL 自动过期
-- 实时监控和健康检查
-
-**配置管理**:
-- 配置文件：`config.yml`（主配置）+ `.env`（环境变量）
-- 支持环境变量覆盖配置项
-- 敏感信息使用环境变量或加密存储
+#### 关键架构模式
+- **责任链模式**: 工作流任务链式执行
+- **装饰器模式**: GPU锁、日志、监控等横切关注点
+- **工厂模式**: 动态任务创建和服务发现
+- **观察者模式**: 任务状态变更通知
 
 ### Testing Strategy
 
-**测试金字塔**:
+#### 测试金字塔
 ```
-         /\
-        /E2E\      端到端测试（少量）
-       /------\
-      /  集成  \    集成测试（适量）
-     /----------\
-    /   单元测试  \  单元测试（大量）
-   /--------------\
+       E2E Tests (少量)
+           ▲
+      Integration Tests (适量)
+           ▲
+      Unit Tests (大量)
 ```
 
-**单元测试** (`tests/unit/`):
-- Mock 所有外部依赖（Redis、GPU、文件系统）
-- 测试纯业务逻辑和算法
-- 使用 `@pytest.mark.unit` 标记
+#### 测试层级
+1. **单元测试** (`tests/unit/`)
+   - Mock 所有外部依赖 (Redis, 文件系统, GPU)
+   - 测试纯业务逻辑
+   - 覆盖率目标: >80%
+   - 运行速度: 快速 (<5秒)
 
-**集成测试** (`tests/integration/`):
-- 使用真实基础设施（Redis、文件系统）
-- 测试单个服务内部组件交互
-- GPU 任务在 CPU 模式下运行或使用专用 GPU Runner
-- 使用 `@pytest.mark.integration` 标记
+2. **集成测试** (`tests/integration/`)
+   - 使用真实 Redis 和文件系统
+   - 测试服务内部模块交互
+   - GPU 任务使用 CPU 模式或专用 GPU Runner
+   - 使用 `@pytest.mark.gpu` 标记 GPU 测试
 
-**端到端测试** (`tests/e2e/`):
-- 完整业务流程测试，模拟真实用户场景
-- 测试跨服务工作流
-- 使用 `@pytest.mark.e2e` 标记
+3. **端到端测试** (`tests/e2e/`)
+   - 完整业务流程测试
+   - 模拟真实用户场景
+   - 可选择性在 CI/CD 中运行
 
-**GPU 测试**:
-- 使用 `@pytest.mark.gpu` 标记 GPU 相关测试
-- 单元测试层严格使用 Mock，不触碰 GPU
-- CI/CD 中 GPU 测试为可选执行
+#### 测试命名约定
+- 测试文件: `test_<module_name>.py`
+- 测试类: `Test<ClassName>`
+- 测试方法: `test_<scenario>_<expected_result>`
 
 ### Git Workflow
 
-**分支策略**:
-- `master`: 主分支，稳定生产版本
-- `task/<feature-name>_<date>_<id>`: 功能分支（如 `task/redundant-code-analysis_20251111_001`）
-- `hotfix/<issue-name>`: 紧急修复分支
+#### 分支策略
+- **master**: 主分支,生产环境代码
+- **feature/***: 功能开发分支
+- **fix/***: 问题修复分支
+- **refactor/***: 代码重构分支
 
-**提交规范**:
-使用约定式提交（Conventional Commits）格式：
+#### Commit 约定
+使用 Conventional Commits 规范:
+
 ```
 <type>(<scope>): <subject>
 
@@ -159,105 +137,122 @@ services/
 <footer>
 ```
 
-**类型**:
+**类型 (type)**:
 - `feat`: 新功能
-- `fix`: 错误修复
-- `refactor`: 重构（不改变功能）
-- `perf`: 性能优化
+- `fix`: 问题修复
+- `refactor`: 代码重构
 - `docs`: 文档更新
 - `test`: 测试相关
-- `chore`: 构建/工具链更新
+- `chore`: 构建/工具变更
+- `perf`: 性能优化
 
 **示例**:
 ```
-feat(whisper): 增加批量处理支持
+feat(paddleocr): add manifest_minio_url field to create_stitched_images
 
-- 添加批量音频处理接口
-- 优化 GPU 内存使用
-- 更新相关文档
+添加manifest_minio_url字段,支持MinIO URL输出
 
 Closes #123
 ```
 
-**Pull Request**:
-- 必须通过所有单元测试和集成测试
-- 必须经过代码审查
-- 更新相关文档（如修改了 API 或配置）
+#### 代码审查要求
+- 所有代码必须经过 PR 审查
+- 至少一位团队成员批准
+- 通过所有 CI 检查
+- **重要**: 未经用户明确要求,不要自动执行 git commit/push
 
 ## Domain Context
 
-**AI 视频处理领域**:
-- 视频处理流程：提取音频 → ASR 识别 → 说话人分离 → 字幕生成 → OCR 识别 → 字幕合并 → AI 优化
-- 音频处理：人声分离、音频增强、语音合成
-- 字幕处理：时间轴对齐、格式转换、多语言支持
+### AI 视频处理领域知识
 
-**工作流概念**:
-- **工作流 (Workflow)**: 由多个阶段组成的完整处理流程
-- **阶段 (Stage)**: 工作流中的一个处理步骤
-- **任务 (Task)**: Celery 任务，执行具体的 AI 处理
-- **上下文 (Context)**: 工作流执行过程中传递的状态和数据
+#### 语音识别 (ASR) 流程
+1. 音频提取 → 2. 降噪预处理 → 3. VAD 检测 → 4. 语音识别 → 5. 时间戳对齐
 
-**GPU 资源管理**:
-- **GPU 锁 (GPU Lock)**: 防止多任务同时使用同一 GPU 导致 OOM
-- **轮询 (Polling)**: 任务等待 GPU 资源释放的策略
-- **心跳 (Heartbeat)**: 任务存活状态检测机制
-- **超时管理 (Timeout)**: 分级超时处理（警告/软超时/硬超时）
+#### 说话人分离流程
+1. 音频分析 → 2. 说话人检测 → 3. 声纹聚类 → 4. 时间轴分割 → 5. 标签标注
 
-**字幕处理**:
-- **ASR 字幕**: 语音识别生成的原始字幕
-- **OCR 字幕**: 视频画面中识别的文字
-- **字幕合并**: 融合多个来源的字幕
-- **字幕校正**: 使用 LLM 优化字幕质量（断句、错别字、语义）
+#### OCR 字幕处理流程
+1. 视频帧提取 → 2. 字幕区域检测 → 3. 文字识别 → 4. 时序去重 → 5. 字幕合并
+
+#### 字幕优化工作流
+1. 原始字幕生成 (ASR/OCR)
+2. AI 校对 (语法、标点、分段)
+3. 时间轴优化 (合并、拆分)
+4. 说话人标注
+5. 最终输出 (SRT/VTT/ASS)
+
+### 工作流引擎核心概念
+
+#### 工作流上下文 (Context)
+统一的 JSON 字典,在所有任务间传递:
+```python
+{
+    "workflow_id": "uuid",
+    "input_params": {...},
+    "stages": {...},
+    "error": None,
+    "metadata": {...}
+}
+```
+
+#### 标准任务接口
+所有 Celery 任务使用统一签名:
+```python
+def standard_task_interface(self: Task, context: dict) -> dict:
+    """标准任务接口"""
+    pass
+```
+
+#### GPU 资源管理
+- 基于 Redis 的分布式锁机制
+- 智能轮询和指数退避
+- 心跳检测和自动恢复
+- 分级超时处理
 
 ## Important Constraints
 
 ### 技术约束
-- **GPU 内存限制**: 单个 GPU 同一时间只能运行一个密集型任务
-- **并发限制**: Celery Worker 并发数受 GPU 数量限制
-- **模型加载**: 首次加载模型耗时较长，需要缓存策略
-- **文件大小**: 支持的最大视频文件大小受存储空间限制
+1. **GPU 资源有限**: 需要严格的锁机制避免冲突
+2. **内存限制**: 大文件处理需要流式处理,避免一次性加载
+3. **存储空间**: 临时文件需要及时清理
+4. **网络带宽**: 大文件传输需要断点续传支持
 
-### 性能约束
-- **实时性要求**: 字幕生成需要在合理时间内完成（通常 < 视频时长）
-- **内存使用**: 避免一次性加载大文件到内存
-- **批处理大小**: 需要根据 GPU 内存动态调整 batch_size
+### 业务约束
+1. **实时性要求**: 某些任务需要在指定时间内完成
+2. **准确性要求**: AI 识别结果需要达到一定准确率阈值
+3. **成本控制**: GPU 使用成本,需要优化资源利用率
 
 ### 安全约束
-- **容器安全**: 所有容器使用非 root 用户运行
-- **API 认证**: 生产环境必须启用 JWT 认证
-- **速率限制**: API 接口配置速率限制防止滥用
-- **敏感数据**: 所有敏感配置使用环境变量或加密存储
+1. **敏感配置**: API密钥、Token 必须使用环境变量
+2. **文件权限**: 共享存储需要严格的权限控制
+3. **容器安全**: 所有容器使用非 root 用户运行
 
 ### 兼容性约束
-- **Python 版本**: 3.8+
-- **CUDA 版本**: 11.x+（推荐 11.8）
-- **GPU 要求**: NVIDIA RTX 系列（推荐 RTX 3090/4090）
-- **操作系统**: Linux（推荐 Ubuntu 20.04/22.04）
+1. **CUDA 版本**: 需要 CUDA 11.x+
+2. **GPU 型号**: 推荐 NVIDIA RTX 系列
+3. **Python 版本**: 3.8+
+4. **平台支持**: Linux (WSL2 支持)
 
 ## External Dependencies
 
-### AI 模型服务
-- **HuggingFace**: 模型下载和托管
-  - faster-whisper 系列模型
-  - pyannote-audio 模型
-  - 需要配置 HuggingFace token
+### AI 模型依赖
+- **Faster-Whisper Models**: HuggingFace Hub (systran/faster-whisper-*)
+- **Pyannote Models**: HuggingFace Hub (需要 HF Token)
+- **PaddleOCR Models**: 官方模型库
+- **TTS Models**: 自托管或第三方服务
 
-### 第三方 API（可选）
-- **OpenAI API**: 字幕 AI 优化（GPT 系列）
-- **Google Gemini API**: 字幕校正和翻译
-- **百度 AI**: 备用语音识别和 NLP 服务
+### 云服务依赖
+- **MinIO**: 对象存储服务 (可替换为 S3)
+- **Redis**: 内存数据库 (必需)
+- **HuggingFace**: 模型下载 (需要稳定网络)
 
-### 基础服务
-- **Redis**: 消息队列、缓存、锁、状态存储
-- **共享存储**: NFS 或本地共享目录 `/share`
-- **Docker Registry**: 镜像存储和分发
+### 第三方 API
+- **LLM 服务**: Gemini / OpenAI / DeepSeek (字幕优化)
+- **TTS 服务**: 可选的第三方 TTS API
+- **监控服务**: Prometheus + Grafana
 
-### 监控和日志
-- **Prometheus**: 指标采集和存储
-- **Grafana**: 监控仪表板
-- **ELK Stack**（可选）: 日志聚合和分析
-
-### 开发依赖
-- **GitHub**: 代码托管和版本控制
-- **Docker Hub**: 公共镜像拉取
-- **PyPI**: Python 包管理
+### 关键系统依赖
+- **FFmpeg**: 音视频处理核心
+- **CUDA Toolkit**: GPU 加速支持
+- **Docker Engine**: 容器运行时
+- **共享文件系统**: 服务间文件交换

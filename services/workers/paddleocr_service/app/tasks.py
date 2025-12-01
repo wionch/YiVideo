@@ -38,6 +38,7 @@ from services.common.config_loader import get_cleanup_temp_files_config
 # 导入标准上下文、锁和状态管理器
 from services.common.context import StageExecution
 from services.common.context import WorkflowContext
+from services.common.minio_url_utils import normalize_minio_url
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
 from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
@@ -130,6 +131,7 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
 
     keyframe_dir = None
     local_download_dir = None
+    paths_file_path = None  # [新增] 用于传递给子进程的临时文件路径
     execution_metadata = {} # [新增] 用于存储执行过程中的元数据，不污染 input_params
     try:
         # --- Parameter Resolution ---
@@ -185,144 +187,99 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
             resolved_params,
             workflow_context
         )
+        
+        auto_decompress = get_param_with_fallback(
+            "auto_decompress",
+            resolved_params,
+            workflow_context,
+            default=True
+        )
 
         logger.info(f"[{stage_name}] 获取到的keyframe_dir: {keyframe_dir}")
         logger.info(f"[{stage_name}] download_from_minio: {download_from_minio}")
+        logger.info(f"[{stage_name}] auto_decompress: {auto_decompress}")
         
         if keyframe_dir and os.path.isdir(keyframe_dir):
             # 情况1: 参数中提供了本地关键帧目录
             logger.info(f"[{stage_name}] 使用参数指定的关键帧目录: {keyframe_dir}")
             execution_metadata['input_source'] = 'parameter_local'
-        elif keyframe_dir and keyframe_dir.startswith('minio://'):
-            # 情况2: 参数中提供了MinIO关键帧目录URL (minio://格式)
-            logger.info(f"[{stage_name}] 检测到MinIO关键帧目录URL: {keyframe_dir}")
-            if not download_from_minio:
-                logger.warning(f"[{stage_name}] 检测到MinIO URL但未启用下载，将尝试使用现有实现")
-            else:
-                # 执行MinIO目录下载
-                try:
-                    from services.common.minio_directory_download import download_keyframes_directory
-
-                    # 如果没有指定本地下载目录，使用默认路径
-                    if not local_download_dir:
-                        local_download_dir = os.path.join(workflow_context.shared_storage_path, "downloaded_keyframes")
-
-                    logger.info(f"[{stage_name}] 开始从MinIO下载关键帧目录: {keyframe_dir}")
-                    logger.info(f"[{stage_name}] 本地保存目录: {local_download_dir}")
-
-                    download_result = download_keyframes_directory(
-                        minio_url=keyframe_dir,
-                        workflow_id=workflow_context.workflow_id,
-                        local_dir=local_download_dir
-                    )
-
-                    if download_result["success"]:
-                        keyframe_dir = local_download_dir
-                        logger.info(f"[{stage_name}] MinIO目录下载成功: {download_result['total_files']} 个文件")
-                        execution_metadata['input_source'] = 'parameter_minio'
-                        # 注意：不修改原始的keyframe_dir，保持为MinIO URL
-                        # 下载后的本地路径将在output中记录
-                        execution_metadata['minio_download_result'] = {
-                            'total_files': download_result['total_files'],
-                            'downloaded_files_count': len(download_result['downloaded_files']),
-                            'downloaded_local_dir': keyframe_dir  # 在output中记录本地路径
-                        }
-                    else:
-                        raise RuntimeError(f"MinIO目录下载失败: {download_result.get('error', '未知错误')}")
-
-                except Exception as e:
-                    logger.error(f"[{stage_name}] MinIO目录下载过程出错: {e}")
-                    raise RuntimeError(f"无法从MinIO下载关键帧目录: {e}")
-        elif keyframe_dir and keyframe_dir.startswith('http://'):
-            # 情况3: 参数中提供了HTTP格式的MinIO关键帧目录URL
-            logger.info(f"[{stage_name}] 检测到HTTP格式的MinIO目录URL: {keyframe_dir}")
-            if not download_from_minio:
-                logger.warning(f"[{stage_name}] 检测到HTTP URL但未启用下载，将尝试使用现有实现")
-            else:
-                # 执行MinIO目录下载
-                try:
-                    from services.common.minio_directory_download import download_keyframes_directory
-
-                    # 转换HTTP URL为minio://格式
-                    # 示例: http://host.docker.internal:9000/yivideo/task_id/keyframes
-                    # 转换为: minio://yivideo/task_id/keyframes
-                    from urllib.parse import urlparse
-                    parsed_url = urlparse(keyframe_dir)
-                    path_parts = parsed_url.path.strip('/').split('/', 1)  # 分割路径，取第一部分作为bucket
-                    if len(path_parts) < 2:
-                        raise ValueError(f"无法从HTTP URL中提取bucket和路径: {keyframe_dir}")
-
-                    bucket_name = path_parts[0]
-                    minio_path = path_parts[1] if len(path_parts) > 1 else ''
-                    minio_url = f"minio://{bucket_name}/{minio_path}"
-
-                    logger.info(f"[{stage_name}] HTTP URL转换: {keyframe_dir} -> {minio_url}")
-
-                    # 如果没有指定本地下载目录，使用默认路径
-                    if not local_download_dir:
-                        local_download_dir = os.path.join(workflow_context.shared_storage_path, "downloaded_keyframes")
-
-                    logger.info(f"[{stage_name}] 开始从MinIO下载关键帧目录: {minio_url}")
-                    logger.info(f"[{stage_name}] 本地保存目录: {local_download_dir}")
-
-                    download_result = download_keyframes_directory(
-                        minio_url=minio_url,
-                        workflow_id=workflow_context.workflow_id,
-                        local_dir=local_download_dir
-                    )
-
-                    if download_result["success"]:
-                        keyframe_dir = local_download_dir
-                        logger.info(f"[{stage_name}] MinIO目录下载成功: {download_result['total_files']} 个文件")
-                        execution_metadata['input_source'] = 'parameter_http_minio'
-                        # 注意：不修改原始的keyframe_dir，保持为HTTP URL
-                        # 下载后的本地路径将在output中记录
-                        execution_metadata['minio_download_result'] = {
-                            'total_files': download_result['total_files'],
-                            'downloaded_files_count': len(download_result['downloaded_files']),
-                            'downloaded_local_dir': keyframe_dir  # 在output中记录本地路径
-                        }
-                    else:
-                        raise RuntimeError(f"MinIO目录下载失败: {download_result.get('error', '未知错误')}")
-
-                except Exception as e:
-                    logger.error(f"[{stage_name}] MinIO目录下载过程出错: {e}")
-                    raise RuntimeError(f"无法从MinIO下载关键帧目录: {e}")
         else:
-             # 最后的尝试：检查前置阶段是否提供了MinIO URL (即使keyframe_dir本身可能为空)
-             # 这处理了 keyframe_dir 为空，但上游输出了 keyframe_minio_url 的情况
-             prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
-             if prev_stage and prev_stage.output:
-                 keyframe_minio_url = prev_stage.output.get("keyframe_minio_url")
-                 if keyframe_minio_url and download_from_minio:
-                    logger.info(f"[{stage_name}] 前置阶段提供了MinIO关键帧目录，将下载到本地")
-                    try:
-                        from services.common.minio_directory_download import download_keyframes_directory
-                        
-                        if not local_download_dir:
-                            local_download_dir = os.path.join(workflow_context.shared_storage_path, "downloaded_keyframes")
-                        
-                        minio_url = f"minio://yivideo/{keyframe_minio_url.split('/yivideo/')[-1]}" if 'yivideo' in keyframe_minio_url else keyframe_minio_url
-                        
-                        download_result = download_keyframes_directory(
-                            minio_url=minio_url,
-                            workflow_id=workflow_context.workflow_id,
-                            local_dir=local_download_dir
-                        )
-                        
-                        if download_result["success"]:
-                            keyframe_dir = local_download_dir
-                            execution_metadata['input_source'] = 'workflow_minio'
-                            execution_metadata['minio_download_result'] = {
-                                'total_files': download_result['total_files'],
-                                'downloaded_files_count': len(download_result['downloaded_files']),
-                                'downloaded_local_dir': keyframe_dir
-                            }
-                            logger.info(f"[{stage_name}] 工作流MinIO目录下载成功")
-                        else:
-                            logger.warning(f"[{stage_name}] 工作流MinIO目录下载失败")
-                    except Exception as e:
-                        logger.warning(f"[{stage_name}] 工作流MinIO目录下载过程出错: {e}")
+            # 情况2 & 3: 或者是MinIO/HTTP URL，或者是空值需要从上游获取
+            if not keyframe_dir:
+                 # 检查前置阶段是否提供了MinIO URL
+                 prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
+                 if prev_stage and prev_stage.output:
+                     keyframe_dir = prev_stage.output.get("keyframe_minio_url")
+            
+            if keyframe_dir:
+                # 统一处理URL格式 (支持http://, https://, minio://)
+                # [修复] 改进URL检测，支持更多主机名格式的MinIO URL
+                from services.common.minio_url_utils import is_minio_url, normalize_minio_url
+                import urllib.parse
+                
+                # 检查是否为HTTP/HTTPS URL或标准的MinIO URL
+                is_url = (keyframe_dir.startswith(('http://', 'https://')) or 
+                         keyframe_dir.startswith('minio://'))
+                
+                if is_url or is_minio_url(keyframe_dir):
+                    logger.info(f"[{stage_name}] 检测到URL格式的关键帧目录: {keyframe_dir}")
+                    
+                    # 如果是HTTP URL且未明确指定下载，先尝试验证是否为MinIO服务器
+                    if keyframe_dir.startswith(('http://', 'https://')) and not is_minio_url(keyframe_dir):
+                        parsed_url = urllib.parse.urlparse(keyframe_dir)
+                        # 检查URL路径是否包含MinIO的bucket结构
+                        path_parts = parsed_url.path.strip('/').split('/', 1)
+                        if len(path_parts) >= 1 and path_parts[0]:
+                            logger.info(f"[{stage_name}] 检测到HTTP URL，可能为MinIO服务器: {parsed_url.netloc}")
+                            # 将HTTP URL当作MinIO URL处理
+                            is_url = True
+                    
+                    if not download_from_minio and is_url:
+                        logger.warning(f"[{stage_name}] 检测到URL但未启用下载，将尝试验证URL有效性")
+                    elif is_url:
+                        # 执行URL下载（MinIO或HTTP）
+                        try:
+                            from services.common.minio_directory_download import download_keyframes_directory
+
+                            # 尝试统一规范化为minio://格式（即使原始是HTTP URL）
+                            try:
+                                minio_url = normalize_minio_url(keyframe_dir)
+                                logger.info(f"[{stage_name}] 规范化URL为MinIO格式: {minio_url}")
+                            except ValueError as e:
+                                # 如果规范化失败，保持原始URL
+                                minio_url = keyframe_dir
+                                logger.info(f"[{stage_name}] 保持原始URL格式: {minio_url}")
+
+                            # 如果没有指定本地下载目录，使用默认路径
+                            if not local_download_dir:
+                                local_download_dir = os.path.join(workflow_context.shared_storage_path, "downloaded_keyframes")
+
+                            logger.info(f"[{stage_name}] 开始从URL下载关键帧目录: {minio_url}")
+                            logger.info(f"[{stage_name}] 本地保存目录: {local_download_dir}")
+
+                            download_result = download_keyframes_directory(
+                                minio_url=minio_url,
+                                workflow_id=workflow_context.workflow_id,
+                                local_dir=local_download_dir,
+                                auto_decompress=auto_decompress
+                            )
+
+                            if download_result["success"]:
+                                keyframe_dir = local_download_dir
+                                logger.info(f"[{stage_name}] URL目录下载成功: {download_result['total_files']} 个文件")
+                                execution_metadata['input_source'] = 'url_download'
+                                execution_metadata['url_download_result'] = {
+                                    'total_files': download_result['total_files'],
+                                    'downloaded_files_count': len(download_result['downloaded_files']),
+                                    'downloaded_local_dir': keyframe_dir,
+                                    'original_url': keyframe_dir
+                                }
+                            else:
+                                raise RuntimeError(f"URL目录下载失败: {download_result.get('error', '未知错误')}")
+
+                        except Exception as e:
+                            logger.error(f"[{stage_name}] URL目录下载过程出错: {e}")
+                            raise RuntimeError(f"无法从URL下载关键帧目录: {e}")
 
         # 验证关键帧目录
         if not keyframe_dir or not os.path.isdir(keyframe_dir):
@@ -342,13 +299,18 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
         result_str = ""
         try:
             executor_script_path = os.path.join(os.path.dirname(__file__), "executor_area_detection.py")
-            keyframe_paths_json = json.dumps(keyframe_paths)
+            
+            # [修改] 使用临时文件传递路径列表，避免参数过长
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix='.json') as tmp_file:
+                json.dump(keyframe_paths, tmp_file)
+                paths_file_path = tmp_file.name
             
             command = [
                 sys.executable,
                 executor_script_path,
-                "--keyframe-paths-json",
-                keyframe_paths_json
+                "--keyframe-paths-file",
+                paths_file_path
             ]
             
             result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
@@ -399,6 +361,14 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
         
+        # [新增] 清理传递参数的临时文件
+        if paths_file_path and os.path.exists(paths_file_path):
+            try:
+                os.remove(paths_file_path)
+                # logger.info(f"[{stage_name}] 清理参数临时文件: {paths_file_path}")
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 清理参数临时文件失败: {e}")
+
         # 临时文件清理：下载的keyframes目录在字幕区域检测完成后删除
         if get_cleanup_temp_files_config():
             # 清理下载的目录
@@ -476,6 +446,13 @@ def create_stitched_images(self: Task, context: dict) -> dict:
             workflow_context,
             default=False
         )
+        
+        auto_decompress = get_param_with_fallback(
+            "auto_decompress",
+            resolved_params,
+            workflow_context,
+            default=True
+        )
 
         # 如果没有显式参数，只记录需要的参数到input_params
         if not recorded_input_params:
@@ -487,42 +464,62 @@ def create_stitched_images(self: Task, context: dict) -> dict:
         # [修复] 确保input_params只包含原始参数，不包含执行元数据
         workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
 
-        # [新增] MinIO下载逻辑
-        if input_dir_str and (input_dir_str.startswith("http://") or input_dir_str.startswith("https://") or input_dir_str.startswith("minio://")):
-            logger.info(f"[{stage_name}] 检测到输入路径为URL，尝试从MinIO下载目录: {input_dir_str}")
+        # [修复] MinIO/HTTP URL下载逻辑 - 支持HTTP URL检测和处理
+        from services.common.minio_url_utils import is_minio_url, normalize_minio_url
+        from services.common.minio_directory_download import is_archive_url
+        import urllib.parse
+
+        # 检查是否为HTTP/HTTPS URL或标准的MinIO URL
+        is_url = (input_dir_str and input_dir_str.startswith(('http://', 'https://'))) or \
+                 (input_dir_str and input_dir_str.startswith('minio://'))
+
+        if input_dir_str and (is_url or is_minio_url(input_dir_str)):
+            logger.info(f"[{stage_name}] 检测到输入路径为URL，尝试从远程下载目录: {input_dir_str}")
+
+            # [重要修复] 先检查原始URL是否为压缩包，避免URL规范化时丢失文件名
+            is_original_archive = is_archive_url(input_dir_str)
+            logger.info(f"[{stage_name}] 原始URL是否为压缩包: {is_original_archive}")
+
+            # 如果是HTTP URL且未明确是MinIO，尝试规范化
+            if input_dir_str.startswith(('http://', 'https://')) and not is_minio_url(input_dir_str):
+                parsed_url = urllib.parse.urlparse(input_dir_str)
+                # 检查URL路径是否包含MinIO的bucket结构
+                path_parts = parsed_url.path.strip('/').split('/', 1)
+                if len(path_parts) >= 1 and path_parts[0]:
+                    logger.info(f"[{stage_name}] 检测到HTTP URL，可能为MinIO服务器: {parsed_url.netloc}")
+
             # 创建一个临时目录用于存放下载的图片
             local_download_dir = os.path.join(workflow_context.shared_storage_path, f"downloaded_cropped_{int(time.time())}")
-            
-            # 处理HTTP格式的URL转换为minio://格式
-            minio_url = input_dir_str
-            if input_dir_str.startswith("http://") or input_dir_str.startswith("https://"):
+
+            # [重要修复] 如果原始URL是压缩包且启用了自动解压，直接使用原始URL
+            # 这样可以避免URL规范化过程中丢失文件名的问题
+            if is_original_archive and auto_decompress:
+                # 对于压缩包URL，使用原始URL（保留完整文件名）
+                download_url = input_dir_str
+                logger.info(f"[{stage_name}] 检测到压缩包URL，使用原始URL避免文件名丢失: {download_url}")
+            else:
+                # 对于普通目录URL，进行规范化处理
                 try:
-                    from urllib.parse import urlparse
-                    parsed_url = urlparse(input_dir_str)
-                    path_parts = parsed_url.path.strip('/').split('/', 1)  # 分割路径，取第一部分作为bucket
-                    if len(path_parts) < 2:
-                        raise ValueError(f"无法从HTTP URL中提取bucket和路径: {input_dir_str}")
+                    download_url = normalize_minio_url(input_dir_str)
+                    logger.info(f"[{stage_name}] 规范化URL为MinIO格式: {download_url}")
+                except ValueError as e:
+                    # 如果规范化失败，保持原始URL
+                    download_url = input_dir_str
+                    logger.info(f"[{stage_name}] 保持原始URL格式: {download_url}")
 
-                    bucket_name = path_parts[0]
-                    minio_path = path_parts[1] if len(path_parts) > 1 else ''
-                    minio_url = f"minio://{bucket_name}/{minio_path}"
-
-                    logger.info(f"[{stage_name}] HTTP URL转换: {input_dir_str} -> {minio_url}")
-                except Exception as e:
-                    logger.error(f"[{stage_name}] HTTP URL转换失败: {e}")
-                    raise ValueError(f"无法处理HTTP格式的MinIO URL: {input_dir_str}")
-            
             download_result = download_directory_from_minio(
-                minio_url=minio_url,
+                minio_url=download_url,
                 local_dir=local_download_dir,
-                create_structure=True
+                create_structure=True,
+                auto_decompress=auto_decompress
             )
-            
+
             if not download_result["success"]:
-                raise RuntimeError(f"从MinIO下载目录失败: {download_result.get('error')}")
-            
+                raise RuntimeError(f"从URL下载目录失败: {download_result.get('error')}")
+
             input_dir_str = local_download_dir
-            logger.info(f"[{stage_name}] MinIO目录下载成功，使用本地路径: {input_dir_str}")
+            logger.info(f"[{stage_name}] URL目录下载成功，使用本地路径: {input_dir_str}")
+            logger.info(f"[{stage_name}] 下载结果: {download_result.get('total_files', 0)} 个文件")
 
         if not input_dir_str or not Path(input_dir_str).is_dir():
             raise FileNotFoundError(f"输入目录不存在或无效: {input_dir_str}")
@@ -579,22 +576,74 @@ def create_stitched_images(self: Task, context: dict) -> dict:
             "manifest_path": str(output_root_dir / "multi_frames.json")
         }
 
-        # [新增] MinIO上传逻辑
+        # [优化] MinIO上传逻辑 - 使用压缩上传提高效率
         if upload_to_minio and os.path.exists(output_data["multi_frames_path"]):
             try:
-                logger.info(f"[{stage_name}] 开始上传拼接图片目录到MinIO...")
+                logger.info(f"[{stage_name}] 开始上传拼接图片目录到MinIO（压缩优化）...")
                 minio_base_path = f"{workflow_context.workflow_id}/stitched_images"
                 
-                upload_result = upload_directory_to_minio(
+                # [重要优化] 使用压缩上传替代逐个文件上传
+                from services.common.minio_directory_upload import upload_directory_compressed
+                
+                upload_result = upload_directory_compressed(
                     local_dir=output_data["multi_frames_path"],
                     minio_base_path=minio_base_path,
-                    delete_local=delete_local_images,
-                    preserve_structure=True
+                    file_pattern="*.jpg",  # 只压缩图片文件
+                    compression_format="zip",
+                    compression_level="default",
+                    delete_local=delete_local_images
                 )
                 
                 if upload_result["success"]:
-                    output_data["multi_frames_minio_url"] = upload_result["minio_base_url"]
-                    logger.info(f"[{stage_name}] 拼接图片上传成功: {upload_result['minio_base_url']}")
+                    # 返回压缩包的URL（而非目录URL）
+                    output_data["multi_frames_minio_url"] = upload_result["archive_url"]
+                    output_data["compression_info"] = upload_result.get("compression_info", {})
+                    output_data["stitched_images_count"] = upload_result.get("total_files", 0)
+                    
+                    compression_info = upload_result.get("compression_info", {})
+                    if compression_info:
+                        compression_ratio = compression_info.get("compression_ratio", 0)
+                        logger.info(f"[{stage_name}] 拼接图片压缩上传成功: {upload_result['archive_url']}")
+                        logger.info(f"[{stage_name}] 压缩统计: {compression_info.get('files_count', 0)} 个文件, "
+                                   f"压缩率 {compression_ratio:.1%}, "
+                                   f"原始大小 {compression_info.get('original_size', 0)/1024/1024:.1f}MB, "
+                                   f"压缩后 {compression_info.get('compressed_size', 0)/1024/1024:.1f}MB")
+                    else:
+                        logger.info(f"[{stage_name}] 拼接图片上传成功: {upload_result['archive_url']}")
+                    
+                    # [新增] 压缩包上传成功后清理本地文件
+                    try:
+                        logger.info(f"[{stage_name}] 开始清理本地临时文件...")
+                        
+                        # 1. 清理下载的压缩包和解压缩的图片目录
+                        if 'cropped_images_local_compression' in output_data and os.path.exists(output_data['cropped_images_local_compression']):
+                            shutil.rmtree(output_data['cropped_images_local_compression'])
+                            logger.info(f"[{stage_name}] 已清理下载压缩包目录: {output_data['cropped_images_local_compression']}")
+                        
+                        if 'cropped_images_local_dir' in output_data and os.path.exists(output_data['cropped_images_local_dir']):
+                            shutil.rmtree(output_data['cropped_images_local_dir'])
+                            logger.info(f"[{stage_name}] 已清理解压缩图片目录: {output_data['cropped_images_local_dir']}")
+                        
+                        # 2. 清理执行后合并图片的目录和压缩包文件
+                        # 注意：upload_directory_compressed 已经处理了 delete_local 参数
+                        # 这里主要是清理其他可能的临时文件
+                        
+                        if os.path.exists(output_data["multi_frames_path"]):
+                            # 如果 delete_local=False，这里需要手动清理
+                            if not delete_local_images:
+                                shutil.rmtree(output_data["multi_frames_path"])
+                                logger.info(f"[{stage_name}] 已清理拼接图片目录: {output_data['multi_frames_path']}")
+                        
+                        # 清理可能的临时压缩包文件（如果存在）
+                        # 注意：upload_directory_compressed 会自动处理这个
+                        
+                        logger.info(f"[{stage_name}] 本地文件清理完成")
+                        
+                    except Exception as cleanup_error:
+                        logger.warning(f"[{stage_name}] 清理本地文件时出现警告: {cleanup_error}")
+                        # 不将清理错误标记为失败，只记录警告
+                        output_data["local_cleanup_warning"] = str(cleanup_error)
+                    
                 else:
                     output_data["multi_frames_upload_error"] = upload_result.get("error")
                     logger.warning(f"[{stage_name}] 拼接图片上传失败: {upload_result.get('error')}")
@@ -662,7 +711,19 @@ def create_stitched_images(self: Task, context: dict) -> dict:
 @celery_app.task(bind=True, name='paddleocr.perform_ocr')
 @gpu_lock()  # 使用配置化的GPU锁，支持运行时参数调整
 def perform_ocr(self: Task, context: dict) -> dict:
-    """[工作流任务] 调用外部脚本对拼接好的图片执行OCR。"""
+    """[工作流任务] 调用外部脚本对拼接好的图片执行OCR。
+
+    支持单步任务模式：
+    - 可通过 manifest_path 和 multi_frames_path 参数直接传入
+    - 支持 ${{...}} 格式的动态引用
+    - 自动上传OCR结果到MinIO
+    
+    新增参数：
+    - manifest_path: 拼接图像的清单文件路径
+    - multi_frames_path: 拼接图像的目录路径
+    - upload_ocr_results_to_minio: 是否上传OCR结果到MinIO (默认true)
+    - delete_local_ocr_results_after_upload: 上传后是否删除本地OCR结果 (默认false)
+    """
     start_time = time.time()
     workflow_context = WorkflowContext(**context)
     stage_name = self.name
@@ -671,6 +732,12 @@ def perform_ocr(self: Task, context: dict) -> dict:
     
     manifest_path = None  # 用于清理的变量
     multi_frames_path = None  # 用于清理的变量
+    ocr_results_path = None  # 用于清理的变量
+    # [新增] 远程URL下载后的临时目录
+    local_manifest_path = None
+    local_multi_frames_path = None
+    manifest_download_dir = None
+    multi_frames_download_dir = None
     try:
         # --- Parameter Resolution ---
         resolved_params = {}
@@ -686,17 +753,7 @@ def perform_ocr(self: Task, context: dict) -> dict:
         # [修复] 记录实际使用的输入参数到input_params
         recorded_input_params = resolved_params.copy() if resolved_params else {}
         
-        # 如果没有显式参数，只记录需要的参数到input_params
-        if not recorded_input_params:
-            prev_stage = workflow_context.stages.get('ffmpeg.extract_keyframes')
-            if prev_stage:
-                keyframe_dir = prev_stage.output.get("keyframe_dir") if prev_stage.output else None
-                if keyframe_dir:
-                    recorded_input_params['keyframe_dir'] = keyframe_dir
-        
-        # [修复] 确保input_params只包含原始参数，不包含执行元数据
-        workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
-
+        # 1. 获取输入路径和字幕区域（使用统一参数获取机制）
         manifest_path = get_param_with_fallback(
             "manifest_path",
             resolved_params,
@@ -711,10 +768,105 @@ def perform_ocr(self: Task, context: dict) -> dict:
             fallback_from_stage="paddleocr.create_stitched_images"
         )
 
-        if not manifest_path or not os.path.exists(manifest_path):
+        # [新增] 获取MinIO上传配置
+        upload_to_minio = get_param_with_fallback(
+            "upload_ocr_results_to_minio",
+            resolved_params,
+            workflow_context,
+            default=True
+        )
+        delete_local_results = get_param_with_fallback(
+            "delete_local_ocr_results_after_upload",
+            resolved_params,
+            workflow_context,
+            default=False
+        )
+
+        # 如果没有显式参数，只记录需要的参数到input_params
+        if not recorded_input_params:
+            if manifest_path:
+                recorded_input_params['manifest_path'] = manifest_path
+            if multi_frames_path:
+                recorded_input_params['multi_frames_path'] = multi_frames_path
+        
+        # [修复] 确保input_params只包含原始参数，不包含执行元数据
+        workflow_context.stages[stage_name].input_params = recorded_input_params.copy()
+
+        # [修复] HTTP/MinIO URL检测和下载逻辑 - 支持HTTP URL
+        from services.common.minio_url_utils import is_minio_url, normalize_minio_url
+        import urllib.parse
+
+        # 处理manifest_path：如果是HTTP/MinIO URL则下载
+        manifest_is_url = (manifest_path and manifest_path.startswith(('http://', 'https://'))) or \
+                         (manifest_path and manifest_path.startswith('minio://'))
+        if manifest_path and (manifest_is_url or is_minio_url(manifest_path)):
+            logger.info(f"[{stage_name}] 检测到manifest_path为URL，尝试下载: {manifest_path}")
+            manifest_download_dir = os.path.join(workflow_context.shared_storage_path, f"download_manifest_{int(time.time())}")
+
+            # 统一处理manifest_path的URL格式
+            try:
+                minio_url = normalize_minio_url(manifest_path)
+                logger.info(f"[{stage_name}] 规范化manifest URL为MinIO格式: {minio_url}")
+            except ValueError as e:
+                # 如果规范化失败，保持原始URL
+                minio_url = manifest_path
+                logger.info(f"[{stage_name}] 保持原始manifest URL格式: {minio_url}")
+
+            # 下载manifest文件
+            file_service = get_file_service()
+            os.makedirs(manifest_download_dir, exist_ok=True)
+            try:
+                local_manifest_path = file_service.resolve_and_download(minio_url, manifest_download_dir)
+                logger.info(f"[{stage_name}] manifest文件下载成功: {local_manifest_path}")
+            except Exception as e:
+                raise RuntimeError(f"从URL下载manifest文件失败: {minio_url}, error: {e}")
+        else:
+            # 本地路径，直接使用
+            local_manifest_path = manifest_path
+
+        # 处理multi_frames_path：如果是HTTP/MinIO URL则下载
+        multi_frames_is_url = (multi_frames_path and multi_frames_path.startswith(('http://', 'https://'))) or \
+                             (multi_frames_path and multi_frames_path.startswith('minio://'))
+        if multi_frames_path and (multi_frames_is_url or is_minio_url(multi_frames_path)):
+            logger.info(f"[{stage_name}] 检测到multi_frames_path为URL，尝试下载目录: {multi_frames_path}")
+
+            # 统一处理multi_frames_path的URL格式
+            try:
+                minio_url = normalize_minio_url(multi_frames_path)
+                logger.info(f"[{stage_name}] 规范化multi_frames URL为MinIO格式: {minio_url}")
+            except ValueError as e:
+                # 如果规范化失败，保持原始URL
+                minio_url = multi_frames_path
+                logger.info(f"[{stage_name}] 保持原始multi_frames URL格式: {minio_url}")
+
+            multi_frames_download_dir = os.path.join(workflow_context.shared_storage_path, f"download_multi_frames_{int(time.time())}")
+
+            # 下载目录
+            download_result = download_directory_from_minio(
+                minio_url=minio_url,
+                local_dir=multi_frames_download_dir,
+                create_structure=True,
+                auto_decompress=True  # OCR任务也支持压缩包
+            )
+
+            if not download_result["success"]:
+                raise RuntimeError(f"从URL下载目录失败: {download_result.get('error')}")
+
+            local_multi_frames_path = multi_frames_download_dir
+            logger.info(f"[{stage_name}] 目录下载成功，使用本地路径: {local_multi_frames_path}")
+        else:
+            # 本地路径，直接使用
+            local_multi_frames_path = multi_frames_path
+
+        # 验证本地路径
+        if not local_manifest_path or not os.path.exists(local_manifest_path):
             raise ValueError(f"上下文中缺少或无效的 'manifest_path' 信息: {manifest_path}")
-        if not multi_frames_path or not os.path.isdir(multi_frames_path):
+        if not local_multi_frames_path or not os.path.isdir(local_multi_frames_path):
             raise ValueError(f"上下文中缺少或无效的 'multi_frames_path' 信息: {multi_frames_path}")
+
+        # 使用本地路径进行后续处理
+        manifest_path = local_manifest_path
+        multi_frames_path = local_multi_frames_path
 
         # [新增] 记录GPU锁和设备信息
         logger.info(f"[{stage_name}] ========== OCR任务设备信息 ==========")
@@ -768,7 +920,30 @@ def perform_ocr(self: Task, context: dict) -> dict:
             json.dump(ocr_results, f, ensure_ascii=False)
         # logger.info(f"[{stage_name}] OCR结果已保存到文件: {ocr_results_path}")
 
+        # 构造基础输出数据
         output_data = {"ocr_results_path": ocr_results_path}
+
+        # [新增] MinIO上传逻辑 - 上传OCR结果JSON文件
+        if upload_to_minio and ocr_results_path and os.path.exists(ocr_results_path):
+            try:
+                logger.info(f"[{stage_name}] 开始上传OCR结果JSON文件到MinIO...")
+                file_service = get_file_service()
+                
+                # 构建OCR结果文件在MinIO中的路径
+                minio_ocr_path = f"{workflow_context.workflow_id}/ocr_results/ocr_results.json"
+                
+                ocr_minio_url = file_service.upload_to_minio(
+                    local_file_path=ocr_results_path,
+                    object_name=minio_ocr_path
+                )
+                
+                output_data["ocr_results_minio_url"] = ocr_minio_url
+                logger.info(f"[{stage_name}] OCR结果文件上传成功: {ocr_minio_url}")
+                
+            except Exception as e:
+                logger.warning(f"[{stage_name}] OCR结果文件上传失败: {e}", exc_info=True)
+                output_data["ocr_results_upload_error"] = str(e)
+
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
 
@@ -780,8 +955,23 @@ def perform_ocr(self: Task, context: dict) -> dict:
     finally:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
-        
-        # 临时文件清理：multi_frames 目录和 manifest 文件在OCR完成后删除
+
+        # [新增] 清理下载的临时目录
+        if get_cleanup_temp_files_config():
+            try:
+                # 清理manifest下载目录
+                if manifest_download_dir and os.path.exists(manifest_download_dir):
+                    shutil.rmtree(manifest_download_dir)
+                    logger.info(f"[{stage_name}] 清理manifest下载目录: {manifest_download_dir}")
+
+                # 清理multi_frames下载目录
+                if multi_frames_download_dir and os.path.exists(multi_frames_download_dir):
+                    shutil.rmtree(multi_frames_download_dir)
+                    logger.info(f"[{stage_name}] 清理multi_frames下载目录: {multi_frames_download_dir}")
+            except Exception as e:
+                logger.warning(f"[{stage_name}] 清理下载目录失败: {e}")
+
+        # 临时文件清理：multi_frames 目录、manifest 文件和OCR结果文件在完成后删除
         if get_cleanup_temp_files_config():
             try:
                 # 删除 multi_frames 目录
@@ -793,6 +983,15 @@ def perform_ocr(self: Task, context: dict) -> dict:
                 if manifest_path and os.path.exists(manifest_path):
                     os.remove(manifest_path)
                     # logger.info(f"[{stage_name}] 清理临时清单文件: {manifest_path}")
+
+                # 删除 OCR 结果文件（如果未上传到MinIO或上传后删除了本地文件）
+                should_clean_ocr_results = True
+                if upload_to_minio and not delete_local_results:
+                    should_clean_ocr_results = False
+                
+                if should_clean_ocr_results and ocr_results_path and os.path.exists(ocr_results_path):
+                    os.remove(ocr_results_path)
+                    # logger.info(f"[{stage_name}] 清理临时OCR结果文件: {ocr_results_path}")
 
                 # 删除整个 cropped_images 目录（现在应该只剩空目录或其他临时文件）
                 if multi_frames_path:
