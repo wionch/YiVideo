@@ -24,7 +24,7 @@ from services.common.config_loader import CONFIG
 
 # 导入GPU锁装饰器
 from services.common.locks import gpu_lock
-from services.common.parameter_resolver import resolve_parameters
+from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
 from services.common.file_service import get_file_service
 
 logger = get_logger('tasks')
@@ -476,17 +476,17 @@ def transcribe_audio(self, context: dict) -> dict:
         # --- 文件下载准备 ---
         file_service = get_file_service()
         
-        # 优先从 resolved_params 获取参数
-        audio_path = resolved_params.get('audio_path')
-        audio_source = "节点参数传入"
-
-        if not audio_path:
-            # 其次从 input_data 中直接获取音频路径（单任务模式）
-            audio_path = workflow_context.input_params.get('input_data', {}).get('audio_path')
-            audio_source = "直接参数传入(input_data)"
-
+        # 使用统一的参数获取逻辑
+        audio_path = get_param_with_fallback(
+            'audio_path',
+            resolved_params,
+            workflow_context,
+            fallback_from_input_data=True
+        )
+        
         if audio_path:
-            logger.info(f"[{stage_name}] 从输入参数获取音频文件: {audio_path}")
+            audio_source = "统一参数获取"
+            logger.info(f"[{stage_name}] 统一参数获取成功: {audio_path}")
         else:
             # 兼容传统工作流模式：从 stages 中获取前序阶段输出
             logger.info(f"[{stage_name}] ========== 音频源选择逻辑 ==========")

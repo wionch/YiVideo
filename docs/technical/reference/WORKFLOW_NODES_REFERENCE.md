@@ -81,19 +81,19 @@ YiVideo系统支持**单任务模式**和**传统工作流模式**两种调用�
 
 #### 音频相关任务的优先级（以 `faster_whisper.transcribe_audio` 为例）：
 
-1. **input\_data.audio\_path** （单任务模式优先）
-2. **audio\_separator.separate\_vocals 输出** （传统工作流模式）
-3. **ffmpeg.extract\_audio 输出** （传统工作流模式）
+1. **input_data.audio_path** （单任务模式优先）
+2. **audio_separator.separate_vocals 输出** （传统工作流模式）
+3. **ffmpeg.extract_audio 输出** （传统工作流模式）
 
 #### 视频相关任务的优先级（以 `paddleocr.detect_subtitle_area` 为例）：
 
-1. **input\_data.video\_path** （单任务模式优先）
-2. **全局 video\_path** 参数 （传统工作流模式）
+1. **input_data.video_path** （单任务模式优先）
+2. **全局 video_path** 参数 （传统工作流模式）
 
 #### 字幕相关任务的优先级（以 `wservice.generate_subtitle_files` 为例）：
 
-1. **节点参数 segments\_file** （显式指定）
-2. **faster\_whisper.transcribe\_audio 输出** （智能检测）
+1. **节点参数 segments_file** （显式指定）
+2. **faster_whisper.transcribe_audio 输出** （智能检测）
 
 > **重要提示**: 单任务模式优先从 `input_data` 获取参数，确保在调用单任务接口时需要明确提供所有必需的输入参数。
 
@@ -210,7 +210,7 @@ def task_name(self: Task, context: dict) -> dict:
 
 FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取、音频提取、字幕区域裁剪和音频分割。
 
-### 1. ffmpeg.extract\_keyframes
+### 1. ffmpeg.extract_keyframes
 
 从视频中抽取若干关键帧图片，为后续的字幕区域检测提供素材。
 
@@ -255,6 +255,35 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 **依赖关系**：无
 
+**单任务模式支持**：
+
+**输入参数**:
+- `video_path` (string, 必需): 视频文件路径，支持 `${{...}}` 动态引用
+- `keyframe_sample_count` (int, 可选): 抽取帧数，默认100
+- `upload_keyframes_to_minio` (bool, 可选): 是否上传关键帧到MinIO，默认false
+- `delete_local_keyframes_after_upload` (bool, 可选): 上传后是否删除本地关键帧，默认false
+- `compress_keyframes_before_upload` (bool, 可选): 是否在上传前压缩目录，默认false
+- `keyframe_compression_format` (string, 可选): 压缩格式，默认"zip"
+- `keyframe_compression_level` (string, 可选): 压缩级别，默认"default"
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "ffmpeg.extract_keyframes",
+    "input_data": {
+        "video_path": "https://minio.example.com/yivideo/video.mp4",
+        "keyframe_sample_count": 50,
+        "upload_keyframes_to_minio": true,
+        "compress_keyframes_before_upload": true
+    }
+}
+```
+
+**参数来源说明**:
+- `video_path`: **节点参数** (在请求体中的 `ffmpeg.extract_keyframes` 对象内提供)
+- `keyframe_sample_count`: **节点参数** (在请求体中的 `ffmpeg.extract_keyframes` 对象内提供)
+- 其他上传相关参数均为节点参数，可选配置
+
 **注意事项**：
 
 * 抽取的帧为随机分布，不是均匀分布
@@ -265,7 +294,7 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 ***
 
-### 2. ffmpeg.extract\_audio
+### 2. ffmpeg.extract_audio
 
 从视频中提取音频文件，转换为适合语音识别的格式。
 
@@ -309,6 +338,24 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 * 超时：1800秒
 
+**单任务模式支持**：
+
+**输入参数**:
+- `video_path` (string, 必需): 视频文件路径，支持 `${{...}}` 动态引用
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "ffmpeg.extract_audio",
+    "input_data": {
+        "video_path": "https://minio.example.com/yivideo/video.mp4"
+    }
+}
+```
+
+**参数来源说明**:
+- `video_path`: **节点参数** (在请求体中的 `ffmpeg.extract_audio` 对象内提供)
+
 **注意事项**：
 
 * 自动覆盖已存在的音频文件
@@ -319,7 +366,7 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 ***
 
-### 3. ffmpeg.crop\_subtitle\_images
+### 3. ffmpeg.crop_subtitle_images
 
 根据检测到的字幕区域，从视频中并发裁剪字幕条图片。
 
@@ -337,6 +384,12 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 * `delete_local_cropped_images_after_upload` (bool, 节点可选): 上传成功后是否删除本地裁剪图片，默认 false。此参数仅在 `upload_cropped_images_to_minio=true` 时生效。
 
+* `compress_directory_before_upload` (bool, 节点可选): 是否在上传前压缩目录，默认 false。启用后可显著减少上传时间和存储空间。
+
+* `compression_format` (string, 节点可选): 压缩格式，支持 "zip"、"tar.gz" 等，默认 "zip"。
+
+* `compression_level` (string, 节点可选): 压缩级别，可选 "fast"、"default"、"maximum"，默认 "default"。
+
 **配置来源说明**：
 
 * `video_path`: **全局参数** (在API请求的顶层 `video_path` 字段提供)
@@ -348,6 +401,12 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 * `upload_cropped_images_to_minio`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供)
 
 * `delete_local_cropped_images_after_upload`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供，仅在上传启用时生效)
+
+* `compress_directory_before_upload`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供，仅在上传启用时生效)
+
+* `compression_format`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供，压缩上传时使用)
+
+* `compression_level`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供，压缩上传时使用)
 
 **智能参数选择**：
 
@@ -377,6 +436,17 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 * `cropped_images_files_count`: 裁剪图片文件数量
 
 * `cropped_images_uploaded_files`: 已上传到MinIO的文件列表（仅当启用上传时）
+
+* `compressed_archive_url`: 压缩包在MinIO中的URL（仅当启用压缩上传时）
+
+* `compression_info`: 压缩信息对象（仅当启用压缩上传时），包含：
+  * `original_size`: 原始大小（字节）
+  * `compressed_size`: 压缩后大小（字节）
+  * `compression_ratio`: 压缩率
+  * `files_count`: 压缩的文件数量
+  * `compression_time`: 压缩耗时（秒）
+  * `checksum`: 压缩包校验和
+  * `format`: 使用的压缩格式
 
 **使用示例**：
 
@@ -434,7 +504,30 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 }
 ```
 
-**示例4：动态引用字幕区域**
+**示例4：启用压缩上传功能**
+
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_keyframes",
+      "paddleocr.detect_subtitle_area",
+      "ffmpeg.crop_subtitle_images"
+    ]
+  },
+  "ffmpeg.crop_subtitle_images": {
+    "subtitle_area": [0, 918, 1920, 1080],
+    "decode_processes": 8,
+    "upload_cropped_images_to_minio": true,
+    "compress_directory_before_upload": true,
+    "compression_format": "zip",
+    "compression_level": "maximum",
+    "delete_local_cropped_images_after_upload": true
+  }
+}
+```
+
+**示例5：动态引用字幕区域**
 
 ```json
 {
@@ -462,15 +555,60 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 * 灵活的删除控制：通过 `delete_local_cropped_images_after_upload` 参数控制
 
+* **压缩上传功能**：支持目录压缩上传，显著减少上传时间和存储空间
+
+* **智能回退机制**：压缩上传失败时自动回退到非压缩模式
+
 * 并发解码处理，提高处理速度
 
 * GPU 加速（使用 GPU 锁保护）
 
 * 超时保护：1800秒
 
+**单任务模式支持**：
+
+**输入参数**:
+- `video_path` (string, 必需): 视频文件路径，支持 `${{...}}` 动态引用
+- `subtitle_area` (array, 可选): 字幕区域坐标，格式为 `[x1, y1, x2, y2]`，支持 `${{...}}` 动态引用
+- `decode_processes` (int, 可选): 解码进程数，默认10
+- `upload_cropped_images_to_minio` (bool, 可选): 是否将裁剪的图片上传到MinIO，默认false
+- `delete_local_cropped_images_after_upload` (bool, 可选): 上传成功后是否删除本地裁剪图片，默认false
+- `compress_directory_before_upload` (bool, 可选): 是否在上传前压缩目录，默认false
+- `compression_format` (string, 可选): 压缩格式，默认"zip"
+- `compression_level` (string, 可选): 压缩级别，默认"default"
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "ffmpeg.crop_subtitle_images",
+    "input_data": {
+        "video_path": "https://minio.example.com/yivideo/video.mp4",
+        "subtitle_area": [0, 918, 1920, 1080],
+        "decode_processes": 8,
+        "upload_cropped_images_to_minio": true,
+        "compress_directory_before_upload": true
+    }
+}
+```
+
+**参数来源说明**:
+- `video_path`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供)
+- `subtitle_area`: **节点参数** (在请求体中的 `ffmpeg.crop_subtitle_images` 对象内提供)
+- 其他参数均为节点参数，可选配置
+
+**压缩上传优势**：
+
+* 减少网络传输量，提高上传速度
+
+* 节省MinIO存储空间
+
+* 支持多种压缩格式和压缩级别
+
+* 提供详细的压缩统计信息
+
 ***
 
-### 4. ffmpeg.split\_audio\_segments
+### 4. ffmpeg.split_audio_segments
 
 根据字幕文件的时间戳数据分割音频片段，支持按说话人分组。
 
@@ -596,6 +734,40 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 * 字幕源：`wservice.generate_subtitle_files`
 
+**单任务模式支持**：
+
+**输入参数**:
+- `audio_path` (string, 可选): 指定音频文件路径，支持 `${{...}}` 动态引用
+- `subtitle_path` (string, 可选): 指定字幕文件路径，支持 `${{...}}` 动态引用
+- `output_format` (string, 可选): 输出格式，默认"wav"
+- `sample_rate` (int, 可选): 采样率，默认16000
+- `channels` (int, 可选): 声道数，默认1
+- `min_segment_duration` (float, 可选): 最小片段时长，默认1.0秒
+- `max_segment_duration` (float, 可选): 最大片段时长，默认30.0秒
+- `group_by_speaker` (bool, 可选): 按说话人分组，默认false
+- `include_silence` (bool, 可选): 包含静音片段，默认false
+- `enable_concurrent` (bool, 可选): 启用并发分割，默认true
+- `max_workers` (int, 可选): 最大工作线程数，默认8
+- `concurrent_timeout` (int, 可选): 并发超时时间，默认600秒
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "ffmpeg.split_audio_segments",
+    "input_data": {
+        "audio_path": "/share/audio/sample.wav",
+        "subtitle_path": "/share/subtitles/sample.srt",
+        "output_format": "wav",
+        "group_by_speaker": true,
+        "min_segment_duration": 2.0,
+        "max_workers": 6
+    }
+}
+```
+
+**参数来源说明**:
+- 所有列出的参数均为 **节点参数**，在请求体中的 `ffmpeg.split_audio_segments` 对象内提供
+
 **特性**：
 
 * 智能源选择，自动从工作流上下文获取最佳输入
@@ -614,7 +786,7 @@ FFmpeg 服务提供视频和音频的基础处理功能，包括关键帧提取�
 
 Faster-Whisper 服务是一个纯粹的音频转录服务，提供基于 faster-whisper 模型的语音识别功能，支持多语言和词级时间戳。
 
-### 1. faster\_whisper.transcribe\_audio
+### 1. faster_whisper.transcribe_audio
 
 对音频进行语音转录，生成包含词级时间戳的详细转录数据。
 
@@ -744,6 +916,25 @@ faster_whisper_service:
 
 * 语音活动检测过滤
 
+**单任务模式支持**：
+
+**输入参数**:
+- `audio_path` (string, 可选): 指定音频文件路径，以覆盖智能音频源选择逻辑，支持 `${{...}}` 动态引用
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "faster_whisper.transcribe_audio",
+    "input_data": {
+        "audio_path": "/share/audio/sample.wav"
+    }
+}
+```
+
+**参数来源说明**:
+- `audio_path`: **节点参数** (在请求体中的 `faster_whisper.transcribe_audio` 对象内提供)
+- 其他模型参数（如模型大小、语言、解码选项）均为全局配置，请在 `config.yml` 中设置
+
 **模型选择建议**：
 
 * `tiny`: 最快速度，精度较低，适合实时应用
@@ -762,7 +953,7 @@ faster_whisper_service:
 
 Audio Separator 服务提供基于 UVR-MDX 模型的专业音频分离功能，支持人声与伴奏的高质量分离。
 
-### 1. audio\_separator.separate\_vocals
+### 1. audio_separator.separate_vocals
 
 分离音频中的人声和背景音，支持多种模型和质量模式。
 
@@ -772,7 +963,7 @@ Audio Separator 服务提供基于 UVR-MDX 模型的专业音频分离功能，�
 
 * `audio_path` (string, 节点可选): 指定音频文件路径，以覆盖智能音频源选择逻辑。
 
-* `model_name` (string, 节点可选): 指定要使用的分离模型名称，如 "UVR-MDX-NET-Inst\_HQ\_3"。如果未提供，则根据 `quality_mode` 从全局配置中选择默认模型。
+* `model_name` (string, 节点可选): 指定要使用的分离模型名称，如 "UVR-MDX-NET-Inst_HQ_3"。如果未提供，则根据 `quality_mode` 从全局配置中选择默认模型。
 
 * `quality_mode` (string, 节点可选): 质量模式，会影响默认模型的选择。可选值: `"fast"`, `"default"`, `"high_quality"`。
 
@@ -886,6 +1077,29 @@ audio_separator_service:
 
 * 高质量 FLAC 输出
 
+**单任务模式支持**：
+
+**输入参数**:
+- `audio_path` (string, 可选): 指定音频文件路径，以覆盖智能音频源选择逻辑
+- `model_name` (string, 可选): 指定要使用的分离模型名称
+- `quality_mode` (string, 可选): 质量模式，可选值: `"fast"`, `"default"`, `"high_quality"`
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "audio_separator.separate_vocals",
+    "input_data": {
+        "audio_path": "/share/audio/sample.wav",
+        "quality_mode": "high_quality",
+        "model_name": "UVR-MDX-NET-Inst_HQ_3"
+    }
+}
+```
+
+**参数来源说明**:
+- `audio_path`, `model_name`, `quality_mode`: **节点参数** (在请求体中的 `audio_separator.separate_vocals` 对象内提供)
+- 其他分离参数（如输出格式、采样率、标准化等）均为全局配置，请在 `config.yml` 中修改
+
 **注意事项**：
 
 * 处理时间较长，特别是高质量模式
@@ -900,7 +1114,7 @@ audio_separator_service:
 
 Pyannote Audio 服务提供基于 pyannote-audio 模型的专业说话人分离功能，支持多人对话场景的说话人识别和时间分割。
 
-### 1. pyannote\_audio.diarize\_speakers
+### 1. pyannote_audio.diarize_speakers
 
 对音频进行说话人分离，识别不同说话人及其时间区间。
 
@@ -1037,6 +1251,25 @@ pyannote_audio_service:
 
 * 处理时间与音频长度和说话人数量相关
 
+**单任务模式支持**：
+
+**输入参数**:
+- `audio_path` (string, 可选): 指定音频文件路径，以覆盖智能音频源选择逻辑
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "pyannote_audio.diarize_speakers",
+    "input_data": {
+        "audio_path": "/share/audio/sample.wav"
+    }
+}
+```
+
+**参数来源说明**:
+- `audio_path`: **节点参数** (在请求体中的 `pyannote_audio.diarize_speakers` 对象内提供)
+- Hugging Face Token和说话人分离相关的参数（如num_speakers）均为全局配置，请在config.yml中设置
+
 **最佳实践**：
 
 * 对于清晰的人声推荐使用 `audio_separator.separate_vocals` 的输出
@@ -1047,11 +1280,291 @@ pyannote_audio_service:
 
 ***
 
+### 2. pyannote_audio.get_speaker_segments
+
+获取指定说话人的片段，支持按说话人过滤和统计分析。
+
+**功能描述**：从说话人分离结果中提取指定说话人的片段，提供片段级的分析和过滤功能。
+
+**输入参数**：
+
+* `diarization_file` (string, 必需): 说话人分离结果文件路径，必须是从 `pyannote_audio.diarize_speakers` 输出的 `diarization_file`。
+
+* `speaker` (string, 可选): 指定要获取的说话人标签，如 "SPEAKER_00"。如果未指定，将返回所有说话人的统计信息。
+
+**配置来源说明**：
+
+* `diarization_file`, `speaker`: **节点参数** (在请求体中的 `pyannote_audio.get_speaker_segments` 对象内提供)。
+
+**前置依赖**：
+
+* `pyannote_audio.diarize_speakers` (必需)
+
+**输出格式**：
+
+```json
+{
+  "success": true,
+  "data": {
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 5.2,
+        "speaker": "SPEAKER_00",
+        "duration": 5.2
+      },
+      {
+        "start": 8.5,
+        "end": 12.3,
+        "speaker": "SPEAKER_00",
+        "duration": 3.8
+      }
+    ],
+    "summary": "说话人 SPEAKER_00 的片段: 2 个"
+  }
+}
+```
+
+**使用示例**：
+
+**示例1：获取指定说话人的片段**：
+
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "pyannote_audio.diarize_speakers",
+      "pyannote_audio.get_speaker_segments"
+    ]
+  },
+  "pyannote_audio.get_speaker_segments": {
+    "diarization_file": "${{ stages.pyannote_audio.diarize_speakers.output.diarization_file }}",
+    "speaker": "SPEAKER_00"
+  }
+}
+```
+
+**示例2：获取所有说话人统计**：
+
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "pyannote_audio.diarize_speakers",
+      "pyannote_audio.get_speaker_segments"
+    ]
+  },
+  "pyannote_audio.get_speaker_segments": {
+    "diarization_file": "${{ stages.pyannote_audio.diarize_speakers.output.diarization_file }}"
+  }
+}
+```
+
+**示例3：单任务模式**：
+
+```json
+{
+  "task_name": "pyannote_audio.get_speaker_segments",
+  "input_data": {
+    "pyannote_audio.get_speaker_segments": {
+      "diarization_file": "/share/workflows/workflow123/diarization/diarization_result.json",
+      "speaker": "SPEAKER_01"
+    }
+  }
+}
+```
+
+**依赖关系**：
+
+* 必需：`pyannote_audio.diarize_speakers`
+
+**技术特性**：
+
+* 支持按说话人标签过滤片段
+
+* 提供片段统计信息
+
+* 保持与原始说话人分离结果的数据格式兼容
+
+* 支持动态参数引用
+
+**单任务模式支持**：
+
+**输入参数**:
+- `diarization_file` (string, 必需): 说话人分离结果文件路径
+- `speaker` (string, 可选): 指定要获取的说话人标签
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "pyannote_audio.get_speaker_segments",
+    "input_data": {
+        "diarization_file": "/share/diarization/result.json",
+        "speaker": "SPEAKER_00"
+    }
+}
+```
+
+**参数来源说明**:
+- `diarization_file`, `speaker`: **节点参数** (在请求体中的 `pyannote_audio.get_speaker_segments` 对象内提供)
+
+**注意事项**：
+
+* `diarization_file` 必须是从 `pyannote_audio.diarize_speakers` 输出的有效文件路径
+
+* 如果指定的 `speaker` 不存在，将返回空结果
+
+* 时间戳格式与输入文件保持一致
+
+***
+
+### 3. pyannote_audio.validate_diarization
+
+验证说话人分离结果的质量，提供详细的质量评估报告。
+
+**功能描述**：对说话人分离结果进行全面的质量检查，包括片段时长分析、说话人数量验证、分布合理性检查等，生成详细的质量评估报告。
+
+**输入参数**：
+
+* `diarization_file` (string, 必需): 说话人分离结果文件路径，必须是从 `pyannote_audio.diarize_speakers` 输出的 `diarization_file`。
+
+**配置来源说明**：
+
+* `diarization_file`: **节点参数** (在请求体中的 `pyannote_audio.validate_diarization` 对象内提供)。
+
+**前置依赖**：
+
+* `pyannote_audio.diarize_speakers` (必需)
+
+**输出格式**：
+
+```json
+{
+  "success": true,
+  "data": {
+    "validation": {
+      "valid": true,
+      "total_segments": 148,
+      "total_speakers": 2,
+      "total_duration": 280.5,
+      "avg_segment_duration": 1.9,
+      "issues": []
+    },
+    "summary": "说话人分离结果有效"
+  }
+}
+```
+
+**输出字段说明**：
+
+* `valid`: 验证结果是否通过
+
+* `total_segments`: 总片段数
+
+* `total_speakers`: 检测到的说话人数量
+
+* `total_duration`: 总时长
+
+* `avg_segment_duration`: 平均片段时长
+
+* `issues`: 发现的问题列表
+
+**质量检查项目**：
+
+1. **片段时长检查**：
+   - 片段过短（<0.5秒）将被标记为问题
+   - 片段过长（>30秒）将被标记为问题
+
+2. **说话人数量检查**：
+   - 检测到0个说话人将被标记为问题
+   - 检测到过多说话人（>10个）将被标记为潜在问题
+
+3. **数据完整性检查**：
+   - 检查片段分布是否完整
+   - 验证时间连续性
+
+**使用示例**：
+
+**示例1：工作流模式**：
+
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "ffmpeg.extract_audio",
+      "pyannote_audio.diarize_speakers",
+      "pyannote_audio.validate_diarization"
+    ]
+  },
+  "pyannote_audio.validate_diarization": {
+    "diarization_file": "${{ stages.pyannote_audio.diarize_speakers.output.diarization_file }}"
+  }
+}
+```
+
+**示例2：单任务模式**：
+
+```json
+{
+  "task_name": "pyannote_audio.validate_diarization",
+  "input_data": {
+    "pyannote_audio.validate_diarization": {
+      "diarization_file": "/share/workflows/workflow123/diarization/diarization_result.json"
+    }
+  }
+}
+```
+
+**依赖关系**：
+
+* 必需：`pyannote_audio.diarize_speakers`
+
+**技术特性**：
+
+* 全面的质量评估算法
+
+* 详细的问题诊断报告
+
+* 支持动态参数引用
+
+* 提供修复建议
+
+**单任务模式支持**：
+
+**输入参数**:
+- `diarization_file` (string, 必需): 说话人分离结果文件路径
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "pyannote_audio.validate_diarization",
+    "input_data": {
+        "diarization_file": "/share/diarization/result.json"
+    }
+}
+```
+
+**参数来源说明**:
+- `diarization_file`: **节点参数** (在请求体中的 `pyannote_audio.validate_diarization` 对象内提供)
+
+**注意事项**：
+
+* `diarization_file` 必须是从 `pyannote_audio.diarize_speakers` 输出的有效文件路径
+
+* 验证结果仅供参考，不影响原始分离结果
+
+* 建议在关键业务场景中使用此节点进行质量保证
+
+***
+***
+
 ## PaddleOCR 服务节点
 
 PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用于视频字幕的检测、识别和处理。
 
-### 1. paddleocr.detect\_subtitle\_area
+### 1. paddleocr.detect_subtitle_area
 
 通过关键帧分析检测视频中的字幕区域位置，支持多种输入模式。
 
@@ -1273,6 +1786,29 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 
 * 支持多种字幕位置检测
 
+**单任务模式支持**：
+
+**输入参数**:
+- `keyframe_dir` (string, 可选): 直接指定关键帧目录路径，支持本地路径或MinIO URL
+- `download_from_minio` (bool, 可选): 是否从MinIO下载关键帧，默认false
+- `local_keyframe_dir` (string, 可选): 本地保存下载关键帧的目录，默认使用共享存储路径
+- `keyframe_sample_count` (int, 可选): 关键帧采样数量（保留参数，当前未使用）
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "paddleocr.detect_subtitle_area",
+    "input_data": {
+        "keyframe_dir": "/share/my_project/keyframes",
+        "download_from_minio": false,
+        "local_keyframe_dir": "/shared/workflows/custom_dir"
+    }
+}
+```
+
+**参数来源说明**:
+- 所有列出的参数均为 **节点参数** (在请求体中的 `paddleocr.detect_subtitle_area` 对象内提供)
+
 **注意事项**：
 
 * MinIO模式需要确保MinIO服务可访问
@@ -1285,7 +1821,7 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 
 ***
 
-### 2. paddleocr.create\_stitched\_images
+### 2. paddleocr.create_stitched_images
 
 将裁剪的字幕条图像并发拼接成大图，提高 OCR 识别效率。
 
@@ -1481,17 +2017,99 @@ pipeline:
 * **参数模式**: 无（直接指定所有必需参数）
 * **MinIO模式**: 需要MinIO服务可用
 
+**单任务模式支持**：
+
+**输入参数**:
+- `cropped_images_path` (string, 可选): 裁剪图像的目录路径，支持本地路径或MinIO URL格式
+- `subtitle_area` (array, 可选): 字幕区域坐标，格式为 `[x1, y1, x2, y2]`，支持 `${{...}}` 动态引用
+- `upload_stitched_images_to_minio` (bool, 可选): 是否将拼接后的大图目录上传到MinIO，默认true
+- `delete_local_stitched_images_after_upload` (bool, 可选): 上传成功后是否删除本地拼接大图，默认false
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "paddleocr.create_stitched_images",
+    "input_data": {
+        "cropped_images_path": "/share/cropped_images/frames",
+        "subtitle_area": [0, 918, 1920, 1080],
+        "upload_stitched_images_to_minio": true,
+        "delete_local_stitched_images_after_upload": true
+    }
+}
+```
+
+**参数来源说明**:
+- 所有列出的参数均为 **节点参数**，在请求体中的 `paddleocr.create_stitched_images` 对象内提供
+- 拼接参数（如concat_batch_size, stitching_workers等）均为全局配置，在config.yml文件中设置
+
 ***
 
-### 3. paddleocr.perform\_ocr
+### 3. paddleocr.perform_ocr
 
 对拼接后的字幕图像进行文字识别。
 
-**功能描述**：使用 PaddleOCR 模型对字幕图像进行高精度文字识别。
+**功能描述**：使用 PaddleOCR 模型对字幕图像进行高精度文字识别。支持单步任务模式，可通过参数直接传入所需的拼接图像清单和目录。
 
 **输入参数**：
 
-* 无直接节点参数。
+* `manifest_path` (string, 节点可选): 拼接图像的清单文件路径，支持本地路径或MinIO URL格式。
+* `multi_frames_path` (string, 节点可选): 拼接图像的目录路径，支持本地路径或MinIO URL格式。
+* `upload_ocr_results_to_minio` (bool, 节点可选): 是否上传OCR结果到MinIO，默认 true。
+* `delete_local_ocr_results_after_upload` (bool, 节点可选): 上传后是否删除本地OCR结果，默认 false。
+
+**配置来源说明**：
+
+* `manifest_path`, `multi_frames_path`, `upload_ocr_results_to_minio`, `delete_local_ocr_results_after_upload`: **节点参数** (在请求体中的 `paddleocr.perform_ocr` 对象内提供)。
+* **OCR参数**: 如 `lang`, `use_angle_cls`, `use_gpu` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。
+
+**智能参数选择**：
+
+* `manifest_path` (按优先级)：
+  1. 显式传入的节点参数（支持MinIO URL自动下载）
+  2. `input_data` 中的参数
+  3. `paddleocr.create_stitched_images` 输出的 `manifest_path`
+
+* `multi_frames_path` (按优先级)：
+  1. 显式传入的节点参数（支持MinIO URL自动下载）
+  2. `input_data` 中的参数
+  3. `paddleocr.create_stitched_images` 输出的 `multi_frames_path`
+
+**前置依赖**：
+
+* 无（可选依赖 `paddleocr.create_stitched_images` - 如果未提供 `manifest_path` 和 `multi_frames_path` 参数）
+
+**单任务模式支持**：
+
+**输入参数**:
+- `manifest_path` (string, 可选): 拼接图像的清单文件路径，支持本地路径或MinIO URL格式
+- `multi_frames_path` (string, 可选): 拼接图像的目录路径，支持本地路径或MinIO URL格式  
+- `upload_ocr_results_to_minio` (bool, 可选): 是否上传OCR结果到MinIO，默认true
+- `delete_local_ocr_results_after_upload` (bool, 可选): 上传后是否删除本地OCR结果，默认false
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "paddleocr.perform_ocr",
+    "input_data": {
+        "manifest_path": "/share/manifest/multi_frames.json",
+        "multi_frames_path": "/share/stitched_images",
+        "upload_ocr_results_to_minio": true,
+        "delete_local_ocr_results_after_upload": false
+    }
+}
+```
+
+**参数来源说明**:
+- 所有列出的参数均为 **节点参数**，在请求体中的 `paddleocr.perform_ocr` 对象内提供
+- OCR模型参数（如lang, use_angle_cls, use_gpu等）均为全局配置，在config.yml文件中设置
+
+**技术特性**：
+
+* 支持MinIO URL自动下载和本地缓存
+* GPU加速OCR处理（使用GPU锁保护）
+* 自动上传OCR结果到MinIO
+* 支持压缩包输入自动解压
+* 完善的错误处理和资源清理
 
 **配置来源说明**：
 
@@ -1499,25 +2117,79 @@ pipeline:
 
 ***
 
-### 4. paddleocr.postprocess\_and\_finalize
+### 4. paddleocr.postprocess_and_finalize
 
 后处理 OCR 结果并生成最终的字幕文件。
 
-**功能描述**：对 OCR 识别结果进行智能后处理，包括时间对齐、文本校正、格式化等。
+**功能描述**：对 OCR 识别结果进行智能后处理，包括时间对齐、文本校正、格式化等。支持单步任务模式，可通过参数直接传入OCR结果文件。
 
 **输入参数**：
 
-* 无直接节点参数。
+* `ocr_results_file` (string, 节点可选): OCR结果文件路径，支持本地路径或MinIO URL格式。
+* `manifest_file` (string, 节点可选): 拼接图像的元数据文件路径，用于字幕时间对齐，支持本地路径或MinIO URL格式。
+* `upload_final_results_to_minio` (bool, 节点可选): 是否将最终字幕结果上传到MinIO，默认 true。
+* `delete_local_results_after_upload` (bool, 节点可选): 上传后是否删除本地结果，默认 false。
 
 **配置来源说明**：
 
+* `ocr_results_file`, `manifest_file`, `upload_final_results_to_minio`, `delete_local_results_after_upload`: **节点参数** (在请求体中的 `paddleocr.postprocess_and_finalize` 对象内提供)。
 * **后处理参数**: 如 `time_alignment_method`, `text_correction`, `min_confidence_threshold` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。
+
+**智能参数选择**：
+
+* `ocr_results_file` (按优先级)：
+  1. 显式传入的节点参数（支持MinIO URL自动下载）
+  2. `input_data` 中的参数
+  3. `paddleocr.perform_ocr` 输出的 `ocr_results_file`
+
+* `manifest_file` (按优先级)：
+  1. 显式传入的节点参数（支持MinIO URL自动下载）
+  2. `input_data` 中的参数
+  3. `paddleocr.create_stitched_images` 输出的 `manifest_path`
+
+**前置依赖**：
+
+* 无（可选依赖 `paddleocr.perform_ocr` - 如果未提供 `ocr_results_file` 和 `manifest_file` 参数）
+
+**单任务模式支持**：
+
+**输入参数**:
+- `ocr_results_file` (string, 可选): OCR结果文件路径，支持本地路径或MinIO URL格式
+- `manifest_file` (string, 可选): 拼接图像的元数据文件路径，用于字幕时间对齐，支持本地路径或MinIO URL格式
+- `upload_final_results_to_minio` (bool, 可选): 是否将最终字幕结果上传到MinIO，默认true
+- `delete_local_results_after_upload` (bool, 可选): 上传后是否删除本地结果，默认false
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "paddleocr.postprocess_and_finalize",
+    "input_data": {
+        "ocr_results_file": "/share/ocr/ocr_results.json",
+        "manifest_file": "/share/manifest/multi_frames.json",
+        "upload_final_results_to_minio": true,
+        "delete_local_results_after_upload": false
+    }
+}
+```
+
+**参数来源说明**:
+- 所有列出的参数均为 **节点参数**，在请求体中的 `paddleocr.postprocess_and_finalize` 对象内提供
+- 后处理参数（如time_alignment_method, text_correction, min_confidence_threshold等）均为全局配置，在config.yml文件中设置
+
+**技术特性**：
+
+* 支持MinIO URL自动下载和本地缓存
+* 智能时间对齐算法
+* 自动文本校正和格式化
+* 支持多种字幕输出格式
+* 自动上传最终结果到MinIO
+* 完善的错误处理和资源清理
 
 ## IndexTTS 服务节点
 
 IndexTTS 服务提供基于 IndexTTS2 模型的高质量语音合成功能，支持情感化语音生成和音色克隆。
 
-### 1. indextts.generate\_speech
+### 1. indextts.generate_speech
 
 使用参考音频生成具有相同音色的语音。
 
@@ -1608,6 +2280,31 @@ IndexTTS 服务提供基于 IndexTTS2 模型的高质量语音合成功能，支
 
 * `speed`: 控制语音速度（0.5-2.0）
 
+**单任务模式支持**：
+
+**输入参数**:
+- `text` (string, 必需): 要合成的文本内容
+- `output_path` (string, 必需): 输出音频文件路径
+- `spk_audio_prompt` (string, 必需): 说话人参考音频路径
+- `emo_audio_prompt` (string, 可选): 情感参考音频路径
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "indextts.generate_speech",
+    "input_data": {
+        "text": "你好，这是一个使用IndexTTS2生成的语音示例。",
+        "output_path": "/shared/tts/generated_speech.wav",
+        "spk_audio_prompt": "/shared/reference/speaker_voice.wav",
+        "emo_audio_prompt": "/shared/reference/happy_emotion.wav"
+    }
+}
+```
+
+**参数来源说明**:
+- `text`, `output_path`, `spk_audio_prompt`, `emo_audio_prompt`: **节点参数** (在请求体中的 `indextts.generate_speech` 对象内提供)
+- 其他合成参数（如emotion_alpha, speed等）均为全局配置，在config.yml文件中设置
+
 **注意事项**：
 
 * 必须提供说话人参考音频
@@ -1620,11 +2317,245 @@ IndexTTS 服务提供基于 IndexTTS2 模型的高质量语音合成功能，支
 
 ***
 
+### 2. indextts.list_voice_presets
+
+列出系统中可用的语音预设，用于语音合成时的参考。
+
+**功能描述**：获取 IndexTTS2 模型支持的语音预设列表，包括预设名称、描述、语言和性别等信息，帮助用户选择合适的语音预设。
+
+**输入参数**：
+
+* 无直接输入参数。
+
+**配置来源说明**：
+
+* 无节点参数。语音预设信息从模型配置中获取。
+
+**前置依赖**：
+
+* 无（可独立运行）
+
+**输出格式**：
+
+```json
+{
+  "status": "success",
+  "presets": {
+    "default": {
+      "name": "Default Voice",
+      "description": "默认语音",
+      "language": "zh-CN",
+      "gender": "female"
+    },
+    "male_01": {
+      "name": "Male Voice 01",
+      "description": "男声01",
+      "language": "zh-CN",
+      "gender": "male"
+    },
+    "female_01": {
+      "name": "Female Voice 01",
+      "description": "女声01",
+      "language": "zh-CN",
+      "gender": "female"
+    }
+  },
+  "total_count": 3
+}
+```
+
+**使用示例**：
+
+**示例1：独立获取语音预设**：
+
+```json
+{
+  "task_name": "indextts.list_voice_presets",
+  "input_data": {}
+}
+```
+
+**示例2：在工作流中获取预设**：
+
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "indextts.list_voice_presets"
+    ]
+  }
+}
+```
+
+**依赖关系**：无
+
+**技术特性**：
+
+* 提供完整的预设信息
+
+* 支持多语言预设
+
+* 包含性别和描述信息
+
+* 轻量级查询，不消耗GPU资源
+
+**单任务模式支持**：
+
+**输入参数**:
+- 无直接输入参数（此节点主要用于信息查询）
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "indextts.list_voice_presets",
+    "input_data": {}
+}
+```
+
+**参数来源说明**:
+- 无节点参数。语音预设信息从模型配置中获取
+
+**注意事项**：
+
+* 此节点主要用于信息查询，不进行实际的语音合成
+
+* 预设信息来源于模型配置文件
+
+* 可以作为工作流的第一步来了解可用选项
+
+***
+
+### 3. indextts.get_model_info
+
+获取 IndexTTS2 模型的详细信息和技术规格。
+
+**功能描述**：返回 IndexTTS2 模型的详细技术信息，包括模型版本、设备状态、配置参数和能力特性等，常用于系统监控和配置验证。
+
+**输入参数**：
+
+* 无直接输入参数。
+
+**配置来源说明**：
+
+* 无节点参数。模型信息从运行环境配置中获取。
+
+**前置依赖**：
+
+* 无（可独立运行）
+
+**输出格式**：
+
+```json
+{
+  "status": "success",
+  "model_info": {
+    "model_type": "IndexTTS2",
+    "model_version": "2.0",
+    "device": "cuda",
+    "model_path": "/models/indextts",
+    "status": "ready (lazy-loading)",
+    "capabilities": {
+      "text_to_speech": true,
+      "voice_cloning": true,
+      "emotion_control": true,
+      "multi_language": true,
+      "real_time": false
+    },
+    "config": {
+      "use_fp16": true,
+      "use_deepspeed": false,
+      "use_cuda_kernel": false
+    }
+  }
+}
+```
+
+**输出字段说明**：
+
+* `model_type`: 模型类型
+
+* `model_version`: 模型版本号
+
+* `device`: 当前使用的设备（cuda/cpu）
+
+* `model_path`: 模型文件路径
+
+* `status`: 模型加载状态
+
+* `capabilities`: 支持的功能特性
+
+* `config`: 当前配置参数
+
+**使用示例**：
+
+**示例1：独立获取模型信息**：
+
+```json
+{
+  "task_name": "indextts.get_model_info",
+  "input_data": {}
+}
+```
+
+**示例2：在工作流中获取模型信息**：
+
+```json
+{
+  "workflow_config": {
+    "workflow_chain": [
+      "indextts.get_model_info",
+      "indextts.generate_speech"
+    ]
+  }
+}
+```
+
+**依赖关系**：无
+
+**技术特性**：
+
+* 提供完整的模型技术规格
+
+* 包含配置参数信息
+
+* 支持功能特性检查
+
+* 轻量级查询，响应快速
+
+**单任务模式支持**：
+
+**输入参数**:
+- 无直接输入参数（此节点主要用于系统信息查询）
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "indextts.get_model_info",
+    "input_data": {}
+}
+```
+
+**参数来源说明**:
+- 无节点参数。模型信息从运行环境配置中获取
+
+**注意事项**：
+
+* 此节点主要用于系统监控和调试
+
+* 模型状态为"lazy-loading"，首次使用时才会加载模型
+
+* 配置参数来源于环境变量和配置文件
+
+* 可以用于验证系统配置是否正确
+
+***
+***
+
 ## WService 字幕优化服务节点
 
 WService 服务提供全面的字幕处理能力，包括基于转录数据生成字幕文件、AI智能优化、字幕校正和TTS片段合并等功能。该服务从 `faster_whisper_service` 迁移了所有非GPU功能。
 
-### 1. wservice.generate\_subtitle\_files
+### 1. wservice.generate_subtitle_files
 
 基于转录数据和可选的说话人数据生成多种格式的字幕文件。
 
@@ -1736,9 +2667,30 @@ faster_whisper_service:
 
 * 说话人切换边界优化
 
+**单任务模式支持**：
+
+**输入参数**:
+- `segments_file` (string, 可选): 指定转录数据文件路径，支持 `${{...}}` 动态引用
+- `diarization_file` (string, 可选): 指定说话人分离数据文件路径，支持 `${{...}}` 动态引用
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "wservice.generate_subtitle_files",
+    "input_data": {
+        "segments_file": "/share/transcription/segments.json",
+        "diarization_file": "/share/diarization/speaker_segments.json"
+    }
+}
+```
+
+**参数来源说明**:
+- `segments_file`, `diarization_file`: **节点参数** (在请求体中的 `wservice.generate_subtitle_files` 对象内提供)
+- 其他字幕格式化参数（如max_chars_per_line, max_lines_per_subtitle, min_subtitle_duration等）均为全局配置，在config.yml文件中设置
+
 ***
 
-### 2. wservice.correct\_subtitles
+### 2. wservice.correct_subtitles
 
 使用 LLM 对字幕进行智能校正和优化。
 
@@ -1775,6 +2727,25 @@ faster_whisper_service:
 
 * `wservice.generate_subtitle_files` (如果未通过 `subtitle_path` 参数指定输入)
 
+**单任务模式支持**：
+
+**输入参数**:
+- `subtitle_path` (string, 可选): 待校正的字幕文件路径，支持 `${{...}}` 动态引用
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "wservice.correct_subtitles",
+    "input_data": {
+        "subtitle_path": "/share/subtitles/video.srt"
+    }
+}
+```
+
+**参数来源说明**:
+- `subtitle_path`: **节点参数** (在请求体中的 `wservice.correct_subtitles` 对象内提供)
+- 其他校正参数（如correction_model, correction_type, target_language等）均为全局配置，在config.yml文件中设置
+
 **注意事项**：
 
 * 校正相关的微调参数（如 `correction_model`）应在 `config.yml` 中配置。
@@ -1783,11 +2754,11 @@ faster_whisper_service:
 
 ***
 
-### 3. wservice.ai\_optimize\_subtitles
+### 3. wservice.ai_optimize_subtitles
 
 对转录后的字幕进行 AI 智能优化和校正。
 
-**功能描述**：使用 AI 大模型对 faster\_whisper 转录的字幕进行智能优化，包括错别字修正、标点补充、口头禅删除、语法优化等。支持大体积字幕的并发处理，采用滑窗重叠分段策略保证上下文完整性。
+**功能描述**：使用 AI 大模型对 faster_whisper 转录的字幕进行智能优化，包括错别字修正、标点补充、口头禅删除、语法优化等。支持大体积字幕的并发处理，采用滑窗重叠分段策略保证上下文完整性。
 
 **输入参数**：
 
@@ -1839,9 +2810,28 @@ faster_whisper_service:
 
 * 滑窗重叠机制确保上下文完整性。
 
+**单任务模式支持**：
+
+**输入参数**:
+- `segments_file` (string, 可选): 输入字幕文件路径，支持 `${{...}}` 动态引用
+
+**单任务调用示例**:
+```json
+{
+    "task_name": "wservice.ai_optimize_subtitles",
+    "input_data": {
+        "segments_file": "/share/transcription/segments.json"
+    }
+}
+```
+
+**参数来源说明**:
+- `segments_file`: **节点参数** (在请求体中的 `wservice.ai_optimize_subtitles` 对象内提供)
+- `subtitle_optimization` (全局参数): 在API请求的顶层 `workflow_config` 内提供，包含 `enabled`, `provider`, `batch_size` 等所有优化相关的微调选项
+
 ***
 
-### 4. wservice.merge\_speaker\_segments
+### 4. wservice.merge_speaker_segments
 
 合并转录字幕与说话人时间段（片段级）。
 
@@ -1897,9 +2887,62 @@ faster_whisper_service:
 
 * 必需：`faster_whisper.transcribe_audio` 和 `pyannote_audio.diarize_speakers`
 
+**单任务模式支持**：
+
+**输入参数**:
+- `segments_data` (array, 可选): 直接提供转录片段数据数组，支持 `${{...}}` 动态引用
+- `speaker_segments_data` (array, 可选): 直接提供说话人分离片段数据数组，支持 `${{...}}` 动态引用  
+- `segments_file` (string, 可选): 指定转录数据文件路径，支持 `${{...}}` 动态引用
+- `diarization_file` (string, 可选): 指定说话人分离数据文件路径，支持 `${{...}}` 动态引用
+- `source_stage_names` (object, 可选): 自定义源阶段名称配置，用于从工作流上下文获取数据
+
+**单任务调用示例1 - 直接传数据**:
+```json
+{
+    "task_name": "wservice.merge_speaker_segments",
+    "input_data": {
+        "segments_data": [
+            {"start": 0.5, "end": 2.3, "text": "这是第一段字幕"},
+            {"start": 2.5, "end": 5.1, "text": "这是第二段字幕"}
+        ],
+        "speaker_segments_data": [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_00"},
+            {"start": 3.0, "end": 6.0, "speaker": "SPEAKER_01"}
+        ]
+    }
+}
+```
+
+**单任务调用示例2 - 文件路径**:
+```json
+{
+    "task_name": "wservice.merge_speaker_segments",
+    "input_data": {
+        "segments_file": "/share/transcription/segments.json",
+        "diarization_file": "/share/diarization/speaker_segments.json"
+    }
+}
+```
+
+**单任务调用示例3 - 动态引用**:
+```json
+{
+    "task_name": "wservice.merge_speaker_segments",
+    "input_data": {
+        "segments_file": "${{ context.input_params.segments_file }}",
+        "diarization_file": "${{ context.input_params.diarization_file }}"
+    }
+}
+```
+
+**参数来源说明**:
+- 节点参数可通过 `input_data` 直接传入，支持动态引用解析
+- 优先级：直接传入数据 > 文件路径 > 工作流上下文自动获取
+- 所有参数都支持 `${{...}}` 动态引用语法
+
 ***
 
-### 5. wservice.merge\_with\_word\_timestamps
+### 5. wservice.merge_with_word_timestamps
 
 使用词级时间戳进行精确的字幕与说话人合并。
 
@@ -1965,9 +3008,74 @@ faster_whisper_service:
 
 * 这是生成最精确说话人字幕的首选方法。
 
+**单任务模式支持**：
+
+**输入参数**:
+- `segments_data` (array, 可选): 直接提供包含词级时间戳的转录片段数据数组，支持 `${{...}}` 动态引用
+- `speaker_segments_data` (array, 可选): 直接提供说话人分离片段数据数组，支持 `${{...}}` 动态引用  
+- `segments_file` (string, 可选): 指定转录数据文件路径，支持 `${{...}}` 动态引用
+- `diarization_file` (string, 可选): 指定说话人分离数据文件路径，支持 `${{...}}` 动态引用
+- `source_stage_names` (object, 可选): 自定义源阶段名称配置，用于从工作流上下文获取数据
+
+**单任务调用示例1 - 直接传数据**:
+```json
+{
+    "task_name": "wservice.merge_with_word_timestamps",
+    "input_data": {
+        "segments_data": [
+            {
+                "start": 0.5, 
+                "end": 2.3, 
+                "text": "这是第一段字幕",
+                "words": [
+                    {"word": "这是", "start": 0.5, "end": 0.8},
+                    {"word": "第一段字幕", "start": 0.9, "end": 2.3}
+                ]
+            }
+        ],
+        "speaker_segments_data": [
+            {"start": 0.0, "end": 3.0, "speaker": "SPEAKER_00"},
+            {"start": 3.0, "end": 6.0, "speaker": "SPEAKER_01"}
+        ]
+    }
+}
+```
+
+**单任务调用示例2 - 文件路径**:
+```json
+{
+    "task_name": "wservice.merge_with_word_timestamps",
+    "input_data": {
+        "segments_file": "/share/transcription/segments_with_words.json",
+        "diarization_file": "/share/diarization/speaker_segments.json"
+    }
+}
+```
+
+**单任务调用示例3 - 动态引用**:
+```json
+{
+    "task_name": "wservice.merge_with_word_timestamps",
+    "input_data": {
+        "segments_file": "${{ context.input_params.segments_file }}",
+        "diarization_file": "${{ context.input_params.diarization_file }}"
+    }
+}
+```
+
+**参数来源说明**:
+- 节点参数可通过 `input_data` 直接传入，支持动态引用解析
+- 优先级：直接传入数据 > 文件路径 > 工作流上下文自动获取
+- 所有参数都支持 `${{...}}` 动态引用语法
+
+**注意事项**:
+- 转录数据必须包含词级时间戳信息（`words` 字段）
+- 如果转录数据不包含词级时间戳，将回退到片段级合并逻辑
+- 单任务模式下推荐直接提供包含词级时间戳的数据以获得最佳精度
+
 ***
 
-### 6. wservice.prepare\_tts\_segments
+### 6. wservice.prepare_tts_segments
 
 为TTS参考音准备和优化字幕片段。
 
@@ -2037,6 +3145,85 @@ faster_whisper_service:
 * 此节点是为 `indextts.generate_speech` 或其他TTS任务准备输入数据的关键步骤。
 
 * 合并与分割的具体行为由 `config.yml` 中的全局配置决定。
+
+**单任务模式支持**：
+
+**输入参数**:
+- `merged_segments` (array, 可选): 直接提供已合并的字幕片段数据数组，支持 `${{...}}` 动态引用
+- `segments` (array, 可选): 直接提供基础字幕片段数据数组，支持 `${{...}}` 动态引用
+- `segments_file` (string, 可选): 指定字幕片段数据文件路径，支持 `${{...}}` 动态引用
+- `source_stage_names` (object, 可选): 自定义源阶段名称配置，用于从工作流上下文获取数据
+
+**单任务调用示例1 - 直接传合并片段数据**:
+```json
+{
+    "task_name": "wservice.prepare_tts_segments",
+    "input_data": {
+        "merged_segments": [
+            {
+                "id": 1,
+                "start": 0.5,
+                "end": 9.8,
+                "text": "这是第一个为TTS准备的、合并后的长片段。",
+                "speaker": "SPEAKER_00"
+            },
+            {
+                "id": 2,
+                "start": 10.2,
+                "end": 15.6,
+                "text": "这是第二个为TTS准备的片段。",
+                "speaker": "SPEAKER_01"
+            }
+        ]
+    }
+}
+```
+
+**单任务调用示例2 - 直接传基础片段数据**:
+```json
+{
+    "task_name": "wservice.prepare_tts_segments",
+    "input_data": {
+        "segments": [
+            {"start": 0.5, "end": 2.3, "text": "这是第一段"},
+            {"start": 2.5, "end": 5.1, "text": "这是第二段"},
+            {"start": 5.5, "end": 8.2, "text": "这是第三段"}
+        ]
+    }
+}
+```
+
+**单任务调用示例3 - 文件路径**:
+```json
+{
+    "task_name": "wservice.prepare_tts_segments",
+    "input_data": {
+        "segments_file": "/share/subtitles/merged_segments.json"
+    }
+}
+```
+
+**单任务调用示例4 - 动态引用**:
+```json
+{
+    "task_name": "wservice.prepare_tts_segments",
+    "input_data": {
+        "merged_segments": "${{ context.input_params.merged_segments }}",
+        "segments_file": "${{ context.input_params.segments_file }}"
+    }
+}
+```
+
+**参数来源说明**:
+- 节点参数可通过 `input_data` 直接传入，支持动态引用解析
+- 优先级：直接传入数据 > 文件路径 > 工作流上下文自动获取
+- 所有参数都支持 `${{...}}` 动态引用语法
+- TTS合并参数（如min_duration, max_duration, max_gap, split_on_punctuation等）均为全局配置，在config.yml文件的wservice.tts_merger_settings部分修改
+
+**注意事项**:
+- 推荐提供 `merged_segments` 数据以获得最佳效果（已包含说话人信息）
+- 如果提供 `segments` 数据，节点将自动进行合并处理
+- 合并与分割的具体行为由 config.yml 中的全局配置决定
 
 ***
 
@@ -2275,11 +3462,13 @@ YiVideo 工作流系统中的各节点存在明确的依赖关系，理解这些
 
 ## 版本兼容性
 
-* **文档版本**：v1.0
+* **文档版本**：v1.1
 
 * **支持的系统版本**：YiVideo v2.0+
 
-* **最后更新时间**：2025-11-09
+* **最后更新时间**：2025-12-01
+
+* **更新内容**：新增pyannote_audio和indextts服务节点文档，补充压缩上传功能参数
 
 ***
 

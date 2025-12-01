@@ -609,26 +609,101 @@ def generate_subtitle_files(self, context: dict) -> dict:
 def merge_speaker_segments(self, context: dict) -> dict:
     """
     合并转录字幕与说话人时间段(片段级)
+    
+    新增input_data参数支持，支持单任务模式调用：
+    - segments_data: 直接传入转录片段数据
+    - speaker_segments_data: 直接传入说话人片段数据  
+    - segments_file: 转录数据文件路径
+    - diarization_file: 说话人分离数据文件路径
     """
+    start_time = time.time()
     workflow_context = WorkflowContext(**context)
     stage_name = self.name
-    start_time = time.time()
     workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
     state_manager.update_workflow_state(workflow_context)
+    
     try:
-        transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
-        transcript_segments = get_segments_data(transcribe_stage.output, 'segments')
-        diarize_stage = workflow_context.stages.get('pyannote_audio.diarize_speakers')
-        speaker_segments = get_speaker_data(diarize_stage.output).get('speaker_enhanced_segments')
+        # --- Parameter Resolution (采用项目标准模式) ---
+        resolved_params = {}
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 1. 尝试直接获取片段数据（最高优先级）
+        transcript_segments = get_param_with_fallback("segments_data", resolved_params, workflow_context)
+        speaker_segments = get_param_with_fallback("speaker_segments_data", resolved_params, workflow_context)
+        
+        # 2. 如果没有直接数据，尝试文件路径
+        if not transcript_segments:
+            segments_file = get_param_with_fallback("segments_file", resolved_params, workflow_context)
+            if segments_file:
+                transcript_segments = load_segments_from_file(segments_file)
+                recorded_input_params['segments_file'] = segments_file
+        
+        if not speaker_segments:
+            diarization_file = get_param_with_fallback("diarization_file", resolved_params, workflow_context)
+            if diarization_file:
+                speaker_data = load_speaker_data_from_file(diarization_file)
+                speaker_segments = speaker_data.get('speaker_enhanced_segments')
+                recorded_input_params['diarization_file'] = diarization_file
+        
+        # 3. 最后回退到原有逻辑（向后兼容）
+        if not transcript_segments:
+            transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
+            if transcribe_stage and transcribe_stage.output:
+                transcript_segments = get_segments_data(transcribe_stage.output, 'segments')
+                recorded_input_params['fallback_source'] = 'faster_whisper.transcribe_audio'
+            else:
+                raise ValueError("无法获取转录片段数据：请提供segments_data/segments_file参数，或确保faster_whisper.transcribe_audio已完成")
+        
+        if not speaker_segments:
+            diarize_stage = workflow_context.stages.get('pyannote_audio.diarize_speakers')
+            if diarize_stage and diarize_stage.output:
+                speaker_segments = get_speaker_data(diarize_stage.output).get('speaker_enhanced_segments')
+                if recorded_input_params.get('fallback_source'):
+                    recorded_input_params['fallback_source'] += ' + pyannote_audio.diarize_speakers'
+                else:
+                    recorded_input_params['fallback_source'] = 'pyannote_audio.diarize_speakers'
+            else:
+                raise ValueError("无法获取说话人片段数据：请提供speaker_segments_data/diarization_file参数，或确保pyannote_audio.diarize_speakers已完成")
+        
+        # 记录最终使用的参数
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+        
+        # 验证数据格式
+        if not transcript_segments:
+            raise ValueError("转录片段数据为空")
         if not validate_speaker_segments(speaker_segments):
             raise ValueError("说话人时间段数据格式无效")
+        
+        # 执行合并逻辑
         service_config = CONFIG.get('faster_whisper_service', {})
         merge_config = service_config.get('subtitle_merge', {})
         merger = create_subtitle_merger(merge_config)
         merged_segments = merger.merge(transcript_segments, speaker_segments)
-        output_data = {'merged_segments': merged_segments}
+        
+        output_data = {
+            'merged_segments': merged_segments,
+            'input_summary': {
+                'transcript_segments_count': len(transcript_segments),
+                'speaker_segments_count': len(speaker_segments),
+                'merged_segments_count': len(merged_segments),
+                'data_source': recorded_input_params.get('fallback_source', 'input_data')
+            }
+        }
+        
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
+        
     except Exception as e:
         logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
@@ -636,6 +711,7 @@ def merge_speaker_segments(self, context: dict) -> dict:
     finally:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
+    
     return workflow_context.model_dump()
 
 
@@ -643,28 +719,107 @@ def merge_speaker_segments(self, context: dict) -> dict:
 def merge_with_word_timestamps(self, context: dict) -> dict:
     """
     使用词级时间戳进行精确字幕合并
+    
+    新增input_data参数支持，支持单任务模式调用：
+    - segments_data: 直接传入包含词级时间戳的转录片段数据
+    - speaker_segments_data: 直接传入说话人片段数据
+    - segments_file: 包含词级时间戳的转录数据文件路径
+    - diarization_file: 说话人分离数据文件路径
     """
+    start_time = time.time()
     workflow_context = WorkflowContext(**context)
     stage_name = self.name
-    start_time = time.time()
     workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
     state_manager.update_workflow_state(workflow_context)
+    
     try:
-        transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
-        transcript_segments = get_segments_data(transcribe_stage.output, 'segments')
+        # --- Parameter Resolution (采用项目标准模式) ---
+        resolved_params = {}
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 1. 尝试直接获取片段数据（最高优先级）
+        transcript_segments = get_param_with_fallback("segments_data", resolved_params, workflow_context)
+        speaker_segments = get_param_with_fallback("speaker_segments_data", resolved_params, workflow_context)
+        
+        # 2. 如果没有直接数据，尝试文件路径
+        if not transcript_segments:
+            segments_file = get_param_with_fallback("segments_file", resolved_params, workflow_context)
+            if segments_file:
+                transcript_segments = load_segments_from_file(segments_file)
+                recorded_input_params['segments_file'] = segments_file
+        
+        if not speaker_segments:
+            diarization_file = get_param_with_fallback("diarization_file", resolved_params, workflow_context)
+            if diarization_file:
+                speaker_data = load_speaker_data_from_file(diarization_file)
+                speaker_segments = speaker_data.get('speaker_enhanced_segments')
+                recorded_input_params['diarization_file'] = diarization_file
+        
+        # 3. 最后回退到原有逻辑（向后兼容）
+        if not transcript_segments:
+            transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
+            if transcribe_stage and transcribe_stage.output:
+                transcript_segments = get_segments_data(transcribe_stage.output, 'segments')
+                recorded_input_params['fallback_source'] = 'faster_whisper.transcribe_audio'
+            else:
+                raise ValueError("无法获取转录片段数据：请提供segments_data/segments_file参数，或确保faster_whisper.transcribe_audio已完成")
+        
+        if not speaker_segments:
+            diarize_stage = workflow_context.stages.get('pyannote_audio.diarize_speakers')
+            if diarize_stage and diarize_stage.output:
+                speaker_segments = get_speaker_data(diarize_stage.output).get('speaker_enhanced_segments')
+                if recorded_input_params.get('fallback_source'):
+                    recorded_input_params['fallback_source'] += ' + pyannote_audio.diarize_speakers'
+                else:
+                    recorded_input_params['fallback_source'] = 'pyannote_audio.diarize_speakers'
+            else:
+                raise ValueError("无法获取说话人片段数据：请提供speaker_segments_data/diarization_file参数，或确保pyannote_audio.diarize_speakers已完成")
+        
+        # 记录最终使用的参数
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+        
+        # 验证数据格式
+        if not transcript_segments:
+            raise ValueError("转录片段数据为空")
+        
+        # 特别验证词级时间戳
         if not any('words' in seg and seg['words'] for seg in transcript_segments):
-            raise ValueError("转录结果不包含词级时间戳")
-        diarize_stage = workflow_context.stages.get('pyannote_audio.diarize_speakers')
-        speaker_segments = get_speaker_data(diarize_stage.output).get('speaker_enhanced_segments')
+            raise ValueError("转录结果不包含词级时间戳，无法执行词级合并")
+        
         if not validate_speaker_segments(speaker_segments):
             raise ValueError("说话人时间段数据格式无效")
+        
+        # 执行词级合并逻辑
         service_config = CONFIG.get('faster_whisper_service', {})
         merge_config = service_config.get('subtitle_merge', {})
         merger = create_word_level_merger(speaker_segments, merge_config)
         merged_segments = merger.merge(transcript_segments)
-        output_data = {'merged_segments': merged_segments}
+        
+        output_data = {
+            'merged_segments': merged_segments,
+            'input_summary': {
+                'transcript_segments_count': len(transcript_segments),
+                'speaker_segments_count': len(speaker_segments),
+                'merged_segments_count': len(merged_segments),
+                'data_source': recorded_input_params.get('fallback_source', 'input_data'),
+                'word_timestamps_required': True
+            }
+        }
+        
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
+        
     except Exception as e:
         logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
         workflow_context.stages[stage_name].status = 'FAILED'
@@ -672,6 +827,7 @@ def merge_with_word_timestamps(self, context: dict) -> dict:
     finally:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
+    
     return workflow_context.model_dump()
 
 
@@ -978,6 +1134,11 @@ def _get_segments_from_source_stages(workflow_context: WorkflowContext, source_s
 def prepare_tts_segments(self, context: dict) -> dict:
     """
     为TTS参考音准备和优化字幕片段。
+    
+    新增input_data参数支持，支持单任务模式调用：
+    - segments_data: 直接传入字幕片段数据
+    - segments_file: 字幕片段数据文件路径
+    - source_stage_names: 自定义源阶段名称列表（替代默认搜索列表）
     """
     start_time = time.time()
     workflow_context = WorkflowContext(**context)
@@ -986,26 +1147,76 @@ def prepare_tts_segments(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
-        source_stage_names = [
-            'wservice.merge_with_word_timestamps',
-            'wservice.merge_speaker_segments',
-            'wservice.generate_subtitle_files',
-            'wservice.ai_optimize_subtitles', # AI优化后也可能作为源
-            'faster_whisper.transcribe_audio' # 最终回退到原始转录
-        ]
-
-        segments, source_name = _get_segments_from_source_stages(workflow_context, source_stage_names)
-
+        # --- Parameter Resolution (采用项目标准模式) ---
+        resolved_params = {}
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        # 记录实际使用的输入参数到input_params
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # 1. 尝试直接获取片段数据（最高优先级）
+        segments = get_param_with_fallback("segments_data", resolved_params, workflow_context)
+        
+        # 2. 如果没有直接数据，尝试文件路径
+        if not segments:
+            segments_file = get_param_with_fallback("segments_file", resolved_params, workflow_context)
+            if segments_file:
+                segments = load_segments_from_file(segments_file)
+                recorded_input_params['segments_file'] = segments_file
+        
+        # 3. 使用自定义源阶段列表（如果提供）
+        source_stage_names = get_param_with_fallback("source_stage_names", resolved_params, workflow_context)
+        
+        # 4. 最后回退到原有逻辑（向后兼容）
+        if not segments:
+            # 默认的源阶段列表
+            default_source_stage_names = [
+                'wservice.merge_with_word_timestamps',
+                'wservice.merge_speaker_segments', 
+                'wservice.generate_subtitle_files',
+                'wservice.ai_optimize_subtitles', # AI优化后也可能作为源
+                'faster_whisper.transcribe_audio' # 最终回退到原始转录
+            ]
+            
+            # 使用自定义或默认源阶段列表
+            source_stage_names = source_stage_names if source_stage_names else default_source_stage_names
+            segments, source_name = _get_segments_from_source_stages(workflow_context, source_stage_names)
+            recorded_input_params['fallback_source'] = source_name
+            recorded_input_params['source_stage_names_used'] = source_stage_names
+        else:
+            source_name = 'input_data'
+        
+        # 记录最终使用的参数
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+        
+        # 验证数据
+        if not segments:
+            raise ValueError("无法获取字幕片段数据：请提供segments_data/segments_file参数，或确保有有效的上游节点")
+        
+        # 执行TTS准备逻辑
         service_config = CONFIG.get('wservice', {})
         merger_config = service_config.get('tts_merger_settings', {})
-
+        
         merger = TtsMerger(config=merger_config)
         prepared_segments = merger.merge_segments(segments)
 
         output_data = {
             'prepared_segments': prepared_segments,
             'source_stage': source_name,
-            'total_segments': len(prepared_segments)
+            'total_segments': len(prepared_segments),
+            'input_summary': {
+                'original_segments_count': len(segments),
+                'prepared_segments_count': len(prepared_segments),
+                'data_source': recorded_input_params.get('fallback_source', 'input_data')
+            }
         }
 
         workflow_context.stages[stage_name].status = 'SUCCESS'

@@ -20,7 +20,7 @@ from .celery_app import celery_app
 from .model_manager import get_model_manager
 # 导入新的通用配置加载器
 from services.common.config_loader import CONFIG
-from services.common.parameter_resolver import resolve_parameters
+from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
 from services.common.file_service import get_file_service
 
 # 配置日志
@@ -114,15 +114,31 @@ def separate_vocals(self, context: dict) -> dict:
             audio_source = "已提取音频 (ffmpeg.extract_audio)"
             logger.info(f"[{stage_name}] 成功获取已提取音频: {audio_path}")
 
-        # 如果没有已提取音频，回退到 input_params 中的文件
+        # 如果没有已提取音频，使用统一的参数获取逻辑
         if not audio_path:
-            # 优先从 resolved_params 获取参数
-            audio_path = resolved_params.get("audio_path")
-            if not audio_path:
-                audio_path = workflow_context.input_params.get("input_data", {}).get("audio_path") or workflow_context.input_params.get("input_data", {}).get("video_path")
+            # 使用 get_param_with_fallback 进行统一的参数获取
+            audio_path = get_param_with_fallback(
+                "audio_path",
+                resolved_params,
+                workflow_context,
+                fallback_from_input_data=True
+            )
+            
             if audio_path:
                 audio_source = "原始输入文件"
-                logger.info(f"[{stage_name}] 回退到原始文件: {audio_path}")
+                logger.info(f"[{stage_name}] 统一参数获取成功: {audio_path}")
+            else:
+                # 尝试从 video_path 回退（兼容性）
+                video_path = get_param_with_fallback(
+                    "video_path",
+                    resolved_params,
+                    workflow_context,
+                    fallback_from_input_data=True
+                )
+                if video_path:
+                    audio_path = video_path
+                    audio_source = "原始视频文件"
+                    logger.info(f"[{stage_name}] 从 video_path 回退成功: {audio_path}")
 
         if not audio_path:
             raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
