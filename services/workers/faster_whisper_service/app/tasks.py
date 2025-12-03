@@ -195,17 +195,16 @@ def _execute_transcription(audio_path: str, service_config: dict, stage_name: st
     start_time = time.time()
 
     try:
-        result = subprocess.run(
+        # 使用新的实时日志输出函数
+        from services.common.subprocess_utils import run_gpu_command
+        
+        result = run_gpu_command(
             cmd,
-            capture_output=True,
-            text=True,
+            stage_name=stage_name,
             timeout=1800,  # 30 分钟超时
             cwd=str(current_dir),
             env=os.environ.copy()  # 继承环境变量（包括 CUDA_VISIBLE_DEVICES）
         )
-
-        execution_time = time.time() - start_time
-        logger.info(f"[{stage_name}] subprocess 执行完成，耗时: {execution_time:.3f}s")
 
         # ===== 检查执行结果 =====
         if result.returncode != 0:
@@ -216,6 +215,7 @@ def _execute_transcription(audio_path: str, service_config: dict, stage_name: st
             raise RuntimeError(f"{error_msg}\nstderr: {result.stderr}")
 
         logger.info(f"[{stage_name}] subprocess 执行成功")
+        logger.info(f"[{stage_name}] 总执行时间: {result.execution_time:.3f}s")
 
         # 记录 stderr 输出（推理脚本的日志）
         if result.stderr:

@@ -107,11 +107,13 @@ class AudioSplitter:
     def _check_ffmpeg_availability(self) -> None:
         """检查ffmpeg命令是否可用"""
         try:
-            result = subprocess.run(
+            from services.common.subprocess_utils import run_with_popen
+            
+            result = run_with_popen(
                 ["ffmpeg", "-version"],
-                capture_output=True,
-                text=True,
-                timeout=10
+                stage_name="ffmpeg_availability_check",
+                timeout=10,
+                capture_output=True
             )
             if result.returncode != 0:
                 raise RuntimeError("ffmpeg命令执行失败")
@@ -209,13 +211,15 @@ class AudioSplitter:
                 output_file
             ]
 
-            # 执行ffmpeg命令
+            # 执行ffmpeg命令（升级为实时日志版本）
             start_time = time.time()
-            result = subprocess.run(
+            from services.common.subprocess_utils import run_with_popen
+            
+            result = run_with_popen(
                 command,
-                capture_output=True,
-                text=True,
-                timeout=self.ffmpeg_timeout
+                stage_name=f"audio_splitter_segment_{segment.id}",
+                timeout=self.ffmpeg_timeout,
+                capture_output=True
             )
             processing_time = time.time() - start_time
 

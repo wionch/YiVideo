@@ -313,7 +313,9 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
                 paths_file_path
             ]
             
-            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
+            # 使用新的实时日志输出函数
+            from services.common.subprocess_utils import run_gpu_command
+            result = run_gpu_command(command, stage_name=stage_name, check=True, timeout=1800)
             
             result_str = result.stdout.strip()
 
@@ -553,7 +555,9 @@ def create_stitched_images(self: Task, context: dict) -> dict:
                 "--subtitle-area-json", subtitle_area_json # [核心修正] 传递字幕区域
             ]
             
-            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
+            # 使用新的实时日志输出函数
+            from services.common.subprocess_utils import run_gpu_command
+            result = run_gpu_command(command, stage_name=stage_name, check=True, timeout=1800)
             
             if result.stderr:
                 pass  # logger.warning(f"[{stage_name}] 图像拼接子进程有 stderr 输出:\n{result.stderr.strip()}")
@@ -897,7 +901,9 @@ def perform_ocr(self: Task, context: dict) -> dict:
                 multi_frames_path
             ]
 
-            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=3600)
+            # 使用新的实时日志输出函数
+            from services.common.subprocess_utils import run_gpu_command
+            result = run_gpu_command(command, stage_name=stage_name, check=True, timeout=3600)
 
             if result.stderr:
                 logger.info(f"[{stage_name}] OCR 子进程 stderr 输出:\n{result.stderr.strip()}")

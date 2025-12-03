@@ -384,7 +384,9 @@ def extract_audio(self: Task, context: dict) -> dict:
         ]
 
         try:
-            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
+            # 使用新的实时日志输出函数
+            from services.common.subprocess_utils import run_gpu_command
+            result = run_gpu_command(command, stage_name=stage_name, check=True, timeout=1800)
 
             if result.stderr:
                 logger.warning(f"[{stage_name}] ffmpeg 有 stderr 输出:\n{result.stderr.strip()}")
@@ -541,7 +543,9 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
                 "--crop-area-json", crop_area_json
             ]
 
-            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=1800)
+            # 使用新的实时日志输出函数
+            from services.common.subprocess_utils import run_gpu_command
+            result = run_gpu_command(command, stage_name=stage_name, check=True, timeout=1800)
             result_str = result.stdout.strip()
 
             if result.stderr:

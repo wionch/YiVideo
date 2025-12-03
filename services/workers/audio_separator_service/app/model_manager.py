@@ -83,16 +83,18 @@ class ModelManager:
 
         logger.info(f"执行命令: {' '.join(cmd)}")
 
-        # 执行 subprocess
+        # 执行 subprocess (升级为实时日志版本)
         try:
-            result = subprocess.run(
+            from services.common.subprocess_utils import run_with_popen
+            
+            result = run_with_popen(
                 cmd,
-                capture_output=True,
-                text=True,
+                stage_name="audio_separator_subprocess",
                 timeout=1800,  # 30分钟超时
                 cwd=str(current_dir),
                 env=os.environ.copy(),
-                encoding='utf-8'
+                encoding='utf-8',
+                text=True
             )
 
             if result.returncode != 0:

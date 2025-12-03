@@ -91,7 +91,9 @@
       "mcp__serena__write_memory",
       "mcp__serena__edit_memory",
       "Bash(python3:*)",
-      "SlashCommand(/openspec:proposal:*)"
+      "SlashCommand(/openspec:proposal:*)",
+      "mcp__serena__think_about_task_adherence",
+      "Bash(openspec validate:*)"
     ],
     "deny": [
       "Bash(docker build:*)"

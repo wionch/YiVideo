@@ -241,10 +241,11 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         start_time = time.time()
 
         try:
-            result = subprocess.run(
+            from services.common.subprocess_utils import run_with_popen
+            
+            result = run_with_popen(
                 cmd,
-                capture_output=True,
-                text=True,
+                stage_name="pyannote_audio_subprocess",
                 timeout=1800,  # 30分钟超时
                 cwd=str(current_dir),
                 env=os.environ.copy()
