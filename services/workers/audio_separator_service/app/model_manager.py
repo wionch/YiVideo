@@ -14,8 +14,8 @@ from pathlib import Path
 import subprocess
 import sys
 import json
-import tempfile
 
+from services.common.temp_path_utils import get_temp_path
 from .config import get_config, AudioSeparatorConfig
 
 # 配置日志
@@ -43,6 +43,7 @@ class ModelManager:
         model_name: str,
         output_dir: str,
         model_type: str,
+        workflow_id: Optional[str] = None,
         use_vocal_optimization: bool = False,
         vocal_optimization_level: Optional[str] = None
     ) -> Dict[str, str]:
@@ -55,9 +56,8 @@ class ModelManager:
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
         # 准备输出路径
-        # 使用临时文件来接收子进程的JSON输出
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as tmp:
-            output_file = tmp.name
+        # 使用基于工作流ID的临时文件来接收子进程的JSON输出
+        output_file = get_temp_path(workflow_id or "audio_separator", '.json')
         
         logger.info(f"子进程结果临时文件: {output_file}")
 

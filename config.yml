@@ -1,752 +1,750 @@
-
-
 # 0. 系统核心配置 (新增)
 core:
-  # 工作流状态记录在Redis中的过期时间（天）
-  workflow_ttl_days: 7
-  
-  # 工作流执行完成后是否删除临时文件
-  # true: 执行完后删除临时文件，节省磁盘空间（推荐）
-  # false: 保留临时文件，便于调试和问题排查
-  cleanup_temp_files: false
+    # 工作流状态记录在Redis中的过期时间（天）
+    workflow_ttl_days: 7
+
+    # 工作流执行完成后是否删除临时文件
+    # true: 执行完后删除临时文件，节省磁盘空间（推荐）
+    # false: 保留临时文件，便于调试和问题排查
+    cleanup_temp_files: false
 
 # 1. Redis 配置 (新增)
 redis:
-  host: ${REDIS_HOST:redis} # 优先使用环境变量，否则使用默认值
-  port: 6379
-  # 用于Celery Broker
-  db_broker: 0
-  # 用于Celery Backend
-  db_backend: 1
-  # 用于分布式锁
-  db_locks: 2
-  # 用于工作流状态存储
-  db_state_store: 3
+    host: ${REDIS_HOST:redis} # 优先使用环境变量，否则使用默认值
+    port: 6379
+    # 用于Celery Broker
+    db_broker: 0
+    # 用于Celery Backend
+    db_backend: 1
+    # 用于分布式锁
+    db_locks: 2
+    # 用于工作流状态存储
+    db_state_store: 3
 
 # 2. 解码器模块配置
 decoder:
-  # GPU解码时，一次性送入显存的帧数。更大的值可以加快解码速度，但会增加显存占用。
-  # 建议值: 16, 32, 64
-  batch_size: 32
+    # GPU解码时，一次性送入显存的帧数。更大的值可以加快解码速度，但会增加显存占用。
+    # 建议值: 16, 32, 64
+    batch_size: 32
 
 # 3. 字幕区域检测模块配置
 area_detector:
-  # 为了确定字幕区域，从整个视频中均匀采样的帧数。值越大，区域定位越准，但检测耗时越长。
-  # 建议值: 100 ~ 500
-  sample_count: 300
-  # 在采样帧中，被认为是有效文本的最小字符长度。用于计算权重，避免将单个噪点字符计入范围。
-  # 建议值: 2, 3
-  min_text_len: 2
-  # 用于并行分析视频帧以确定字幕位置的工作进程数。
-  # 默认值: min(CPU核心数, 4)
-  num_workers: 4
-  # 检测到的字幕区域上下各扩展的像素数，用于确保完整捕获字幕内容。
-  # 建议值: 5-10 (精确字幕), 10-15 (一般场景), 15-30 (有特效字幕)
-  y_padding: 10
+    # 为了确定字幕区域，从整个视频中均匀采样的帧数。值越大，区域定位越准，但检测耗时越长。
+    # 建议值: 100 ~ 500
+    sample_count: 300
+    # 在采样帧中，被认为是有效文本的最小字符长度。用于计算权重，避免将单个噪点字符计入范围。
+    # 建议值: 2, 3
+    min_text_len: 2
+    # 用于并行分析视频帧以确定字幕位置的工作进程数。
+    # 默认值: min(CPU核心数, 4)
+    num_workers: 4
+    # 检测到的字幕区域上下各扩展的像素数，用于确保完整捕获字幕内容。
+    # 建议值: 5-10 (精确字幕), 10-15 (一般场景), 15-30 (有特效字幕)
+    y_padding: 10
 
 # 4. 关键帧检测模块配置
 keyframe_detector:
-  # 感知哈希(dHash)的大小。更高的值可以更精确地捕捉图像内容的细节，但也可能对微小噪点更敏感。
-  # 推荐值: 8, 16
-  dhash_size: 8
-  # 相似度阈值。两帧间相似度低于此值则认为是新的关键帧。
-  # - 90% (0.90): 严格模式，只有显著差异才触发新关键帧
-  # - 85% (0.85): 平衡模式，适合大多数场景
-  # - 80% (0.80): 宽松模式，对细微变化也敏感
-  # 建议值: 0.98 (修复重复字幕问题)
-  similarity_threshold: 0.98
-  
-  # dHash区域优化配置 (聚焦字幕中心，减少背景干扰)
-  # dHash焦点区域宽度计算公式: 字幕高度 × dhash_focus_ratio
-  # - 2.0: 较窄焦点，最小背景干扰
-  # - 3.0: 平衡焦点，推荐值  
-  # - 4.0: 较宽焦点，适合字体较大的字幕
-  dhash_focus_ratio: 3.0
-  # 最小焦点宽度保护，防止极小字幕导致焦点区域过窄
-  # 建议值: 150-300像素
-  min_focus_width: 200
+    # 感知哈希(dHash)的大小。更高的值可以更精确地捕捉图像内容的细节，但也可能对微小噪点更敏感。
+    # 推荐值: 8, 16
+    dhash_size: 8
+    # 相似度阈值。两帧间相似度低于此值则认为是新的关键帧。
+    # - 90% (0.90): 严格模式，只有显著差异才触发新关键帧
+    # - 85% (0.85): 平衡模式，适合大多数场景
+    # - 80% (0.80): 宽松模式，对细微变化也敏感
+    # 建议值: 0.98 (修复重复字幕问题)
+    similarity_threshold: 0.98
+
+    # dHash区域优化配置 (聚焦字幕中心，减少背景干扰)
+    # dHash焦点区域宽度计算公式: 字幕高度 × dhash_focus_ratio
+    # - 2.0: 较窄焦点，最小背景干扰
+    # - 3.0: 平衡焦点，推荐值
+    # - 4.0: 较宽焦点，适合字体较大的字幕
+    dhash_focus_ratio: 3.0
+    # 最小焦点宽度保护，防止极小字幕导致焦点区域过窄
+    # 建议值: 150-300像素
+    min_focus_width: 200
 
 # 5. OCR识别模块配置
 ocr:
-  # OCR语言设置
-  lang: 'en' # 英文en 中文ch
-  # 并行处理的工作进程数
-  num_workers: 4
-  
-  # PaddleOCR 3.x 核心参数配置 (基于测试结果优化)
-  paddleocr_config:
-    # 模型版本选择 - PP-OCRv5是最新最准确的版本
-    ocr_version: 'PP-OCRv5'
-    
-    # 文本检测参数 (针对字幕条优化)
-    text_det_limit_side_len: 736         # 检测模型输入边长限制 (修正为代码默认值)
-    text_det_thresh: 0.30               # 文本检测像素阈值
-    text_det_box_thresh: 0.60           # 文本检测框阈值 
-    text_det_unclip_ratio: 1.50         # 文本检测扩张系数
-    text_det_input_shape: null          # 检测模型输入形状，null使用默认
-    
-    # 文本识别参数
-    text_recognition_batch_size: 8      # 识别批处理大小
-    text_rec_score_thresh: 0            # 文本识别阈值
-    text_rec_input_shape: null          # 识别模型输入形状，null使用默认
-    
-    # 方向分类参数 (字幕场景优化：全部关闭以提高速度)
-    use_doc_orientation_classify: false    # 关闭文档图像方向分类
-    use_doc_unwarping: false              # 关闭文档扭曲矫正
-    use_textline_orientation: false       # 关闭文本行方向分类
-    textline_orientation_batch_size: 6    # 方向分类批处理大小
-    
-    # 其他优化参数
-    return_word_box: false          # 是否返回单词级别的边界框
-    precision: "fp32"              # 推理精度：fp32(精度高) 或 fp16(速度快)
-    use_tensorrt: false            # 是否启用TensorRT加速
-  
-  # 模型配置 - 用于字幕场景的最佳模型选择
-  models:
-    # 文本检测模型
-    detection_model: "PP-OCRv5_server_det"
-    
-    # 文本识别模型配置 - 按语言优化选择
-    recognition_models:
-      zh: "PP-OCRv5_server_rec"           # 中文简体
-      chinese_cht: "PP-OCRv5_server_rec"  # 中文繁体
-      en: "en_PP-OCRv5_mobile_rec"        # 英文专用 (轻量高效)
-      ja: "PP-OCRv5_server_rec"           # 日文
-      korean: "korean_PP-OCRv5_mobile_rec" # 韩文
-      fr: "latin_PP-OCRv5_mobile_rec"     # 法语
-      de: "latin_PP-OCRv5_mobile_rec"     # 德语
-      es: "latin_PP-OCRv5_mobile_rec"     # 西班牙语
-      it: "latin_PP-OCRv5_mobile_rec"     # 意大利语
-      pt: "latin_PP-OCRv5_mobile_rec"     # 葡萄牙语
-      ru: "eslav_PP-OCRv5_mobile_rec"     # 俄语
-      th: "th_PP-OCRv5_mobile_rec"        # 泰语
-      ar: "ar_PP-OCRv5_mobile_rec"        # 阿拉伯语
-      default: "PP-OCRv5_server_rec"      # 默认回退模型
-    
-    # 字幕场景优化设置
-    subtitle_optimized: true
+    # OCR语言设置
+    lang: 'en' # 英文en 中文ch
+    # 并行处理的工作进程数
+    num_workers: 4
+
+    # PaddleOCR 3.x 核心参数配置 (基于测试结果优化)
+    paddleocr_config:
+        # 模型版本选择 - PP-OCRv5是最新最准确的版本
+        ocr_version: 'PP-OCRv5'
+
+        # 文本检测参数 (针对字幕条优化)
+        text_det_limit_side_len: 736 # 检测模型输入边长限制 (修正为代码默认值)
+        text_det_thresh: 0.30 # 文本检测像素阈值
+        text_det_box_thresh: 0.60 # 文本检测框阈值
+        text_det_unclip_ratio: 1.50 # 文本检测扩张系数
+        text_det_input_shape: null # 检测模型输入形状，null使用默认
+
+        # 文本识别参数
+        text_recognition_batch_size: 8 # 识别批处理大小
+        text_rec_score_thresh: 0 # 文本识别阈值
+        text_rec_input_shape: null # 识别模型输入形状，null使用默认
+
+        # 方向分类参数 (字幕场景优化：全部关闭以提高速度)
+        use_doc_orientation_classify: false # 关闭文档图像方向分类
+        use_doc_unwarping: false # 关闭文档扭曲矫正
+        use_textline_orientation: false # 关闭文本行方向分类
+        textline_orientation_batch_size: 6 # 方向分类批处理大小
+
+        # 其他优化参数
+        return_word_box: false # 是否返回单词级别的边界框
+        precision: 'fp32' # 推理精度：fp32(精度高) 或 fp16(速度快)
+        use_tensorrt: false # 是否启用TensorRT加速
+
+    # 模型配置 - 用于字幕场景的最佳模型选择
+    models:
+        # 文本检测模型
+        detection_model: 'PP-OCRv5_server_det'
+
+        # 文本识别模型配置 - 按语言优化选择
+        recognition_models:
+            zh: 'PP-OCRv5_server_rec' # 中文简体
+            chinese_cht: 'PP-OCRv5_server_rec' # 中文繁体
+            en: 'en_PP-OCRv5_mobile_rec' # 英文专用 (轻量高效)
+            ja: 'PP-OCRv5_server_rec' # 日文
+            korean: 'korean_PP-OCRv5_mobile_rec' # 韩文
+            fr: 'latin_PP-OCRv5_mobile_rec' # 法语
+            de: 'latin_PP-OCRv5_mobile_rec' # 德语
+            es: 'latin_PP-OCRv5_mobile_rec' # 西班牙语
+            it: 'latin_PP-OCRv5_mobile_rec' # 意大利语
+            pt: 'latin_PP-OCRv5_mobile_rec' # 葡萄牙语
+            ru: 'eslav_PP-OCRv5_mobile_rec' # 俄语
+            th: 'th_PP-OCRv5_mobile_rec' # 泰语
+            ar: 'ar_PP-OCRv5_mobile_rec' # 阿拉伯语
+            default: 'PP-OCRv5_server_rec' # 默认回退模型
+
+        # 字幕场景优化设置
+        subtitle_optimized: true
 
 # 6. 后处理器模块配置
 postprocessor:
-  # 一条字幕被认为是有效的最小持续时间（单位：秒）。用于过滤掉因检测错误而产生的快速闪现的无效字幕。
-  # 建议值: 0.1 ~ 0.5
-  min_duration_seconds: 0.2
+    # 一条字幕被认为是有效的最小持续时间（单位：秒）。用于过滤掉因检测错误而产生的快速闪现的无效字幕。
+    # 建议值: 0.1 ~ 0.5
+    min_duration_seconds: 0.2
 
 # 7. 流水线控制
 pipeline:
-  # true: 只处理内容变化的关键帧 (推荐，性能更好)。
-  # false: 处理视频的每一帧。速度极慢，但能捕捉所有微小变化。
-  detect_keyframes: false
-  
-  # true: 将多个字幕条拼接成一张大图进行OCR (推荐，提高效率)。
-  # false: 对每个字幕条独立进行OCR。
-  use_image_concat: true
-  
-  # 当 use_image_concat=true 时，每多少个字幕条合并成一张图片。
-  concat_batch_size: 10
+    # true: 只处理内容变化的关键帧 (推荐，性能更好)。
+    # false: 处理视频的每一帧。速度极慢，但能捕捉所有微小变化。
+    detect_keyframes: false
 
-  # [新增] 字幕条拼接任务的并发进程数
-  stitching_workers: 10
-  
-  # 帧缓存策略。
-  # "memory": 帧图像缓存在内存中。速度快，内存占用高。
-  # "pic": 帧图像保存为临时图片文件。内存占用低，磁盘I/O开销大。
-  frame_cache_strategy: "pic"
+    # true: 将多个字幕条拼接成一张大图进行OCR (推荐，提高效率)。
+    # false: 对每个字幕条独立进行OCR。
+    use_image_concat: true
+
+    # 当 use_image_concat=true 时，每多少个字幕条合并成一张图片。
+    concat_batch_size: 10
+
+    # [新增] 字幕条拼接任务的并发进程数
+    stitching_workers: 10
+
+    # 帧缓存策略。
+    # "memory": 帧图像缓存在内存中。速度快，内存占用高。
+    # "pic": 帧图像保存为临时图片文件。内存占用低，磁盘I/O开销大。
+    frame_cache_strategy: 'pic'
 
 # 8. LLM 服务配置
 llm_service:
-  # 如果工作流中未指定，则使用此默认提供商
-  default_provider: gemini
-  # 各个大模型提供商的配置
-  providers:
-    gemini:
-      # 在此处填入你的Gemini API Key
-      api_key: ""
-      # Gemini Pro 模型的API Endpoint
-      api_base_url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
-    deepseek:
-      # 在此处填入你的DeepSeek API Key
-      api_key: ""
-      # DeepSeek 模型的API Endpoint
-      api_base_url: "https://api.deepseek.com/chat/completions"
+    # 如果工作流中未指定，则使用此默认提供商
+    default_provider: gemini
+    # 各个大模型提供商的配置
+    providers:
+        gemini:
+            # 在此处填入你的Gemini API Key
+            api_key: ''
+            # Gemini Pro 模型的API Endpoint
+            api_base_url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
+        deepseek:
+            # 在此处填入你的DeepSeek API Key
+            api_key: ''
+            # DeepSeek 模型的API Endpoint
+            api_base_url: 'https://api.deepseek.com/chat/completions'
 
 # 9. Faster Whisper Service 配置 (新增)
 faster_whisper_service:
-  # === 基础 ASR 配置 ===
-  # Faster Whisper ASR 模型设置
-  # 使用与v3测试脚本相同的Systran优化模型
-  model_name: "Systran/faster-whisper-large-v3"
-  # ASR 语言代码。如果设置为null，将自动检测。
-  language: null
-  # 推理设备: "cuda" 或 "cpu"
-  device: "cuda"
-  # 推理精度: "float16", "float32", "int8"
-  compute_type: "float16"
-  # 转录时的批处理大小，根据显存调整
-  batch_size: 4
+    # === 基础 ASR 配置 ===
+    # Faster Whisper ASR 模型设置
+    # 使用与v3测试脚本相同的Systran优化模型
+    model_name: 'Systran/faster-whisper-large-v3'
+    # ASR 语言代码。如果设置为null，将自动检测。
+    language: null
+    # 推理设备: "cuda" 或 "cpu"
+    device: 'cuda'
+    # 推理精度: "float16", "float32", "int8"
+    compute_type: 'float16'
+    # 转录时的批处理大小，根据显存调整
+    batch_size: 4
 
-  # === 高级功能配置 ===
-  # 启用词级时间戳（推荐启用）
-  enable_word_timestamps: true
+    # === 高级功能配置 ===
+    # 启用词级时间戳（推荐启用）
+    enable_word_timestamps: true
 
-  # === 词级说话人匹配配置 ===
-  # 是否启用词级时间戳精确匹配（推荐启用）
-  enable_word_level_matching: true
-  # 最小字幕片段时长（秒），防止产生过短的字幕
-  min_subtitle_duration: 0.5
-  # 最大字幕片段时长（秒），防止产生过长的字幕
-  max_subtitle_duration: 10.0
-  # 是否启用智能断句（在保持说话人边界的前提下）
-  enable_smart_breaking: true
+    # === 词级说话人匹配配置 ===
+    # 是否启用词级时间戳精确匹配（推荐启用）
+    enable_word_level_matching: true
+    # 最小字幕片段时长（秒），防止产生过短的字幕
+    min_subtitle_duration: 0.5
+    # 最大字幕片段时长（秒），防止产生过长的字幕
+    max_subtitle_duration: 10.0
+    # 是否启用智能断句（在保持说话人边界的前提下）
+    enable_smart_breaking: true
 
-  # === 字幕合并配置 ===
-  # 新增：用于合并转录字幕与说话人时间段的配置
-  subtitle_merge:
-    # 说话人边界检测阈值（0-1），较低值会更积极地检测边界
-    speaker_boundary_threshold: 0.5
-    # 置信度阈值（0-1），低于此值的说话人匹配会被标记
-    confidence_threshold: 0.6
-    # 词级匹配容差（秒），用于词级时间戳匹配
-    word_matching_tolerance: 0.1
-    # 最小词置信度（0-1），用于过滤低质量的词级时间戳
-    min_word_confidence: 0.5
+    # === 字幕合并配置 ===
+    # 新增：用于合并转录字幕与说话人时间段的配置
+    subtitle_merge:
+        # 说话人边界检测阈值（0-1），较低值会更积极地检测边界
+        speaker_boundary_threshold: 0.5
+        # 置信度阈值（0-1），低于此值的说话人匹配会被标记
+        confidence_threshold: 0.6
+        # 词级匹配容差（秒），用于词级时间戳匹配
+        word_matching_tolerance: 0.1
+        # 最小词置信度（0-1），用于过滤低质量的词级时间戳
+        min_word_confidence: 0.5
 
-  # === 音频配置 ===
-  # 音频采样率
-  audio_sample_rate: 16000
-  # 音频通道数
-  audio_channels: 1
+    # === 音频配置 ===
+    # 音频采样率
+    audio_sample_rate: 16000
+    # 音频通道数
+    audio_channels: 1
 
-  # === GPU配置 ===
-  # 是否启用GPU锁机制
-  enable_gpu_lock: true
-  # GPU设备ID，-1表示自动选择，0表示第一个GPU
-  gpu_device_id: 0
+    # === GPU配置 ===
+    # 是否启用GPU锁机制
+    enable_gpu_lock: true
+    # GPU设备ID，-1表示自动选择，0表示第一个GPU
+    gpu_device_id: 0
 
-  # === 监控配置 ===
-  # 是否启用性能监控
-  enable_monitoring: true
-  # 日志级别: DEBUG, INFO, WARNING, ERROR
-  log_level: "INFO"
+    # === 监控配置 ===
+    # 是否启用性能监控
+    enable_monitoring: true
+    # 日志级别: DEBUG, INFO, WARNING, ERROR
+    log_level: 'INFO'
 
 # 10. GPU锁配置 (新增)
 # 用于优化GPU资源的并发访问控制，提升系统吞吐量
 gpu_lock:
-  # 初始轮询间隔（秒）
-  poll_interval: 2
-  # 最大等待时间（秒）
-  max_wait_time: 1800
-  # 锁超时时间（秒）- 防止任务崩溃导致死锁
-  lock_timeout: 3600
-  # 启用指数退避 - 动态调整轮询间隔，避免固定间隔的 thundering herd 问题
-  exponential_backoff: true
-  # 最大轮询间隔（秒）- 指数退避的上限
-  max_poll_interval: 10
+    # 初始轮询间隔（秒）
+    poll_interval: 2
+    # 最大等待时间（秒）
+    max_wait_time: 1800
+    # 锁超时时间（秒）- 防止任务崩溃导致死锁
+    lock_timeout: 3600
+    # 启用指数退避 - 动态调整轮询间隔，避免固定间隔的 thundering herd 问题
+    exponential_backoff: true
+    # 最大轮询间隔（秒）- 指数退避的上限
+    max_poll_interval: 10
 
 # 11. GPU锁监控配置 (新增)
 # 用于主动监控GPU锁状态，自动检测和恢复死锁
 gpu_lock_monitor:
-  # 监控间隔（秒）
-  monitor_interval: 30
+    # 监控间隔（秒）
+    monitor_interval: 30
 
-  # 分级超时配置
-  timeout_levels:
-    warning: 1800      # 30分钟 - 记录警告日志
-    soft_timeout: 3600  # 60分钟 - 尝试优雅终止
-    hard_timeout: 7200  # 120分钟 - 强制释放锁
+    # 分级超时配置
+    timeout_levels:
+        warning: 1800 # 30分钟 - 记录警告日志
+        soft_timeout: 3600 # 60分钟 - 尝试优雅终止
+        hard_timeout: 7200 # 120分钟 - 强制释放锁
 
-  # 心跳配置
-  heartbeat:
-    interval: 60       # 任务心跳间隔
-    timeout: 300       # 心跳超时时间
+    # 心跳配置
+    heartbeat:
+        interval: 60 # 任务心跳间隔
+        timeout: 300 # 心跳超时时间
 
-  # 清理配置
-  cleanup:
-    max_retry: 3       # 最大重试次数
-    retry_delay: 60    # 重试间隔
+    # 清理配置
+    cleanup:
+        max_retry: 3 # 最大重试次数
+        retry_delay: 60 # 重试间隔
 
-  # 监控开关
-  enabled: true       # 是否启用监控功能
-  auto_recovery: true # 是否启用自动恢复
+    # 监控开关
+    enabled: true # 是否启用监控功能
+    auto_recovery: true # 是否启用自动恢复
 
-  # 健康检查阈值
-  health_thresholds:
-    min_success_rate: 0.8     # 最小成功率
-    max_timeout_rate: 0.2     # 最大超时率
-    max_lock_age: 3600        # 最大锁持有时间
-    recent_window_size: 20    # 最近统计窗口大小
+    # 健康检查阈值
+    health_thresholds:
+        min_success_rate: 0.8 # 最小成功率
+        max_timeout_rate: 0.2 # 最大超时率
+        max_lock_age: 3600 # 最大锁持有时间
+        recent_window_size: 20 # 最近统计窗口大小
 
 # 12. Audio Separator Service 配置 (新增)
 # 基于 UVR-MDX 和 Demucs 模型的人声/背景音分离服务
 audio_separator_service:
-  # === 模型类型选择 ===
-  # 支持的模型类型: "mdx" 或 "demucs"
-  model_type: "demucs"  # 默认使用MDX模型
-  
-  # === MDX 模型配置 ===
-  # 默认使用的 UVR-MDX 模型（平衡质量和速度）
-  default_model: "UVR-MDX-NET-Inst_HQ_5.onnx"
-  # 高质量模型（人声专用优化）
-  high_quality_model: "UVR-MDX-NET-Voc_FT.onnx"
-  # 快速模型（质量稍低，速度更快）
-  fast_model: "UVR-MDX-NET-Inst_3.onnx"
-  # 人声专用优化模型（推荐用于人声分离）
-  vocal_optimization_model: "UVR-MDX-NET-Voc_FT.onnx"
-  # 模型文件存储目录 - 映射到宿主机避免重复下载
-  models_dir: "/models/uvr_mdx"
-  
-  # === Demucs 模型配置 ===
-  # Demucs v4 模型（最新版本，质量最高）
-  # 注意：audio-separator库需要模型文件名带.yaml扩展名
-  demucs_default_model: "htdemucs.yaml"
-  # Demucs v4 fast模型（速度更快）
-  demucs_fast_model: "htdemucs_ft.yaml"
-  # Demucs v4 模型（平衡质量和速度）
-  demucs_balanced_model: "htdemucs.yaml"
-  # Demucs v4 6-stem高质量模型
-  demucs_high_quality_model: "htdemucs_6s.yaml"
-  # Demucs模型文件存储目录
-  demucs_models_dir: "/models/demucs"
+    # === 模型类型选择 ===
+    # 支持的模型类型: "mdx" 或 "demucs"
+    model_type: 'demucs' # 默认使用MDX模型
 
-  # === GPU 配置 ===
-  # 是否使用 GPU 加速
-  use_gpu: true
-  # GPU 设备 ID
-  gpu_id: 0
-  # 是否启用 GPU 锁机制（推荐启用，与其他服务共享 GPU）
-  enable_gpu_lock: true
+    # === MDX 模型配置 ===
+    # 默认使用的 UVR-MDX 模型（平衡质量和速度）
+    default_model: 'UVR-MDX-NET-Inst_HQ_5.onnx'
+    # 高质量模型（人声专用优化）
+    high_quality_model: 'UVR-MDX-NET-Voc_FT.onnx'
+    # 快速模型（质量稍低，速度更快）
+    fast_model: 'UVR-MDX-NET-Inst_3.onnx'
+    # 人声专用优化模型（推荐用于人声分离）
+    vocal_optimization_model: 'UVR-MDX-NET-Voc_FT.onnx'
+    # 模型文件存储目录 - 映射到宿主机避免重复下载
+    models_dir: '/models/uvr_mdx'
 
-  # === 输出配置 ===
-  # 输出音频格式: flac(无损推荐), wav(无损), mp3(压缩)
-  output_format: "flac"
-  # 音频归一化阈值（0.0-1.0）
-  normalization_threshold: 0.9
-  # 注意：输出目录已改为按工作流ID动态创建: /share/workflows/{workflow_id}/audio/audio_separated
+    # === Demucs 模型配置 ===
+    # Demucs v4 模型（最新版本，质量最高）
+    # 注意：audio-separator库需要模型文件名带.yaml扩展名
+    demucs_default_model: 'htdemucs.yaml'
+    # Demucs v4 fast模型（速度更快）
+    demucs_fast_model: 'htdemucs_ft.yaml'
+    # Demucs v4 模型（平衡质量和速度）
+    demucs_balanced_model: 'htdemucs.yaml'
+    # Demucs v4 6-stem高质量模型
+    demucs_high_quality_model: 'htdemucs_6s.yaml'
+    # Demucs模型文件存储目录
+    demucs_models_dir: '/models/demucs'
 
-  # === 性能配置 ===
-  # MDX 模型分段大小（影响显存占用和速度）
-  mdx_segment_size: 256  # 使用较小的值避免显存问题
-  # MDX 模型批处理大小
-  mdx_batch_size: 1      # 确保批处理大小为1，避免并发问题
-  # 是否启用 Test-Time Augmentation（提高质量但降低速度约 2-3 倍）
-  enable_tta: false
-  
-  # === Demucs 模型参数 ===
-  # Demucs模型分段大小（影响显存占用和速度）
-  # 可选值: "default" (使用库默认值), 数值 (如10.0表示10秒分段)
-  # 注意: 字符串"default"会在代码中转换为None，让audio-separator库使用默认值
-  demucs_segment: "default"
-  
-  # Demucs模型 shifts参数（提高质量但降低速度）
-  # 范围: 0-10，值越大质量越高但速度越慢
-  demucs_shifts: 2
+    # === GPU 配置 ===
+    # 是否使用 GPU 加速
+    use_gpu: true
+    # GPU 设备 ID
+    gpu_id: 0
+    # 是否启用 GPU 锁机制（推荐启用，与其他服务共享 GPU）
+    enable_gpu_lock: true
 
-  # === 文件管理配置 ===
-  # 是否自动清理临时文件
-  cleanup_temp_files: true
-  # 是否保留背景音文件（用于后续视频合成）
-  preserve_background: true
-  # 分离文件保留天数（超过后自动清理）
-  file_retention_days: 7
+    # === 输出配置 ===
+    # 输出音频格式: flac(无损推荐), wav(无损), mp3(压缩)
+    output_format: 'flac'
+    # 音频归一化阈值（0.0-1.0）
+    normalization_threshold: 0.9
+    # 注意：输出目录已改为按工作流ID动态创建: /share/workflows/{workflow_id}/audio/audio_separated
 
-  # === 监控配置 ===
-  # 是否启用性能监控
-  enable_monitoring: true
-  # 日志级别: DEBUG, INFO, WARNING, ERROR
-  log_level: "INFO"
+    # === 性能配置 ===
+    # MDX 模型分段大小（影响显存占用和速度）
+    mdx_segment_size: 256 # 使用较小的值避免显存问题
+    # MDX 模型批处理大小
+    mdx_batch_size: 1 # 确保批处理大小为1，避免并发问题
+    # 是否启用 Test-Time Augmentation（提高质量但降低速度约 2-3 倍）
+    enable_tta: false
+
+    # === Demucs 模型参数 ===
+    # Demucs模型分段大小（影响显存占用和速度）
+    # 可选值: "default" (使用库默认值), 数值 (如10.0表示10秒分段)
+    # 注意: 字符串"default"会在代码中转换为None，让audio-separator库使用默认值
+    demucs_segment: 'default'
+
+    # Demucs模型 shifts参数（提高质量但降低速度）
+    # 范围: 0-10，值越大质量越高但速度越慢
+    demucs_shifts: 2
+
+    # === 文件管理配置 ===
+    # 是否自动清理临时文件
+    cleanup_temp_files: true
+    # 是否保留背景音文件（用于后续视频合成）
+    preserve_background: true
+    # 分离文件保留天数（超过后自动清理）
+    file_retention_days: 7
+
+    # === 监控配置 ===
+    # 是否启用性能监控
+    enable_monitoring: true
+    # 日志级别: DEBUG, INFO, WARNING, ERROR
+    log_level: 'INFO'
 
 # 13. FFmpeg Service 配置 (新增)
 # FFmpeg视频处理服务，支持音频提取、关键帧提取和音频分割功能
 ffmpeg_service:
-  # === 基础配置 ===
-  # 是否启用 GPU 锁机制（推荐启用，与其他服务共享 GPU）
-  enable_gpu_lock: true
-  # FFmpeg 命令超时时间（秒）
-  command_timeout: 1800
+    # === 基础配置 ===
+    # 是否启用 GPU 锁机制（推荐启用，与其他服务共享 GPU）
+    enable_gpu_lock: true
+    # FFmpeg 命令超时时间（秒）
+    command_timeout: 1800
 
-  # === 音频分割配置 ===
-  split_audio:
-    # 输出音频格式: wav(无损推荐), flac(无损), mp3(压缩), aac, m4a
-    output_format: "wav"
-    # 音频采样率 (建议16000用于语音处理)
-    sample_rate: 16000
-    # 音频声道数: 1(单声道), 2(立体声)
-    channels: 1
-    # 最小片段时长（秒），防止产生过短的片段
-    min_segment_duration: 1.0
-    # 最大片段时长（秒），防止产生过长的片段
-    max_segment_duration: 30.0
-    # 是否按说话人分组存储音频文件
-    group_by_speaker: false
-    # 是否包含静音段（时长小于min_segment_duration的片段）
-    include_silence: false
-    # 分割后的音频文件存储目录（工作流中间数据）
-    output_dir: "/share/workflows/audio_segments"
-    # FFmpeg 音频分割命令超时时间（秒）
-    split_timeout: 300
+    # === 音频分割配置 ===
+    split_audio:
+        # 输出音频格式: wav(无损推荐), flac(无损), mp3(压缩), aac, m4a
+        output_format: 'wav'
+        # 音频采样率 (建议16000用于语音处理)
+        sample_rate: 16000
+        # 音频声道数: 1(单声道), 2(立体声)
+        channels: 1
+        # 最小片段时长（秒），防止产生过短的片段
+        min_segment_duration: 1.0
+        # 最大片段时长（秒），防止产生过长的片段
+        max_segment_duration: 30.0
+        # 是否按说话人分组存储音频文件
+        group_by_speaker: false
+        # 是否包含静音段（时长小于min_segment_duration的片段）
+        include_silence: false
+        # 分割后的音频文件存储目录（工作流中间数据）
+        output_dir: '/share/workflows/audio_segments'
+        # FFmpeg 音频分割命令超时时间（秒）
+        split_timeout: 300
 
-    # === 并发分割配置 (新增) ===
-    # 是否启用并发分割（推荐启用，可显著提升分割速度）
-    enable_concurrent: true
-    # 最大并发线程数（建议根据CPU核心数调整，4-12为佳）
-    max_workers: 8
-    # 并发操作总超时时间（秒）
-    concurrent_timeout: 600
-    # 批处理大小（用于控制内存使用）
-    batch_size: 20
+        # === 并发分割配置 (新增) ===
+        # 是否启用并发分割（推荐启用，可显著提升分割速度）
+        enable_concurrent: true
+        # 最大并发线程数（建议根据CPU核心数调整，4-12为佳）
+        max_workers: 8
+        # 并发操作总超时时间（秒）
+        concurrent_timeout: 600
+        # 批处理大小（用于控制内存使用）
+        batch_size: 20
 
-  # === 字幕文件配置 ===
-  subtitle:
-    # 字幕文件优先级顺序
-    # 1. speaker_srt_path: 带说话人信息的SRT文件
-    # 2. subtitle_path: 基础SRT文件
-    # 3. speaker_json_path: 带说话人信息的JSON文件
-    priority_order: ["speaker_srt_path", "subtitle_path", "speaker_json_path"]
-    # 是否自动检测字幕文件格式
-    auto_detect_format: true
-    # 字幕时间戳容差（秒），用于验证时间戳有效性
-    timestamp_tolerance: 0.1
+    # === 字幕文件配置 ===
+    subtitle:
+        # 字幕文件优先级顺序
+        # 1. speaker_srt_path: 带说话人信息的SRT文件
+        # 2. subtitle_path: 基础SRT文件
+        # 3. speaker_json_path: 带说话人信息的JSON文件
+        priority_order: ['speaker_srt_path', 'subtitle_path', 'speaker_json_path']
+        # 是否自动检测字幕文件格式
+        auto_detect_format: true
+        # 字幕时间戳容差（秒），用于验证时间戳有效性
+        timestamp_tolerance: 0.1
 
-  # === 音频源配置 ===
-  audio_source:
-    # 音频文件优先级顺序（工作流中）
-    # 1. vocal_audio: audio_separator.separate_vocals 输出的人声音频
-    # 2. audio_path: ffmpeg.extract_audio 输出的默认音频
-    priority_order: ["vocal_audio", "audio_path"]
-    # 音频格式验证：是否检查文件扩展名
-    validate_format: true
-    # 支持的音频格式
-    supported_formats: ["wav", "flac", "mp3", "aac", "m4a", "ogg", "opus"]
+    # === 音频源配置 ===
+    audio_source:
+        # 音频文件优先级顺序（工作流中）
+        # 1. vocal_audio: audio_separator.separate_vocals 输出的人声音频
+        # 2. audio_path: ffmpeg.extract_audio 输出的默认音频
+        priority_order: ['vocal_audio', 'audio_path']
+        # 音频格式验证：是否检查文件扩展名
+        validate_format: true
+        # 支持的音频格式
+        supported_formats: ['wav', 'flac', 'mp3', 'aac', 'm4a', 'ogg', 'opus']
 
-  # === 输出目录结构配置 ===
-  output_structure:
-    # 启用按说话人分组的子目录结构
-    enable_speaker_groups: true
-    # 分组子目录名称
-    speaker_group_dir: "by_speaker"
-    # 普通片段子目录名称
-    segments_dir: "segments"
-    # 信息文件名称
-    info_filename: "split_info.json"
-    # 是否生成详细的统计信息
-    generate_statistics: true
+    # === 输出目录结构配置 ===
+    output_structure:
+        # 启用按说话人分组的子目录结构
+        enable_speaker_groups: true
+        # 分组子目录名称
+        speaker_group_dir: 'by_speaker'
+        # 普通片段子目录名称
+        segments_dir: 'segments'
+        # 信息文件名称
+        info_filename: 'split_info.json'
+        # 是否生成详细的统计信息
+        generate_statistics: true
 
-  # === 性能优化配置 ===
-  performance:
-    # 并行处理的工作进程数（0表示自动检测CPU核心数）
-    worker_processes: 0
-    # 批处理大小（用于批量分割）
-    batch_size: 10
-    # 是否启用进度回调
-    enable_progress_callback: true
+    # === 性能优化配置 ===
+    performance:
+        # 并行处理的工作进程数（0表示自动检测CPU核心数）
+        worker_processes: 0
+        # 批处理大小（用于批量分割）
+        batch_size: 10
+        # 是否启用进度回调
+        enable_progress_callback: true
 
-  # === 错误处理配置 ===
-  error_handling:
-    # 重试次数
-    max_retries: 3
-    # 重试间隔（秒）
-    retry_delay: 5
-    # 是否在失败时继续处理其他片段
-    continue_on_error: true
-    # 是否记录详细的错误信息
-    verbose_errors: true
+    # === 错误处理配置 ===
+    error_handling:
+        # 重试次数
+        max_retries: 3
+        # 重试间隔（秒）
+        retry_delay: 5
+        # 是否在失败时继续处理其他片段
+        continue_on_error: true
+        # 是否记录详细的错误信息
+        verbose_errors: true
 
-  # === 监控配置 ===
-  monitoring:
-    # 是否启用性能监控
-    enable_monitoring: true
-    # 日志级别: DEBUG, INFO, WARNING, ERROR
-    log_level: "INFO"
-    # 是否记录处理统计信息
-    log_statistics: true
-    # 是否生成处理报告
-    generate_report: true
+    # === 监控配置 ===
+    monitoring:
+        # 是否启用性能监控
+        enable_monitoring: true
+        # 日志级别: DEBUG, INFO, WARNING, ERROR
+        log_level: 'INFO'
+        # 是否记录处理统计信息
+        log_statistics: true
+        # 是否生成处理报告
+        generate_report: true
 
 # 14. Pyannote Audio Service 配置 (新增)
 # 基于 pyannote.audio 的说话人分离服务
 pyannote_audio_service:
-  # === 模式配置 ===
-  # 是否使用付费接口 (precision-2 模型)
-  # false: 使用免费的 community-1 模型，需要在 .env 文件中配置 HF_TOKEN
-  # true: 使用付费的 precision-2 模型，需要在 .env 文件中配置 PYANNOTEAI_API_KEY
-  # 注意: 此功能开关仅在配置文件中管理，不被环境变量覆盖
-  use_paid_api: false
+    # === 模式配置 ===
+    # 是否使用付费接口 (precision-2 模型)
+    # false: 使用免费的 community-1 模型，需要在 .env 文件中配置 HF_TOKEN
+    # true: 使用付费的 precision-2 模型，需要在 .env 文件中配置 PYANNOTEAI_API_KEY
+    # 注意: 此功能开关仅在配置文件中管理，不被环境变量覆盖
+    use_paid_api: false
 
-  # === 处理配置 ===
-  # 音频采样率 (与faster_whisper_service保持一致)
-  audio_sample_rate: 16000
-  # 最小片段时长（秒），小于此值的片段将被合并
-  min_segment_duration: 0.5
-  # 最大片段时长（秒），大于此值的片段将被分割
-  max_segment_duration: 30.0
-  # 是否启用片段优化
-  enable_segment_optimization: true
+    # === 处理配置 ===
+    # 音频采样率 (与faster_whisper_service保持一致)
+    audio_sample_rate: 16000
+    # 最小片段时长（秒），小于此值的片段将被合并
+    min_segment_duration: 0.5
+    # 最大片段时长（秒），大于此值的片段将被分割
+    max_segment_duration: 30.0
+    # 是否启用片段优化
+    enable_segment_optimization: true
 
-  # === GPU配置 ===
-  # 是否启用GPU锁机制
-  enable_gpu_lock: true
-  # GPU设备ID，-1表示自动选择，0表示第一个GPU
-  gpu_device_id: 0
+    # === GPU配置 ===
+    # 是否启用GPU锁机制
+    enable_gpu_lock: true
+    # GPU设备ID，-1表示自动选择，0表示第一个GPU
+    gpu_device_id: 0
 
-  # === 质量控制 ===
-  # 是否启用结果验证
-  enable_validation: true
-  # 最小说话人数量，低于此值将重新处理
-  min_speakers: 1
-  # 最大说话人数量，超过此值将重新处理
-  max_speakers: 10
+    # === 质量控制 ===
+    # 是否启用结果验证
+    enable_validation: true
+    # 最小说话人数量，低于此值将重新处理
+    min_speakers: 1
+    # 最大说话人数量，超过此值将重新处理
+    max_speakers: 10
 
-  # === 错误处理 ===
-  # 重试次数
-  max_retries: 2
-  # 重试间隔（秒）
-  retry_delay: 10
+    # === 错误处理 ===
+    # 重试次数
+    max_retries: 2
+    # 重试间隔（秒）
+    retry_delay: 10
 
-  # === 性能优化 ===
-  # 是否启用缓存
-  enable_cache: true
-  # 缓存过期时间（小时）
-  cache_ttl_hours: 24
+    # === 性能优化 ===
+    # 是否启用缓存
+    enable_cache: true
+    # 缓存过期时间（小时）
+    cache_ttl_hours: 24
 
-  # === 监控配置 ===
-  # 是否启用性能监控
-  enable_monitoring: true
-  # 日志级别: DEBUG, INFO, WARNING, ERROR
-  log_level: "INFO"
-  # 是否记录详细的处理日志
-  verbose_processing: false
+    # === 监控配置 ===
+    # 是否启用性能监控
+    enable_monitoring: true
+    # 日志级别: DEBUG, INFO, WARNING, ERROR
+    log_level: 'INFO'
+    # 是否记录详细的处理日志
+    verbose_processing: false
 
 # 16. WService (字幕AI优化服务) 配置 (新增)
 # WService专注于字幕处理和AI优化，从faster_whisper_service迁移了所有非GPU功能
 wservice:
-  # === 基础配置 ===
-  # 是否启用性能监控
-  enable_monitoring: true
-  # 日志级别: DEBUG, INFO, WARNING, ERROR
-  log_level: "INFO"
-  # 是否记录详细的处理日志
-  verbose_processing: false
+    # === 基础配置 ===
+    # 是否启用性能监控
+    enable_monitoring: true
+    # 日志级别: DEBUG, INFO, WARNING, ERROR
+    log_level: 'INFO'
+    # 是否记录详细的处理日志
+    verbose_processing: false
 
-  # === 字幕处理配置 ===
-  # 字幕文件生成格式
-  subtitle_formats: ["srt", "vtt", "ass"]
-  # 字幕编码格式
-  subtitle_encoding: "utf-8"
-  # 字幕时间戳精度（小数点后位数）
-  timestamp_precision: 3
+    # === 字幕处理配置 ===
+    # 字幕文件生成格式
+    subtitle_formats: ['srt', 'vtt', 'ass']
+    # 字幕编码格式
+    subtitle_encoding: 'utf-8'
+    # 字幕时间戳精度（小数点后位数）
+    timestamp_precision: 3
 
-  # === 说话人合并配置 ===
-  # 启用词级时间戳匹配
-  enable_word_timestamps: true
-  # 说话人边界检测阈值（0-1）
-  speaker_boundary_threshold: 0.5
-  # 词级匹配容差（秒）
-  word_matching_tolerance: 0.1
-  # 最小字幕片段时长（秒）
-  min_subtitle_duration: 0.5
-  # 最大字幕片段时长（秒）
-  max_subtitle_duration: 10.0
+    # === 说话人合并配置 ===
+    # 启用词级时间戳匹配
+    enable_word_timestamps: true
+    # 说话人边界检测阈值（0-1）
+    speaker_boundary_threshold: 0.5
+    # 词级匹配容差（秒）
+    word_matching_tolerance: 0.1
+    # 最小字幕片段时长（秒）
+    min_subtitle_duration: 0.5
+    # 最大字幕片段时长（秒）
+    max_subtitle_duration: 10.0
 
-  # === AI优化配置 ===
-  # 默认AI服务提供商
-  default_ai_provider: deepseek
-  # AI优化批次大小
-  batch_size: 5
-  # 最大重试次数
-  max_retry_attempts: 3
-  # 重试延迟时间（秒）
-  retry_delay: 2.0
-  # API请求超时时间（秒）
-  api_timeout: 300
+    # === AI优化配置 ===
+    # 默认AI服务提供商
+    default_ai_provider: deepseek
+    # AI优化批次大小
+    batch_size: 5
+    # 最大重试次数
+    max_retry_attempts: 3
+    # 重试延迟时间（秒）
+    retry_delay: 2.0
+    # API请求超时时间（秒）
+    api_timeout: 300
 
-  # === 性能优化 ===
-  # 并发处理工作进程数
-  worker_processes: 2
-  # 是否启用缓存
-  enable_cache: true
-  # 缓存过期时间（小时）
-  cache_ttl_hours: 24
-  # 是否启用批量处理
-  enable_batch_processing: true
+    # === 性能优化 ===
+    # 并发处理工作进程数
+    worker_processes: 2
+    # 是否启用缓存
+    enable_cache: true
+    # 缓存过期时间（小时）
+    cache_ttl_hours: 24
+    # 是否启用批量处理
+    enable_batch_processing: true
 
-  # === 文件管理 ===
-  # 临时文件目录
-  temp_dir: "/tmp/wservice"
-  # 是否自动清理临时文件
-  cleanup_temp_files: true
-  # 文件保留时间（小时）
-  file_retention_hours: 24
+    # === 文件管理 ===
+    # 临时文件目录（建议使用任务特定的目录）
+    temp_dir: '/share/workflows'
+    # 是否自动清理临时文件
+    cleanup_temp_files: true
+    # 文件保留时间（小时）
+    file_retention_hours: 24
 
 # 15. 字幕校正服务配置 (新增)
 # 基于AI的字幕校正功能，支持多个AI服务提供商进行字幕质量优化
 subtitle_correction:
-  # === 基础配置 ===
-  # 默认AI服务提供商
-  default_provider: deepseek
+    # === 基础配置 ===
+    # 默认AI服务提供商
+    default_provider: deepseek
 
-  # === 处理配置 ===
-  # 单次处理的最大字符数（基于智能token估算优化）
-  # 注意：虽然DeepSeek支持128K tokens，但为了稳定性推荐使用较小值
-  # 系统会根据实际情况自动判断是否需要分批处理
-  max_subtitle_length: 8000
-  # AI响应的最大令牌数
-  max_tokens: 8000
-  # AI响应温度参数（0.0-2.0，越低越保守）
-  temperature: 0.1
-  # API请求超时时间（秒）
-  timeout_seconds: 600
+    # === 处理配置 ===
+    # 单次处理的最大字符数（基于智能token估算优化）
+    # 注意：虽然DeepSeek支持128K tokens，但为了稳定性推荐使用较小值
+    # 系统会根据实际情况自动判断是否需要分批处理
+    max_subtitle_length: 8000
+    # AI响应的最大令牌数
+    max_tokens: 8000
+    # AI响应温度参数（0.0-2.0，越低越保守）
+    temperature: 0.1
+    # API请求超时时间（秒）
+    timeout_seconds: 600
 
-  # === 文件配置 ===
-  # 系统提示词文件路径
-  system_prompt_path: "/app/config/system_prompt/subtitle_optimization.md"
-  # 输出字幕格式
-  output_format: "srt"
-  # 是否备份原始字幕文件
-  backup_original: true
+    # === 文件配置 ===
+    # 系统提示词文件路径
+    system_prompt_path: '/app/config/system_prompt/subtitle_optimization.md'
+    # 输出字幕格式
+    output_format: 'srt'
+    # 是否备份原始字幕文件
+    backup_original: true
 
-  # === 处理选项 ===
-  # 是否启用批量处理（长字幕自动分批）
-  batch_processing: true
-  # 批处理大小
-  batch_size: 5
-  # 是否保持原始时间戳（推荐启用）
-  preserve_timestamps: true
-  # 最大重试次数
-  max_retry_attempts: 3
-  # 重试延迟时间（秒）
-  retry_delay: 2.0
+    # === 处理选项 ===
+    # 是否启用批量处理（长字幕自动分批）
+    batch_processing: true
+    # 批处理大小
+    batch_size: 5
+    # 是否保持原始时间戳（推荐启用）
+    preserve_timestamps: true
+    # 最大重试次数
+    max_retry_attempts: 3
+    # 重试延迟时间（秒）
+    retry_delay: 2.0
 
-  # === 本地合并配置 ===
-  # 是否启用本地短字幕合并预处理
-  enable_local_merge: true
-  # 短字幕的最大字符数（1个字的字幕会尝试合并）
-  local_merge_max_chars: 1
-  # 合并后每行最大字符数（超过此长度不会合并）
-  local_merge_max_line_length: 20
+    # === 本地合并配置 ===
+    # 是否启用本地短字幕合并预处理
+    enable_local_merge: true
+    # 短字幕的最大字符数（1个字的字幕会尝试合并）
+    local_merge_max_chars: 1
+    # 合并后每行最大字符数（超过此长度不会合并）
+    local_merge_max_line_length: 20
 
-  # === AI服务提供商配置 ===
-  providers:
-    # DeepSeek (deepseek-chat)
-    deepseek:
-      # API密钥（从环境变量 DEEPSEEK_API_KEY 读取）
-      api_key_env: "DEEPSEEK_API_KEY"
-      # API基础URL
-      api_base_url: "https://api.deepseek.com/chat/completions"
-      # 模型名称
-      model: "deepseek-chat"
-      # 最大令牌数（可覆盖全局设置）
-      max_tokens: 8000
-      # 温度参数（可覆盖全局设置）
-      temperature: 0.1
-      # 请求超时时间（秒）
-      timeout: 300
-      # 是否启用此提供商
-      enabled: true
+    # === AI服务提供商配置 ===
+    providers:
+        # DeepSeek (deepseek-chat)
+        deepseek:
+            # API密钥（从环境变量 DEEPSEEK_API_KEY 读取）
+            api_key_env: 'DEEPSEEK_API_KEY'
+            # API基础URL
+            api_base_url: 'https://api.deepseek.com/chat/completions'
+            # 模型名称
+            model: 'deepseek-chat'
+            # 最大令牌数（可覆盖全局设置）
+            max_tokens: 8000
+            # 温度参数（可覆盖全局设置）
+            temperature: 0.1
+            # 请求超时时间（秒）
+            timeout: 300
+            # 是否启用此提供商
+            enabled: true
 
-    # Google Gemini (gemini-pro)
-    gemini:
-      # API密钥（从环境变量 GEMINI_API_KEY 读取）
-      api_key_env: "GEMINI_API_KEY"
-      # API基础URL
-      api_base_url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
-      # 模型名称
-      model: "gemini-pro"
-      max_tokens: 8000
-      temperature: 0.1
-      timeout: 300
-      enabled: true
+        # Google Gemini (gemini-pro)
+        gemini:
+            # API密钥（从环境变量 GEMINI_API_KEY 读取）
+            api_key_env: 'GEMINI_API_KEY'
+            # API基础URL
+            api_base_url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
+            # 模型名称
+            model: 'gemini-pro'
+            max_tokens: 8000
+            temperature: 0.1
+            timeout: 300
+            enabled: true
 
-    # 智谱AI (glm-4)
-    zhipu:
-      # API密钥（从环境变量 ZHIPU_API_KEY 读取）
-      api_key_env: "ZHIPU_API_KEY"
-      # API基础URL
-      api_base_url: "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-      # 模型名称
-      model: "glm-4"
-      max_tokens: 8000
-      temperature: 0.1
-      timeout: 300
-      enabled: true
+        # 智谱AI (glm-4)
+        zhipu:
+            # API密钥（从环境变量 ZHIPU_API_KEY 读取）
+            api_key_env: 'ZHIPU_API_KEY'
+            # API基础URL
+            api_base_url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+            # 模型名称
+            model: 'glm-4'
+            max_tokens: 8000
+            temperature: 0.1
+            timeout: 300
+            enabled: true
 
-    # 火山引擎 (doubao-pro-32k)
-    volcengine:
-      # API密钥（从环境变量 VOLCENGINE_API_KEY 读取）
-      api_key_env: "VOLCENGINE_API_KEY"
-      # API基础URL
-      api_base_url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-      # 模型名称
-      model: "doubao-pro-32k"
-      # 端点ID（如果需要）
-      endpoint_id: ""
-      max_tokens: 8000
-      temperature: 0.1
-      timeout: 300
-      enabled: true
-      
-    # OpenAI 兼容接口 (新增)
-    openai_compatible:
-      # API密钥（从环境变量 OPENAI_COMPATIBLE_API_KEY 读取）
-      api_key_env: "OPENAI_COMPATIBLE_API_KEY"
-      # API基础URL (请根据你的服务商修改)
-      api_base_url: "https://np.wionch.top/v1/chat/completions"
-      # 模型名称 (请根据你的服务商修改)
-      model: "流式抗截断/gemini-2.5-pro"
-      max_tokens: 4096
-      temperature: 0.1
-      timeout: 300
-      enabled: true
+        # 火山引擎 (doubao-pro-32k)
+        volcengine:
+            # API密钥（从环境变量 VOLCENGINE_API_KEY 读取）
+            api_key_env: 'VOLCENGINE_API_KEY'
+            # API基础URL
+            api_base_url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+            # 模型名称
+            model: 'doubao-pro-32k'
+            # 端点ID（如果需要）
+            endpoint_id: ''
+            max_tokens: 8000
+            temperature: 0.1
+            timeout: 300
+            enabled: true
 
-  # === 质量控制 ===
-  # 是否启用结果验证
-  enable_validation: true
-  # 最小校正质量分数（0.0-1.0）
-  min_quality_score: 0.7
-  # 是否启用自动重试（质量不达标时）
-  auto_retry_on_low_quality: false
+        # OpenAI 兼容接口 (新增)
+        openai_compatible:
+            # API密钥（从环境变量 OPENAI_COMPATIBLE_API_KEY 读取）
+            api_key_env: 'OPENAI_COMPATIBLE_API_KEY'
+            # API基础URL (请根据你的服务商修改)
+            api_base_url: 'https://np.wionch.top/v1/chat/completions'
+            # 模型名称 (请根据你的服务商修改)
+            model: '流式抗截断/gemini-2.5-pro'
+            max_tokens: 4096
+            temperature: 0.1
+            timeout: 300
+            enabled: true
 
-  # === 性能优化 ===
-  # 是否启用响应缓存
-  enable_cache: false
-  # 缓存过期时间（小时）
-  cache_ttl_hours: 24
-  # 是否启用并发处理（多批处理）
-  enable_concurrent_batches: false
-  # 最大并发批数
-  max_concurrent_batches: 2
+    # === 质量控制 ===
+    # 是否启用结果验证
+    enable_validation: true
+    # 最小校正质量分数（0.0-1.0）
+    min_quality_score: 0.7
+    # 是否启用自动重试（质量不达标时）
+    auto_retry_on_low_quality: false
 
-  # === 监控配置 ===
-  # 是否启用性能监控
-  enable_monitoring: true
-  # 日志级别: DEBUG, INFO, WARNING, ERROR
-  log_level: "INFO"
-  # 是否记录详细的处理日志
-  verbose_processing: false
-  # 是否记录API调用统计
-  log_api_stats: true
+    # === 性能优化 ===
+    # 是否启用响应缓存
+    enable_cache: false
+    # 缓存过期时间（小时）
+    cache_ttl_hours: 24
+    # 是否启用并发处理（多批处理）
+    enable_concurrent_batches: false
+    # 最大并发批数
+    max_concurrent_batches: 2
+
+    # === 监控配置 ===
+    # 是否启用性能监控
+    enable_monitoring: true
+    # 日志级别: DEBUG, INFO, WARNING, ERROR
+    log_level: 'INFO'
+    # 是否记录详细的处理日志
+    verbose_processing: false
+    # 是否记录API调用统计
+    log_api_stats: true
 
 # 14. IndexTTS2 文本转语音服务配置 (基于官方源码验证)
 indextts_service:
-  # === 模型配置 ===
-  model_dir: "/models/indextts"
-  checkpoints_dir: "/models/indextts/checkpoints"
-  config_file: "/models/indextts/checkpoints/config.yaml"
+    # === 模型配置 ===
+    model_dir: '/models/indextts'
+    checkpoints_dir: '/models/indextts/checkpoints'
+    config_file: '/models/indextts/checkpoints/config.yaml'
 
-  # === 性能配置 ===
-  use_fp16: true                      # 启用FP16推理以节省显存
-  use_deepspeed: false                # DeepSpeed加速（稳定性优先）
-  use_cuda_kernel: false              # CUDA内核（稳定性优先）
-  num_workers: 1                      # 单工作进程避免GPU冲突
+    # === 性能配置 ===
+    use_fp16: true # 启用FP16推理以节省显存
+    use_deepspeed: false # DeepSpeed加速（稳定性优先）
+    use_cuda_kernel: false # CUDA内核（稳定性优先）
+    num_workers: 1 # 单工作进程避免GPU冲突
 
-  # === 默认参数配置 ===
-  default_emotion_alpha: 1.0         # 默认情感强度
-  default_max_text_tokens: 120        # 默认每段最大token数
-  default_verbose: false              # 默认不启用详细日志
+    # === 默认参数配置 ===
+    default_emotion_alpha: 1.0 # 默认情感强度
+    default_max_text_tokens: 120 # 默认每段最大token数
+    default_verbose: false # 默认不启用详细日志
 
-  # === 基础TTS参数 ===
-  default_interval_silence: 200       # 默认间隔静音时长(ms)
+    # === 基础TTS参数 ===
+    default_interval_silence: 200 # 默认间隔静音时长(ms)
 
-  # === 监控配置 ===
-  enable_monitoring: true             # 启用基础监控
-  log_processing_time: true           # 记录处理时间
-  log_gpu_usage: true                 # 记录GPU使用情况
+    # === 监控配置 ===
+    enable_monitoring: true # 启用基础监控
+    log_processing_time: true # 记录处理时间
+    log_gpu_usage: true # 记录GPU使用情况

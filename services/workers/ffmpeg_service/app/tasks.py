@@ -192,7 +192,8 @@ def extract_keyframes(self: Task, context: dict) -> dict:
                         file_pattern="*.jpg",
                         compression_format=keyframe_compression_format,
                         compression_level=keyframe_compression_level,
-                        delete_local=delete_local_keyframes
+                        delete_local=delete_local_keyframes,
+                        workflow_id=workflow_context.workflow_id
                     )
                     
                     if upload_result["success"]:

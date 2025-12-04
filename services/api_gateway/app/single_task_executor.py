@@ -196,7 +196,7 @@ class SingleTaskExecutor:
     def _create_task_context(self, task_id: str, task_name: str, input_data: Dict[str, Any], 
                            callback_url: Optional[str] = None) -> Dict[str, Any]:
         """创建任务上下文"""
-        shared_storage_path = f"/share/single_tasks/{task_id}"
+        shared_storage_path = f"/share/workflows/{task_id}"
         os.makedirs(shared_storage_path, exist_ok=True)
         
         context = {

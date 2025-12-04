@@ -35,7 +35,12 @@ logger = get_logger('tasks')
 # ============================================================================
 
 
-def _transcribe_audio_with_lock(audio_path: str, service_config: dict, stage_name: str) -> dict:
+def _transcribe_audio_with_lock(
+    audio_path: str, 
+    service_config: dict, 
+    stage_name: str, 
+    workflow_context: WorkflowContext
+) -> dict:
     """
     使用faster-whisper原生API进行ASR，生成转录结果。
     
@@ -56,15 +61,20 @@ def _transcribe_audio_with_lock(audio_path: str, service_config: dict, stage_nam
     
     if need_gpu_lock:
         # 需要GPU锁，调用带锁版本
-        return _transcribe_audio_with_gpu_lock(audio_path, service_config, stage_name)
+        return _transcribe_audio_with_gpu_lock(audio_path, service_config, stage_name, workflow_context)
     else:
         # 不需要GPU锁，直接执行
         logger.info(f"[{stage_name}] 语音转录使用非GPU模式，跳过GPU锁")
-        return _transcribe_audio_without_lock(audio_path, service_config, stage_name)
+        return _transcribe_audio_without_lock(audio_path, service_config, stage_name, workflow_context)
 
 
 @gpu_lock()  # 仅在CUDA模式下获取GPU锁
-def _transcribe_audio_with_gpu_lock(audio_path: str, service_config: dict, stage_name: str) -> dict:
+def _transcribe_audio_with_gpu_lock(
+    audio_path: str, 
+    service_config: dict, 
+    stage_name: str, 
+    workflow_context: WorkflowContext
+) -> dict:
     """
     带GPU锁的语音转录功能（CUDA模式）
     
@@ -78,10 +88,15 @@ def _transcribe_audio_with_gpu_lock(audio_path: str, service_config: dict, stage
     """
     logger.info(f"[{stage_name}] 语音转录使用GPU锁模式（CUDA）")
     # 直接执行转录逻辑，GPU锁由装饰器管理
-    return _execute_transcription(audio_path, service_config, stage_name)
+    return _execute_transcription(audio_path, service_config, stage_name, workflow_context)
 
 
-def _transcribe_audio_without_lock(audio_path: str, service_config: dict, stage_name: str) -> dict:
+def _transcribe_audio_without_lock(
+    audio_path: str, 
+    service_config: dict, 
+    stage_name: str, 
+    workflow_context: WorkflowContext
+) -> dict:
     """
     不带GPU锁的语音转录功能（CPU模式）
     
@@ -95,10 +110,15 @@ def _transcribe_audio_without_lock(audio_path: str, service_config: dict, stage_
     """
     logger.info(f"[{stage_name}] 语音转录使用非GPU模式")
     # 直接执行转录逻辑，无需GPU锁
-    return _execute_transcription(audio_path, service_config, stage_name)
+    return _execute_transcription(audio_path, service_config, stage_name, workflow_context)
 
 
-def _execute_transcription(audio_path: str, service_config: dict, stage_name: str) -> dict:
+def _execute_transcription(
+    audio_path: str, 
+    service_config: dict, 
+    stage_name: str, 
+    workflow_context: WorkflowContext
+) -> dict:
     """
     执行语音转录 - 使用 subprocess 隔离模式
 
@@ -142,8 +162,10 @@ def _execute_transcription(audio_path: str, service_config: dict, stage_name: st
 
     # ===== 准备输出路径 =====
     # 使用临时目录存储推理结果
-    import tempfile
-    temp_dir = tempfile.gettempdir()
+    # 构建基于任务ID的临时目录
+    task_id = workflow_context.workflow_id
+    temp_dir = f"/share/workflows/{task_id}/tmp"
+    os.makedirs(temp_dir, exist_ok=True)
     output_file = Path(temp_dir) / f"faster_whisper_result_{int(time.time() * 1000)}.json"
 
     logger.info(f"[{stage_name}] 准备通过 subprocess 执行转录")
@@ -554,7 +576,7 @@ def transcribe_audio(self, context: dict) -> dict:
 
         # 执行语音转录
         logger.info(f"[{stage_name}] 执行语音转录...")
-        transcribe_result = _transcribe_audio_with_lock(audio_path, service_config, stage_name)
+        transcribe_result = _transcribe_audio_with_lock(audio_path, service_config, stage_name, workflow_context)
 
         logger.info(f"[{stage_name}] 转录完成，获得 {len(transcribe_result.get('segments', []))} 个片段")
 

@@ -11,7 +11,6 @@ MinIO目录下载模块
 
 import os
 import glob
-import tempfile
 import shutil
 from pathlib import Path
 from typing import List, Dict, Optional, Union
@@ -19,6 +18,7 @@ from services.common.logger import get_logger
 from services.common.file_service import get_file_service
 from services.common.minio_url_utils import normalize_minio_url, is_minio_url
 from services.common.directory_compression import decompress_archive
+from services.common.temp_path_utils import get_temp_path
 
 logger = get_logger('minio_directory_download')
 
@@ -49,7 +49,8 @@ class MinioDirectoryDownloader:
         
     def download_and_extract_archive(self,
                                    minio_url: str,
-                                   local_dir: str) -> Dict[str, Union[str, List[str]]]:
+                                   local_dir: str,
+                                   workflow_id: Optional[str] = None) -> Dict[str, Union[str, List[str]]]:
         """
         从MinIO下载压缩包并解压到本地目录
         
@@ -85,10 +86,12 @@ class MinioDirectoryDownloader:
             # 确保本地目录存在
             os.makedirs(local_dir, exist_ok=True)
             
-            # 创建临时文件用于存放下载的压缩包
+            # 生成基于工作流ID的临时文件路径
             suffix = ".zip" if minio_url.lower().endswith(".zip") else ".tar.gz"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-                temp_archive_path = tmp_file.name
+            temp_archive_path = get_temp_path(
+                workflow_id or "download", 
+                suffix
+            )
             
             # 下载压缩包
             try:

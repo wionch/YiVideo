@@ -8,7 +8,6 @@ MinIO文件服务模块。
 """
 
 import os
-import tempfile
 import mimetypes
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
@@ -16,6 +15,7 @@ from minio import Minio
 from minio.error import S3Error
 
 from services.common.logger import get_logger
+from services.common.temp_path_utils import get_temp_path
 
 logger = get_logger('minio_service')
 
@@ -47,7 +47,7 @@ class MinIOFileService:
         self.default_bucket = "yivideo"
         logger.info(f"MinIO服务初始化完成: {self.host}:{self.port}, 默认桶: {self.default_bucket}")
     
-    def upload_file(self, file_data: bytes, file_path: str, bucket: Optional[str] = None) -> Dict:
+    def upload_file(self, file_data: bytes, file_path: str, bucket: Optional[str] = None, workflow_id: Optional[str] = None) -> Dict:
         """
         上传文件到MinIO（传统方式，使用临时文件）
         
@@ -62,10 +62,12 @@ class MinIOFileService:
         bucket = bucket or self.default_bucket
         
         try:
-            # 创建临时文件
-            temp_file = tempfile.NamedTemporaryFile(delete=False)
-            temp_file.write(file_data)
-            temp_file.close()
+            # 生成基于工作流ID的临时文件路径
+            temp_file_path = get_temp_path(workflow_id or "upload", "")
+            
+            # 写入文件数据
+            with open(temp_file_path, 'wb') as f:
+                f.write(file_data)
             
             # 确保桶存在
             if not self._bucket_exists(bucket):
@@ -73,7 +75,7 @@ class MinIOFileService:
                 logger.info(f"创建新桶: {bucket}")
             
             # 上传文件
-            self.client.fput_object(bucket, file_path, temp_file.name)
+            self.client.fput_object(bucket, file_path, temp_file_path)
             
             # 获取下载链接（24小时有效期）
             download_url = self.client.presigned_get_object(
@@ -97,9 +99,9 @@ class MinIOFileService:
             raise
         finally:
             # 清理临时文件
-            if 'temp_file' in locals():
+            if 'temp_file_path' in locals():
                 try:
-                    os.unlink(temp_file.name)
+                    os.unlink(temp_file_path)
                 except:
                     pass
     
@@ -165,7 +167,7 @@ class MinIOFileService:
             logger.error(f"文件流式上传失败: {bucket}/{file_path}, 错误: {e}")
             raise
     
-    def download_file(self, file_path: str, bucket: Optional[str] = None) -> bytes:
+    def download_file(self, file_path: str, bucket: Optional[str] = None, workflow_id: Optional[str] = None) -> bytes:
         """
         从MinIO下载文件
         
@@ -179,15 +181,14 @@ class MinIOFileService:
         bucket = bucket or self.default_bucket
         
         try:
-            # 创建临时文件
-            temp_file = tempfile.NamedTemporaryFile(delete=False)
-            temp_file.close()
+            # 生成基于工作流ID的临时文件路径
+            temp_file_path = get_temp_path(workflow_id or "download", "")
             
             # 下载文件
-            self.client.fget_object(bucket, file_path, temp_file.name)
+            self.client.fget_object(bucket, file_path, temp_file_path)
             
             # 读取文件数据
-            with open(temp_file.name, 'rb') as f:
+            with open(temp_file_path, 'rb') as f:
                 file_data = f.read()
             
             logger.info(f"文件下载成功: {bucket}/{file_path}, 大小: {len(file_data)} bytes")
@@ -201,9 +202,9 @@ class MinIOFileService:
             raise
         finally:
             # 清理临时文件
-            if 'temp_file' in locals():
+            if 'temp_file_path' in locals():
                 try:
-                    os.unlink(temp_file.name)
+                    os.unlink(temp_file_path)
                 except:
                     pass
     

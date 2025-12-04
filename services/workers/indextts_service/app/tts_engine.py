@@ -202,8 +202,8 @@ def _tts_worker_initializer(config: Dict[str, Any]):
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"IndexTTS 配置文件不存在: {config_path}")
 
-        # 添加 IndexTTS 路径
-        indextts_path = "/tmp/index-tts"
+        # 添加 IndexTTS 路径 - 使用配置的模型目录
+        indextts_path = model_dir  # 使用配置中的模型目录
         if os.path.exists(indextts_path):
             sys.path.insert(0, indextts_path)
 

@@ -28,6 +28,7 @@ from services.common.directory_compression import (
     compress_directory,
     decompress_archive
 )
+from services.common.temp_path_utils import get_temp_path
 
 logger = get_logger('minio_directory_upload')
 
@@ -53,7 +54,8 @@ class MinioDirectoryUploader:
                                    compression_level: CompressionLevel = CompressionLevel.DEFAULT,
                                    delete_local: bool = False,
                                    preserve_structure: bool = True,
-                                   progress_callback: Optional[Callable[[CompressionProgress], None]] = None) -> Dict[str, Union[str, List[str], Dict]]:
+                                   progress_callback: Optional[Callable[[CompressionProgress], None]] = None,
+                                   workflow_id: Optional[str] = None) -> Dict[str, Union[str, List[str], Dict]]:
         """
         压缩目录并上传到MinIO
         
@@ -67,6 +69,7 @@ class MinioDirectoryUploader:
             delete_local: 上传成功后是否删除本地目录（默认False）
             preserve_structure: 是否保留目录结构（默认True）
             progress_callback: 压缩进度回调函数
+            workflow_id: 工作流ID，用于构建任务特定的临时目录（可选）
             
         Returns:
             Dict: 包含上传结果和压缩信息的字典
@@ -112,21 +115,18 @@ class MinioDirectoryUploader:
         temp_archive_path = None
         
         try:
-            # 生成压缩包路径
-            import time
-            import uuid
+            # 确保 workflow_id 存在
+            if not workflow_id:
+                raise ValueError("workflow_id is required for temporary file creation")
             
             source_name = os.path.basename(local_dir) or "directory"
-            timestamp = int(time.time())
-            unique_id = str(uuid.uuid4())[:8]
-            temp_archive_path = os.path.join(
-                tempfile.gettempdir(),
-                f"{source_name}_compressed_{timestamp}_{unique_id}"
+            
+            # 生成基于工作流ID的临时压缩包路径
+            suffix = ".zip" if compression_format == CompressionFormat.ZIP else ".tar.gz"
+            temp_archive_path = get_temp_path(
+                workflow_id, 
+                f"_{source_name}_compressed{suffix}"
             )
-            if compression_format == CompressionFormat.ZIP:
-                temp_archive_path += ".zip"
-            else:
-                temp_archive_path += ".tar.gz"
 
             logger.info(f"开始压缩目录: {local_dir}")
             logger.info(f"压缩格式: {compression_format.value}, 级别: {compression_level.name}")
@@ -213,6 +213,16 @@ class MinioDirectoryUploader:
                     logger.debug(f"已清理临时压缩包: {temp_archive_path}")
                 except Exception as e:
                     logger.warning(f"清理临时压缩包失败: {temp_archive_path}, 错误: {e}")
+            
+            # 清理临时目录（如果是基于workflow_id创建的）
+            if workflow_id:
+                temp_base_dir = os.path.join("/share/workflows", workflow_id, "tmp")
+                try:
+                    if os.path.exists(temp_base_dir) and not os.listdir(temp_base_dir):
+                        os.rmdir(temp_base_dir)
+                        logger.debug(f"已清理空临时目录: {temp_base_dir}")
+                except Exception as e:
+                    logger.debug(f"清理临时目录失败（可能非空）: {temp_base_dir}, 错误: {e}")
     
     def download_and_extract(self,
                             minio_url: str,
@@ -494,7 +504,8 @@ def upload_directory_compressed(local_dir: str,
                                compression_format: Union[str, CompressionFormat] = "zip",
                                compression_level: Union[str, CompressionLevel] = "default",
                                delete_local: bool = False,
-                               progress_callback: Optional[Callable[[CompressionProgress], None]] = None) -> Dict[str, Union[str, List[str], Dict]]:
+                               progress_callback: Optional[Callable[[CompressionProgress], None]] = None,
+                               workflow_id: Optional[str] = None) -> Dict[str, Union[str, List[str], Dict]]:
     """
     便捷函数：压缩目录并上传到MinIO
 
@@ -507,6 +518,7 @@ def upload_directory_compressed(local_dir: str,
         compression_level: 压缩级别 ("store", "fast", "default", "maximum")，也可以是枚举类型
         delete_local: 上传成功后是否删除本地目录
         progress_callback: 压缩进度回调函数
+        workflow_id: 工作流ID，用于构建任务特定的临时目录（可选）
 
     Returns:
         Dict: 包含压缩上传结果的字典
@@ -540,7 +552,8 @@ def upload_directory_compressed(local_dir: str,
         compression_format=format_enum,
         compression_level=level_enum,
         delete_local=delete_local,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        workflow_id=workflow_id
     )
 
 def upload_cropped_images_compressed(local_dir: str,
@@ -589,7 +602,8 @@ def upload_cropped_images_compressed(local_dir: str,
         compression_format=compression_format,
         compression_level=level_enum,  # 传递转换后的枚举值
         delete_local=delete_local,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        workflow_id=workflow_id  # 传递 workflow_id 确保临时目录基于任务ID
     )
 
 def download_and_extract_archive(minio_url: str,

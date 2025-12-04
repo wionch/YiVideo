@@ -14,8 +14,11 @@ current_dir = Path(__file__).parent
 services_dir = current_dir.parent.parent
 sys.path.insert(0, str(services_dir))
 
-# 添加IndexTTS2路径
-indextts_path = Path("/tmp/index-tts")
+# 添加IndexTTS2路径 - 使用配置的模型目录
+from services.common.config_loader import get_config
+config = get_config()
+indextts_model_dir = config.get('indextts_service', {}).get('model_dir', '/models/indextts')
+indextts_path = Path(indextts_model_dir)
 if indextts_path.exists():
     sys.path.insert(0, str(indextts_path))
 

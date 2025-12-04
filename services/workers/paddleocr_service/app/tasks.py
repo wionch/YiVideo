@@ -45,6 +45,7 @@ from services.common.parameter_resolver import resolve_parameters, get_param_wit
 from services.common.file_service import get_file_service
 from services.common.minio_directory_download import download_directory_from_minio
 from services.common.minio_directory_upload import upload_directory_to_minio
+from services.common.temp_path_utils import get_temp_path
 
 # --- 日志配置 ---
 # 日志已统一管理，使用 services.common.logger
@@ -300,11 +301,10 @@ def detect_subtitle_area(self: Task, context: dict) -> dict:
         try:
             executor_script_path = os.path.join(os.path.dirname(__file__), "executor_area_detection.py")
             
-            # [修改] 使用临时文件传递路径列表，避免参数过长
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix='.json') as tmp_file:
-                json.dump(keyframe_paths, tmp_file)
-                paths_file_path = tmp_file.name
+            # [修改] 使用基于工作流ID的临时文件传递路径列表，避免参数过长
+            paths_file_path = get_temp_path(workflow_context.workflow_id, '.json')
+            with open(paths_file_path, 'w', encoding='utf-8') as f:
+                json.dump(keyframe_paths, f)
             
             command = [
                 sys.executable,
@@ -595,7 +595,8 @@ def create_stitched_images(self: Task, context: dict) -> dict:
                     file_pattern="*.jpg",  # 只压缩图片文件
                     compression_format="zip",
                     compression_level="default",
-                    delete_local=delete_local_images
+                    delete_local=delete_local_images,
+                    workflow_id=workflow_context.workflow_id
                 )
                 
                 if upload_result["success"]:
