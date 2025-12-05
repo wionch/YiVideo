@@ -1,80 +1,194 @@
-# Gemini Development Guidelines for YiVideo
+<!-- OPENSPEC:START -->
 
+# OpenSpec Instructions
 
+These instructions are for AI assistants working in this project.
+
+Always open `@/openspec/AGENTS.md` when the request:
+
+-   Mentions planning or proposals (words like proposal, spec, change, plan)
+-   Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
+-   Sounds ambiguous and you need the authoritative spec before coding
+
+Use `@/openspec/AGENTS.md` to learn:
+
+-   How to create and apply change proposals
+-   Spec format and conventions
+-   Project structure and guidelines
+
+Keep this managed block so 'openspec update' can refresh the instructions.
+
+<!-- OPENSPEC:END -->
+
+# GEMINI.md
+
+This file provides guidance to Gemini Code (gemini.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-**YiVideo** is a one-stop, modular AI video processing and localization platform. Its primary goal is to automate the process of translating video content into multiple languages, including subtitle extraction, translation, and dubbing, to help content creators reach a global audience.
+**YiVideo** is an AI-powered video processing platform built on a dynamic workflow engine with microservices architecture. The core philosophy is "configuration over coding" - AI processing pipelines are dynamically constructed through workflow configuration files.
 
-The system is designed as a **dynamic, configurable AI video processing workflow engine**. Instead of hardcoded pipelines, it uses a "configuration over coding" philosophy. Users can define and execute complex processing chains by submitting a `workflow_config` to the main API, allowing for flexible and extensible combination of various AI capabilities.
+### Core Features
 
-### Core Technologies & Architecture
+-   **Automatic Speech Recognition (ASR)**: High-precision speech-to-text powered by Faster-Whisper
+-   **Speaker Diarization**: Multi-speaker identification and separation using Pyannote-audio
+-   **Optical Character Recognition (OCR)**: Subtitle region detection and text recognition via PaddleOCR
+-   **Audio Processing**: Voice/background separation and audio enhancement
+-   **Subtitle Processing**: AI-driven subtitle generation, proofreading, optimization, and merging
+-   **Text-to-Speech (TTS)**: Multi-engine high-quality voice synthesis
+-   **Video Processing**: FFmpeg-based video editing and format conversion
 
-*   **Architecture**: Microservices architecture orchestrated with `docker-compose`.
-*   **Backend**: Python, FastAPI for the API Gateway.
-*   **Task Queuing**: Celery with a Redis broker for asynchronous task management between services.
-*   **State Management**: A central Redis store is used to track the state and progress of each workflow.
-*   **AI Services**: The project is composed of several independent AI worker services, each running in its own Docker container:
-    *   `api_gateway`: The "brain" of the system. It receives user requests, interprets the `workflow_config`, and dynamically constructs and dispatches the Celery task chain.
-    *   `ffmpeg_service`: Handles fundamental video operations like decoding and frame extraction.
-    *   `audio_separator_service`: Separates audio tracks (e.g., vocals vs. background music) to improve transcription and dubbing quality.
-    *   `paddleocr_service`: Performs Optical Character Recognition (OCR) to extract hardcoded subtitles from video frames.
-    *   `faster_whisper_service`: Provides Automatic Speech Recognition (ASR) to transcribe audio into subtitles.
-    *   `pyannote_audio_service`: Performs speaker diarization to identify who is speaking and when.
-    *   `wservice` (formerly `llm_service`): The Subtitle AI Optimization Service. It interacts with Large Language Models (e.g., Gemini, DeepSeek) for translation, subtitle refinement, and logic handling.
-    *   `indextts_service`: Text-to-Speech (TTS) engine for generating dubbed audio.
-    *   `inpainting_service`: (Future/In Development) Removes original hardcoded subtitles from the video.
-    *   `gptsovits_service`: (Future/In Development) Alternative TTS engine.
-*   **Data Sharing**: Services share files (videos, frames, subtitles) via shared Docker volumes mounted to a common path (e.g., `/share`).
+## Project Structure
 
-## Building and Running
-
-The entire environment is managed by Docker. An NVIDIA GPU is required for the AI-powered worker services.
-
-### Prerequisites
-
-*   Docker
-*   Docker Compose
-*   NVIDIA Container Toolkit (for GPU support)
-
-### Running the System
-
-To build and run all services in detached mode, use the following command from the project root directory:
-
-```bash
-docker-compose up -d --build
+```
+yivideo/
+├── services/                    # Microservices directory
+│   ├── api_gateway/             # API Gateway - unified entry point
+│   ├── common/                  # Common modules (state management, utilities)
+│   └── workers/                 # Celery Worker services
+│       ├── faster_whisper_service/   # ASR speech recognition
+│       ├── pyannote_audio_service/   # Speaker diarization
+│       ├── paddleocr_service/        # OCR text recognition
+│       ├── audio_separator_service/  # Audio separation
+│       ├── ffmpeg_service/           # Video processing
+│       ├── indextts_service/         # TTS voice synthesis
+│       ├── gptsovits_service/        # GPT-SoVITS TTS
+│       ├── inpainting_service/       # Video inpainting
+│       └── wservice/                 # Generic workflow service
+├── config/                      # Configuration files
+├── config.yml                   # Main configuration file
+├── docker-compose.yml           # Container orchestration
+├── docs/                        # Project documentation
+├── openspec/                    # OpenSpec specifications
+├── tests/                       # Test directory
+├── share/                       # Inter-service shared storage
+└── scripts/                     # Utility scripts
 ```
 
-This command will:
-1.  Build the Docker images for all services defined in `docker-compose.yml`.
-2.  Start the containers in the background.
-3.  Mount the necessary local directories (`./services`, `./videos`, `./share`, etc.) as volumes into the containers.
+## Tech Stack
 
-To stop the services:
+### Backend Framework & Services
 
-```bash
-docker-compose down
+-   **Python 3.8+**: Primary programming language
+-   **FastAPI**: HTTP service framework for API Gateway
+-   **Celery 5.x**: Distributed task queue and workflow engine
+-   **Redis**: Multi-purpose data store (DB0: Broker, DB1: Backend, DB2: Locks, DB3: State)
+
+### AI/ML Models & Libraries
+
+-   **Faster-Whisper**: GPU-accelerated speech recognition
+-   **Pyannote-audio**: Speaker diarization and voice-print recognition
+-   **PaddleOCR**: Chinese-English OCR recognition
+-   **Audio-Separator**: Audio source separation
+-   **IndexTTS / GPT-SoVITS**: TTS engines
+
+### Infrastructure
+
+-   **Docker & Docker Compose**: Containerized deployment
+-   **FFmpeg**: Audio/video processing
+-   **MinIO**: Object storage service
+-   **CUDA 11.x+**: GPU acceleration support
+
+## Development Commands
+
+```
+# Container management
+docker-compose up -d              # Start all services
+docker-compose ps                 # Check service status
+docker-compose logs -f <service>  # View logs
+
+# Testing
+pytest tests/unit/                # Unit tests
+pytest tests/integration/         # Integration tests
+pytest -m gpu                     # GPU tests
 ```
 
-## Development Conventions
+## Global Architectural Constraints
 
-### Workflow Execution
+**CRITICAL**: You must strictly adhere to these principles for all code generation, refactoring, and design tasks.
 
-1.  A user sends a `POST` request to the `api_gateway` at `/v1/workflows`.
-2.  The request body contains the `video_path` and a `workflow_config` JSON object that defines the sequence of operations.
-3.  The `api_gateway` creates a unique `workflow_id`, sets up a shared directory under `/share/workflows/<workflow_id>`, and initializes the workflow's state in Redis.
-4.  The `workflow_factory` module within the gateway parses the `workflow_config` and constructs a Celery `chain` of tasks.
-5.  The task chain is executed asynchronously. Each task takes a `WorkflowContext` object as input, performs its function (e.g., runs OCR), updates the state in Redis, and passes the updated context to the next task in the chain.
-6.  The status of the workflow can be monitored by querying `GET /v1/workflows/status/<workflow_id>`.
+### 1. KISS (Keep It Simple, Stupid)
 
-### Adding a New AI Service
+-   **Rule**: Prioritize the simplest implementation path. Avoid over-engineering.
+-   **Trigger**: If the code requires complex comments to explain or uses design patterns (like Strategy/Factory) for simple logic.
+-   **Directive**: "If a simple `if/else` works, do not use a complex pattern." Keep the cognitive load low.
 
-1.  Create a new directory for your service under `services/workers/`.
-2.  Add a `Dockerfile` that inherits from the base image and installs any specific dependencies.
-3.  Implement the core logic as a Celery task, ensuring it follows the `standard_task_interface(self: Task, context: dict) -> dict` signature.
-4.  Add the new service definition to the root `docker-compose.yml` file, ensuring volumes and environment variables are correctly configured.
-5.  Update the `workflow_factory` in the `api_gateway` to recognize the new capability and add it to task chains when requested in a `workflow_config`.
+### 2. DRY (Don't Repeat Yourself)
 
-### Code Style
+-   **Rule**: Every piece of logic must have a single, unambiguous representation.
+-   **Trigger**: Repeated logic blocks, copy-pasted code, or duplicate magic values.
+-   **Directive**: Extract repeated logic into utility functions or constants. _Note: Avoid premature abstraction that hurts readability._
 
-The project uses Python. While no specific linter is enforced in the provided files, it is recommended to use standard tools like `black` for formatting and `ruff` or `flake8` for linting to maintain code consistency.
+### 3. YAGNI (You Ain't Gonna Need It)
+
+-   **Rule**: Implement ONLY what is explicitly requested in the current Spec/Task.
+-   **Trigger**: Adding "hooks" for future features, unused configuration options, or extra interface methods.
+-   **Directive**: "Write only the code needed to pass the current tests." Do not speculate on future requirements.
+
+### 4. SOLID (Object-Oriented Design)
+
+-   **SRP**: Single Responsibility Principle (One reason to change).
+-   **OCP**: Open/Closed Principle (Extend without modifying).
+-   **LSP**: Liskov Substitution Principle (Subtypes must be substitutable).
+-   **ISP**: Interface Segregation Principle (No forced dependencies on unused methods).
+-   **DIP**: Dependency Inversion Principle (Depend on abstractions).
+
+### Violation Check (Self-Correction)
+
+Before outputting any code, perform this internal check:
+
+1. Is this the simplest way? (KISS)
+2. Did I add unused features? (YAGNI)
+3. Is logic duplicated? (DRY)
+4. Does it violate SOLID?
+
+**Fix any violations immediately before responding.**
+
+## Code Style Guidelines
+
+-   **Formatting**: Black (line-length=100), Flake8
+-   **Naming**: Classes `PascalCase`, Functions `snake_case`, Constants `UPPER_SNAKE_CASE`
+-   **Documentation**: Google-style docstrings, Python 3.8+ type annotations
+-   **Comment Language**: Maintain consistency with existing codebase
+
+## Architecture Patterns
+
+-   **API Gateway Pattern**: Unified entry point for request routing and workflow orchestration
+-   **Worker Pattern**: Each AI capability isolated as independent Celery Worker
+-   **Shared Storage**: `/share` directory for inter-service file exchange
+-   **State Management**: Centralized StateManager
+
+## Git Workflow
+
+Use Conventional Commits: `<type>(<scope>): <subject>`
+
+**Types**: `feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf`
+
+**Important**: Do not automatically execute git commit/push operations without explicit user request.
+
+## Assistant Behavior Guidelines
+
+### Response Language Requirements
+
+**CRITICAL**: All responses to user interactions MUST be in Chinese (Simplified Chinese), regardless of the language used in this documentation or the codebase.
+
+-   **Internal Processing**: You may reason and process information in English for optimal performance
+-   **Output Format**: Always present the final response to the user in Chinese
+-   **Code Comments**: Use Chinese (Simplified) for all code comments, docstrings, and inline documentation to maintain consistency with the project's localization standards
+-   **Exception**: Only respond in English if the user explicitly requests English responses
+
+### MCP Services Integration
+
+1. **Always Default to MCP Services**: When faced with complex reasoning, context-heavy tasks, or ambiguous requirements, your first action should be to engage the relevant MCP services.
+
+2. **Service Selection**:
+
+    - Use **serena** for general context management and conversation continuity
+    - Use **context7** for deep context processing and analysis
+    - Use **sequentialthinking** for structured problem-solving and step-by-step reasoning
+
+3. **Transparent Usage**: When using MCP services, briefly indicate in your response which services were engaged and how they informed your approach.
+
+4. **Fallback Protocol**: If MCP services are unavailable for technical reasons, explicitly state this limitation and proceed with native reasoning while noting the reduced capability.
+
+**CRITICAL REMINDER**: These MCP services are core project infrastructure. Not using them when appropriate violates project conventions and reduces effectiveness.
