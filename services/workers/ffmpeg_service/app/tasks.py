@@ -33,7 +33,6 @@ from services.common.file_service import get_file_service
 # 导入该服务内部的核心视频处理逻辑模块
 from .modules.video_decoder import extract_random_frames
 # 导入音频分割相关模块
-from .modules.subtitle_parser import parse_subtitle_segments
 from .modules.audio_splitter import AudioSplitter, split_audio_segments as split_audio_by_segments
 
 # --- Celery 任务定义 ---

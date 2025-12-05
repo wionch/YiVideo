@@ -21,7 +21,7 @@ from paddleocr import TextRecognition
 
 from services.common.logger import get_logger
 
-from ..utils.progress_logger import create_stage_progress
+from services.common.progress_logger import create_stage_progress
 
 # 导入我们自己的解码器
 from .decoder import GPUDecoder
@@ -84,9 +84,8 @@ def initialize_worker():
     try:
         # 导入通用配置加载器
         import sys
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from utils.config_loader import get_ocr_lang
-        lang = get_ocr_lang(default_lang='ch')
+        from services.common.config_loader import CONFIG
+        lang = CONFIG.get('ocr', {}).get('lang', 'ch')
         logger.info(f"[PID: {os.getpid()}] 从配置加载语言设置: {lang}")
     except Exception as e:
         lang = 'ch'  # 后备默认值
@@ -96,14 +95,13 @@ def initialize_worker():
         # 使用统一的模型配置加载器
         # 导入通用配置加载器
         import sys
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from utils.config_loader import get_detection_model
-        from utils.config_loader import get_ocr_lang
-        from utils.config_loader import get_ocr_models_config
-        from utils.config_loader import get_recognition_model_for_lang
+        from services.common.config_loader import CONFIG
+        from .config_helpers import get_detection_model
+        from .config_helpers import get_ocr_models_config
+        from .config_helpers import get_recognition_model_for_lang
 
         # 获取语言设置
-        lang = get_ocr_lang(default_lang='zh')
+        lang = CONFIG.get('ocr', {}).get('lang', 'zh')
         logger.info(f"[PID: {os.getpid()}] 从配置加载语言设置: {lang}")
         
         # 获取统一的模型配置

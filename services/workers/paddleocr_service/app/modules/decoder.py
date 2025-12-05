@@ -7,7 +7,7 @@ import av
 import numpy as np
 import torch
 
-from ..utils.progress_logger import create_progress_bar
+from services.common.progress_logger import create_progress_bar
 
 
 class GPUDecoder:

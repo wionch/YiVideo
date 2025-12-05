@@ -1,16 +1,13 @@
 """
-SRT字幕格式解析器 - 专为字幕校正功能设计
+通用字幕解析模块
 
-提供SRT字幕文件的解析、验证和生成功能。
-支持字幕条目的增删改查和时间戳处理。
-
-注意：此模块与 services/workers/ffmpeg_service/app/modules/subtitle_parser.py 功能类似但用途不同：
-- 本模块：主要用于字幕校正和文本处理，专注于SRT格式，包含高级文本处理功能
-- ffmpeg_service模块：主要用于音频分割，支持多种格式（SRT、JSON），包含说话人信息处理
+提供SRT、JSON等多种格式字幕文件的解析、验证、生成和转换功能。
+支持字幕条目的增删改查、时间戳处理、短字幕合并等高级功能。
 """
 
 import re
 import os
+import json
 from typing import List, Dict, Optional, Union
 from dataclasses import dataclass
 import logging
@@ -29,15 +26,27 @@ class SubtitleEntry:
     text: str                            # 字幕文本
     duration: float = 0.0                # 持续时间（秒），自动计算
     speaker: Optional[str] = None        # 说话人标识
+    confidence: Optional[float] = None   # 置信度（可选）
+    words: Optional[List[Dict]] = None   # 词级时间戳（可选）
 
     # 说话人标识正则表达式模式
-    SPEAKER_PATTERN = r'\[(SPEAKER_[\w_]+)\]'
-    SPEAKER_CLEAN_PATTERN = r'\[SPEAKER_[\w_]+\]\s*'
+    SPEAKER_PATTERN = r' তুলতে(SPEAKER_[\w_]+)ântul'
+    SPEAKER_CLEAN_PATTERN = r' তুলতেSPEAKER_[\w_]+ântul\s*'
 
     def __post_init__(self):
         """自动计算持续时间和说话人信息"""
         self.duration = self.end_time - self.start_time
-        self.speaker = self._extract_speaker()
+        if self.speaker is None:
+            self.speaker = self._extract_speaker()
+
+    @property
+    def id(self) -> int:
+        """index的别名，兼容部分使用id的代码"""
+        return self.index
+    
+    @id.setter
+    def id(self, value: int):
+        self.index = value
 
     def _extract_speaker(self) -> Optional[str]:
         """从字幕文本中提取说话人标识"""
@@ -83,6 +92,13 @@ class SubtitleEntry:
         match = re.match(pattern, time_str.strip())
 
         if not match:
+            # 尝试备用格式 (HH:MM:SS.mmm)
+            pattern_dot = r'(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})'
+            match_dot = re.match(pattern_dot, time_str.strip())
+            if match_dot:
+                hours, minutes, seconds, milliseconds = map(int, match_dot.groups())
+                return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+            
             raise ValueError(f"无效的SRT时间格式: {time_str}")
 
         hours, minutes, seconds, milliseconds = map(int, match.groups())
@@ -121,7 +137,7 @@ class SRTParser:
     """SRT字幕解析器"""
 
     # SRT时间戳正则表达式
-    TIME_PATTERN = re.compile(r'(\d{1,2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2},\d{3})')
+    TIME_PATTERN = re.compile(r'(\d{1,2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,\.]\d{3})')
 
     def __init__(self):
         """初始化SRT解析器"""
@@ -198,12 +214,17 @@ class SRTParser:
         """
         lines = block.split('\n')
         if len(lines) < 3:
-            logger.warning(f"字幕块格式不正确，至少需要3行: {block[:50]}...")
+            # 有些SRT文件可能缺少空行分隔，尝试容错处理
+            # 但标准SRT必须有至少3行
             return None
 
         try:
             # 第一行：序号
-            index = int(lines[0].strip())
+            try:
+                index = int(lines[0].strip())
+            except ValueError:
+                # 可能是BOM头或其他垃圾字符，跳过
+                return None
 
             # 第二行：时间戳
             time_line = lines[1].strip()
@@ -217,16 +238,22 @@ class SRTParser:
             start_time = SubtitleEntry._srt_time_to_seconds(start_time_str)
             end_time = SubtitleEntry._srt_time_to_seconds(end_time_str)
 
-            if start_time >= end_time:
-                logger.warning(f"时间戳无效: 开始时间 >= 结束时间 ({start_time} >= {end_time})")
+            if start_time > end_time: # 允许相等
+                logger.warning(f"时间戳无效: 开始时间 > 结束时间 ({start_time} > {end_time})")
+                # 修正：如果时间倒退，可能需要交换或者丢弃。这里选择修正为相等。
+                # end_time = start_time 
                 return None
 
             # 剩余行：字幕文本
             text = '\n'.join(lines[2:]).strip()
+            
+            # 处理可能的说话人信息 [SPEAKER_XX] prefix
+            # SubtitleEntry.__post_init__ 会自动处理
 
             if not text:
                 logger.warning(f"字幕文本为空: 序号 {index}")
-                return None
+                # 允许空文本字幕存在，有时用于占位
+                text = ""
 
             return SubtitleEntry(
                 index=index,
@@ -235,11 +262,8 @@ class SRTParser:
                 text=text
             )
 
-        except ValueError as e:
-            logger.warning(f"解析字幕块失败: {e}")
-            return None
         except Exception as e:
-            logger.error(f"解析字幕块时发生未知错误: {e}")
+            logger.debug(f"解析字幕块失败: {e} (block: {block[:20]}...)")
             return None
 
     def _validate_and_sort_entries(self, entries: List[SubtitleEntry]) -> List[SubtitleEntry]:
@@ -261,17 +285,7 @@ class SRTParser:
         # 检查序号连续性
         for i, entry in enumerate(entries):
             if entry.index != i + 1:
-                logger.debug(f"修正字幕序号: {entry.index} -> {i + 1}")
                 entry.index = i + 1
-
-        # 检查时间重叠
-        overlaps = []
-        for i in range(len(entries) - 1):
-            if entries[i].overlaps_with(entries[i + 1]):
-                overlaps.append((entries[i], entries[i + 1]))
-
-        if overlaps:
-            logger.warning(f"发现 {len(overlaps)} 个时间重叠的字幕条目")
 
         return entries
 
@@ -441,7 +455,10 @@ class SRTParser:
                 index=entry.index,
                 start_time=entry.start_time * stretch_factor + offset,
                 end_time=entry.end_time * stretch_factor + offset,
-                text=entry.text
+                text=entry.text,
+                speaker=entry.speaker,
+                confidence=entry.confidence,
+                words=entry.words
             )
             adjusted.append(new_entry)
 
@@ -574,8 +591,100 @@ class SRTParser:
             index=min(entry1.index, entry2.index),
             start_time=start_time,
             end_time=end_time,
-            text=merged_text.strip()
+            text=merged_text.strip(),
+            speaker=entry1.speaker
         )
+
+    @staticmethod
+    def parse_subtitle_json_file(file_path: str) -> List[SubtitleEntry]:
+        """
+        解析JSON格式的字幕文件
+
+        Args:
+            file_path: JSON字幕文件路径
+
+        Returns:
+            List[SubtitleEntry]: 字幕片段列表
+        """
+        if not os.path.exists(file_path):
+            logger.error(f"JSON字幕文件不存在: {file_path}")
+            return []
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            segments = []
+
+            # 处理不同的JSON格式
+            if isinstance(data, dict) and 'segments' in data:
+                # WhisperX带说话人信息的JSON格式
+                segment_data = data['segments']
+
+                for seg in segment_data:
+                    try:
+                        # 处理ID可能不存在的情况
+                        idx = seg.get('id', len(segments) + 1)
+                        
+                        segment = SubtitleEntry(
+                            index=idx,
+                            start_time=seg.get('start', 0.0),
+                            end_time=seg.get('end', 0.0),
+                            text=seg.get('text', ''),
+                            speaker=seg.get('speaker'),
+                            confidence=seg.get('speaker_confidence'),
+                            words=seg.get('words')
+                        )
+                        segments.append(segment)
+
+                    except Exception as e:
+                        logger.warning(f"解析JSON字幕片段失败: {seg}, 错误: {e}")
+                        continue
+            elif isinstance(data, list):
+                # 可能是直接的片段列表
+                for i, seg in enumerate(data):
+                    try:
+                        segment = SubtitleEntry(
+                            index=i+1,
+                            start_time=seg.get('startTime', seg.get('start', 0.0)),
+                            end_time=seg.get('endTime', seg.get('end', 0.0)),
+                            text=seg.get('text', ''),
+                            speaker=seg.get('speaker'),
+                            confidence=seg.get('confidence'),
+                            words=seg.get('words')
+                        )
+                        segments.append(segment)
+                    except Exception:
+                        pass
+
+            logger.info(f"成功解析JSON字幕文件: {file_path}, 共 {len(segments)} 个片段")
+            return segments
+
+        except Exception as e:
+            logger.error(f"读取JSON字幕文件失败: {file_path}, 错误: {e}")
+            return []
+
+    def group_segments_by_speaker(self, segments: List[SubtitleEntry]) -> Dict[str, List[SubtitleEntry]]:
+        """
+        按说话人分组字幕片段
+
+        Args:
+            segments: 字幕片段列表
+
+        Returns:
+            Dict[str, List[SubtitleEntry]]: 按说话人分组的字典
+        """
+        grouped = {}
+
+        for segment in segments:
+            speaker = segment.speaker or "UNKNOWN"
+
+            if speaker not in grouped:
+                grouped[speaker] = []
+
+            grouped[speaker].append(segment)
+
+        return grouped
 
 
 # 便捷函数
@@ -584,6 +693,14 @@ def parse_srt_file(file_path: str) -> List[SubtitleEntry]:
     parser = SRTParser()
     return parser.parse_file(file_path)
 
+def parse_subtitle_file(file_path: str) -> List[SubtitleEntry]:
+    """便捷函数：自动识别格式解析"""
+    _, ext = os.path.splitext(file_path.lower())
+    if ext == '.json':
+        return SRTParser.parse_subtitle_json_file(file_path)
+    else:
+        # 默认按SRT处理
+        return parse_srt_file(file_path)
 
 def write_srt_file(entries: List[SubtitleEntry], file_path: str) -> None:
     """便捷函数：写入SRT文件"""

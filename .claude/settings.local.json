@@ -93,7 +93,8 @@
       "Bash(python3:*)",
       "SlashCommand(/openspec:proposal:*)",
       "mcp__serena__think_about_task_adherence",
-      "Bash(openspec validate:*)"
+      "Bash(openspec validate:*)",
+      "Bash(openspec:*)"
     ],
     "deny": [
       "Bash(docker build:*)"

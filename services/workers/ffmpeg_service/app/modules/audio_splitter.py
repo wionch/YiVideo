@@ -20,7 +20,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .subtitle_parser import SubtitleSegment, parse_subtitle_segments
+from services.common.subtitle.subtitle_parser import SubtitleEntry as SubtitleSegment, parse_subtitle_file
 
 logger = logging.getLogger(__name__)
 
@@ -647,7 +647,7 @@ def split_audio_segments(
         SplitResult: 分割结果
     """
     # 解析字幕文件
-    segments = parse_subtitle_segments(subtitle_file, **kwargs)
+    segments = parse_subtitle_file(subtitle_file)
     if not segments:
         raise ValueError(f"无法解析字幕文件或文件为空: {subtitle_file}")
 

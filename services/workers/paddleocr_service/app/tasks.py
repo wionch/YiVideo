@@ -34,6 +34,7 @@ from celery import Task
 from services.common import state_manager
 from services.common.config_loader import CONFIG
 from services.common.config_loader import get_cleanup_temp_files_config
+from services.common.subtitle.subtitle_parser import SubtitleEntry, write_srt_file as common_write_srt_file
 
 # 导入标准上下文、锁和状态管理器
 from services.common.context import StageExecution
@@ -76,29 +77,6 @@ def _get_video_fps(video_path: str) -> float:
     except Exception as e:
         logger.warning(f"Could not get FPS from video metadata using PyAV: {e}. Defaulting to 30.0")
         return 30.0
-
-def _write_srt_file(subtitles: list, srt_path: str):
-    """Helper function to write a list of subtitle dicts to an SRT file."""
-    with open(srt_path, 'w', encoding='utf-8') as f:
-        for i, sub in enumerate(subtitles, 1):
-            start_time = sub['startTime']
-            end_time = sub['endTime']
-            text = sub['text']
-            
-            start_h, rem = divmod(start_time, 3600)
-            start_m, rem = divmod(rem, 60)
-            start_s, start_ms = divmod(rem, 1)
-            
-            end_h, rem = divmod(end_time, 3600)
-            end_m, rem = divmod(rem, 60)
-            end_s, end_ms = divmod(rem, 1)
-
-            start_srt = f"{int(start_h):02}:{int(start_m):02}:{int(start_s):02},{int(start_ms*1000):03}"
-            end_srt = f"{int(end_h):02}:{int(end_m):02}:{int(end_s):02},{int(end_ms*1000):03}"
-            
-            f.write(f"{i}\n")
-            f.write(f"{start_srt} --> {end_srt}\n")
-            f.write(f"{text}\n\n")
 
 def natural_sort_key(s: str) -> list:
     """
@@ -1105,7 +1083,18 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
             final_srt_path = os.path.join(workflow_context.shared_storage_path, f"{video_name}.srt")
             final_json_path = os.path.join(workflow_context.shared_storage_path, f"{video_name}.json")
             
-            _write_srt_file(final_subtitles, final_srt_path)
+            # Convert to SubtitleEntry objects for common writer
+            entries = []
+            for i, sub in enumerate(final_subtitles, 1):
+                entry = SubtitleEntry(
+                    index=i,
+                    start_time=sub['startTime'],
+                    end_time=sub['endTime'],
+                    text=sub['text']
+                )
+                entries.append(entry)
+            
+            common_write_srt_file(entries, final_srt_path)
             with open(final_json_path, 'w', encoding='utf-8') as f:
                 json.dump(final_subtitles, f, ensure_ascii=False, indent=4)
 

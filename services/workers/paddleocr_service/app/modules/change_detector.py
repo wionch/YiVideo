@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import torch
 
-from ..utils.progress_logger import create_stage_progress
+from services.common.progress_logger import create_stage_progress
 from .decoder import GPUDecoder
 from .base_detector import BaseDetector, ConfigManager
 from services.common.logger import get_logger

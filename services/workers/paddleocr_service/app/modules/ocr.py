@@ -18,7 +18,7 @@ import cv2
 import torch
 from paddleocr import PaddleOCR
 
-from ..utils.progress_logger import create_stage_progress
+from services.common.progress_logger import create_stage_progress
 
 # Configure logging
 # 日志已统一管理，使用 services.common.logger
@@ -206,12 +206,10 @@ def _full_ocr_worker_initializer(full_config: Dict):
         # [修复] 基于PaddleOCR 3.x源码分析，使用正确的API参数
         try:
             # 导入通用配置加载器
-            import sys
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-            from utils.config_loader import get_ocr_lang
+            from services.common.config_loader import CONFIG
 
             # 获取语言设置
-            lang = get_ocr_lang(default_lang='zh')
+            lang = CONFIG.get('ocr', {}).get('lang', 'zh')
             logger.info(f"[PID: {pid}] 从配置加载语言设置: {lang}")
 
             # [修复] 使用PaddleOCR 3.x正确参数
