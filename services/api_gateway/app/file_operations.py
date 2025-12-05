@@ -8,6 +8,8 @@
 """
 
 import mimetypes
+import os
+import shutil
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
@@ -16,7 +18,7 @@ from pydantic import ValidationError
 from services.common.logger import get_logger
 from .minio_service import get_minio_service
 from .single_task_models import (
-    FileUploadRequest, FileUploadResponse, FileOperationResponse, 
+    FileUploadRequest, FileUploadResponse, FileOperationResponse,
     FileListResponse, FileListItem, ErrorResponse
 )
 
@@ -24,6 +26,126 @@ logger = get_logger('file_operations')
 
 # 创建路由器
 router = APIRouter(prefix="/v1/files", tags=["File Operations"])
+
+
+@router.delete("/directories", response_model=FileOperationResponse)
+async def delete_directory(
+    directory_path: str = Query(..., description="要删除的本地目录路径")
+):
+    """
+    删除本地文件系统中的目录及其所有内容
+
+    Args:
+        directory_path: 要删除的本地目录路径
+
+    Returns:
+        FileOperationResponse: 删除结果
+    """
+    logger.info(f"开始删除本地目录: {directory_path}")
+
+    try:
+        # 验证目录路径参数
+        if not directory_path:
+            raise HTTPException(status_code=400, detail="directory_path不能为空")
+
+        # 安全检查：防止路径遍历攻击（限制在 /share/ 目录下）
+        if ".." in directory_path:
+            logger.warning(f"检测到不安全的目录路径（路径遍历攻击）: {directory_path}")
+            raise HTTPException(status_code=400, detail="无效的目录路径：禁止路径遍历攻击")
+
+        # 限制只能删除 /share/ 目录下的路径
+        if not (directory_path.startswith("/share/") or directory_path.startswith("share/")):
+            logger.warning(f"检测到越权路径访问: {directory_path}")
+            raise HTTPException(status_code=400, detail="无效的目录路径：只能删除 /share/ 目录下的文件")
+
+        # 检查目录是否存在
+        if not os.path.exists(directory_path):
+            logger.info(f"目录不存在，视为删除成功: {directory_path}")
+            return FileOperationResponse(
+                success=True,
+                message=f"目录不存在，删除操作已幂等完成: {directory_path}",
+                file_path=directory_path
+            )
+
+        # 检查是否为目录
+        if not os.path.isdir(directory_path):
+            logger.warning(f"路径不是目录: {directory_path}")
+            raise HTTPException(status_code=400, detail=f"路径不是目录: {directory_path}")
+
+        # 尝试删除目录及其内容
+        try:
+            shutil.rmtree(directory_path)
+            logger.info(f"目录删除成功: {directory_path}")
+
+            return FileOperationResponse(
+                success=True,
+                message=f"目录删除成功: {directory_path}",
+                file_path=directory_path
+            )
+        except PermissionError as e:
+            logger.error(f"权限不足，无法删除目录: {directory_path}, 错误: {e}")
+            raise HTTPException(status_code=403, detail=f"权限不足，无法删除目录: {directory_path}")
+        except Exception as e:
+            logger.error(f"删除目录时发生错误: {directory_path}, 错误: {e}")
+            raise HTTPException(status_code=500, detail=f"删除目录失败: {str(e)}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"处理删除目录请求时发生未知错误: {e}")
+        raise HTTPException(status_code=500, detail=f"处理请求时发生错误: {str(e)}")
+
+
+@router.delete("/{file_path:path}", response_model=FileOperationResponse)
+async def delete_file(
+    file_path: str,
+    bucket: Optional[str] = Query("yivideo", description="文件桶名称")
+):
+    """
+    删除MinIO中的文件
+
+    Args:
+        file_path: 文件在MinIO中的路径
+        bucket: 文件桶名称（默认yivideo）
+
+    Returns:
+        FileOperationResponse: 删除结果
+    """
+    logger.info(f"开始删除文件: {file_path}, 桶: {bucket}")
+
+    try:
+        # 验证文件路径
+        if ".." in file_path or file_path.startswith("/"):
+            raise HTTPException(status_code=400, detail="无效的文件路径")
+
+        # 获取MinIO服务
+        minio_service = get_minio_service()
+
+        # 删除文件
+        success = minio_service.delete_file(file_path, bucket)
+
+        if success:
+            message = f"文件删除成功: {file_path}"
+            logger.info(message)
+            return FileOperationResponse(
+                success=True,
+                message=message,
+                file_path=file_path
+            )
+        else:
+            message = f"文件删除失败: {file_path}"
+            logger.warning(message)
+            return FileOperationResponse(
+                success=False,
+                message=message,
+                file_path=file_path
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"文件删除失败: {e}")
+        raise HTTPException(status_code=500, detail=f"文件删除失败: {str(e)}")
 
 
 @router.post("/upload", response_model=FileUploadResponse)
@@ -125,288 +247,6 @@ async def download_file(
     except Exception as e:
         logger.error(f"文件下载失败: {e}")
         raise HTTPException(status_code=500, detail=f"文件下载失败: {str(e)}")
-
-
-@router.delete("/{file_path:path}", response_model=FileOperationResponse)
-async def delete_file(
-    file_path: str,
-    bucket: Optional[str] = Query("yivideo", description="文件桶名称")
-):
-    """
-    删除MinIO中的文件
-    
-    Args:
-        file_path: 文件在MinIO中的路径
-        bucket: 文件桶名称（默认yivideo）
-        
-    Returns:
-        FileOperationResponse: 删除结果
-    """
-    logger.info(f"开始删除文件: {file_path}, 桶: {bucket}")
-    
-    try:
-        # 验证文件路径
-        if ".." in file_path or file_path.startswith("/"):
-            raise HTTPException(status_code=400, detail="无效的文件路径")
-        
-        # 获取MinIO服务
-        minio_service = get_minio_service()
-        
-        # 删除文件
-        success = minio_service.delete_file(file_path, bucket)
-        
-        if success:
-            message = f"文件删除成功: {file_path}"
-            logger.info(message)
-            return FileOperationResponse(
-                success=True,
-                message=message,
-                file_path=file_path
-            )
-        else:
-            message = f"文件删除失败: {file_path}"
-            logger.warning(message)
-            return FileOperationResponse(
-                success=False,
-                message=message,
-                file_path=file_path
-            )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"文件删除失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文件删除失败: {str(e)}")
-
-
-@router.get("/list/{prefix:path}", response_model=FileListResponse)
-async def list_files_with_prefix(
-    prefix: str = "",
-    bucket: Optional[str] = Query("yivideo", description="文件桶名称"),
-    recursive: bool = Query(True, description="是否递归列出子目录")
-):
-    """
-    列出MinIO中的文件（指定前缀）
-    
-    Args:
-        prefix: 文件路径前缀
-        bucket: 文件桶名称（默认yivideo）
-        recursive: 是否递归列出子目录
-        
-    Returns:
-        FileListResponse: 文件列表
-    """
-    logger.info(f"开始列出文件（指定前缀）: 前缀={prefix}, 桶={bucket}, 递归={recursive}")
-    
-    try:
-        # 获取MinIO服务
-        minio_service = get_minio_service()
-        
-        # 列出文件
-        files_info = minio_service.list_files(prefix, bucket, recursive)
-        
-        # 转换为响应格式
-        file_items = [
-            FileListItem(
-                file_path=info["file_path"],
-                size=info["size"],
-                last_modified=info["last_modified"],
-                etag=info["etag"],
-                content_type=info["content_type"]
-            )
-            for info in files_info
-        ]
-        
-        response = FileListResponse(
-            prefix=prefix,
-            bucket=bucket or "yivideo",
-            files=file_items,
-            total_count=len(file_items)
-        )
-        
-        logger.info(f"文件列表获取成功: 找到 {len(file_items)} 个文件")
-        return response
-        
-    except Exception as e:
-        logger.error(f"文件列表获取失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文件列表获取失败: {str(e)}")
-
-
-# 新增路由：支持只使用查询参数的列表请求
-@router.get("/list", response_model=FileListResponse)
-async def list_files_no_prefix(
-    bucket: Optional[str] = Query("yivideo", description="文件桶名称"),
-    recursive: bool = Query(True, description="是否递归列出子目录")
-):
-    """
-    列出MinIO中的文件（通过查询参数）
-    
-    Args:
-        bucket: 文件桶名称（默认yivideo）
-        recursive: 是否递归列出子目录
-        
-    Returns:
-        FileListResponse: 文件列表
-    """
-    logger.info(f"开始列出文件（通过查询参数）: 桶={bucket}, 递归={recursive}")
-    
-    try:
-        # 获取MinIO服务
-        minio_service = get_minio_service()
-        
-        # 列出文件（空前缀表示所有文件）
-        files_info = minio_service.list_files("", bucket, recursive)
-        
-        # 转换为响应格式
-        file_items = [
-            FileListItem(
-                file_path=info["file_path"],
-                size=info["size"],
-                last_modified=info["last_modified"],
-                etag=info["etag"],
-                content_type=info["content_type"]
-            )
-            for info in files_info
-        ]
-        
-        response = FileListResponse(
-            prefix="",
-            bucket=bucket or "yivideo",
-            files=file_items,
-            total_count=len(file_items)
-        )
-        
-        logger.info(f"文件列表获取成功: 找到 {len(file_items)} 个文件")
-        return response
-        
-    except Exception as e:
-        logger.error(f"文件列表获取失败: {e}")
-        raise HTTPException(status_code=500, detail=f"文件列表获取失败: {str(e)}")
-
-
-@router.get("/exists/{file_path:path}")
-async def check_file_exists(
-    file_path: str,
-    bucket: Optional[str] = Query("yivideo", description="文件桶名称")
-):
-    """
-    检查文件是否存在
-    
-    Args:
-        file_path: 文件在MinIO中的路径
-        bucket: 文件桶名称（默认yivideo）
-        
-    Returns:
-        dict: 文件存在信息
-    """
-    logger.info(f"检查文件存在性: {file_path}, 桶: {bucket}")
-    
-    try:
-        # 验证文件路径
-        if ".." in file_path or file_path.startswith("/"):
-            raise HTTPException(status_code=400, detail="无效的文件路径")
-        
-        # 获取MinIO服务
-        minio_service = get_minio_service()
-        
-        # 检查文件存在性
-        exists = minio_service.file_exists(file_path, bucket)
-        
-        return {
-            "file_path": file_path,
-            "bucket": bucket or "yivideo",
-            "exists": exists
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"检查文件存在性失败: {e}")
-        raise HTTPException(status_code=500, detail=f"检查文件存在性失败: {str(e)}")
-
-
-@router.get("/url/{file_path:path}")
-async def get_file_url(
-    file_path: str,
-    bucket: Optional[str] = Query("yivideo", description="文件桶名称"),
-    expires_hours: int = Query(24, description="链接有效期（小时）")
-):
-    """
-    获取文件的预签名URL
-    
-    Args:
-        file_path: 文件在MinIO中的路径
-        bucket: 文件桶名称（默认yivideo）
-        expires_hours: 链接有效期（小时）
-        
-    Returns:
-        dict: 预签名URL信息
-    """
-    logger.info(f"获取文件URL: {file_path}, 桶: {bucket}, 有效期: {expires_hours}小时")
-    
-    try:
-        from datetime import timedelta
-        
-        # 验证参数
-        if expires_hours <= 0 or expires_hours > 168:  # 最多7天
-            raise HTTPException(status_code=400, detail="有效期必须在1-168小时之间")
-        
-        # 验证文件路径
-        if ".." in file_path or file_path.startswith("/"):
-            raise HTTPException(status_code=400, detail="无效的文件路径")
-        
-        # 获取MinIO服务
-        minio_service = get_minio_service()
-        
-        # 获取预签名URL
-        url = minio_service.get_presigned_url(
-            file_path, 
-            bucket, 
-            expires=timedelta(hours=expires_hours)
-        )
-        
-        return {
-            "file_path": file_path,
-            "bucket": bucket or "yivideo",
-            "download_url": url,
-            "expires_in_hours": expires_hours
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取文件URL失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取文件URL失败: {str(e)}")
-
-
-@router.get("/health")
-async def health_check():
-    """
-    文件服务健康检查
-    
-    Returns:
-        dict: 健康状态信息
-    """
-    try:
-        # 尝试获取MinIO服务实例
-        minio_service = get_minio_service()
-        
-        # 简单检查：尝试列出根目录（不应该有太多文件）
-        files = minio_service.list_files("", "yivideo", recursive=False)
-        
-        return {
-            "status": "healthy",
-            "minio_host": minio_service.host,
-            "default_bucket": minio_service.default_bucket,
-            "test_files_count": len(files)
-        }
-        
-    except Exception as e:
-        logger.error(f"文件服务健康检查失败: {e}")
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
 
 
 def get_file_operations_router():

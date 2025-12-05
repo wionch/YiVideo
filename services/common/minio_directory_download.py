@@ -328,7 +328,8 @@ def download_directory_from_minio(minio_url: str,
                                  local_dir: str,
                                  file_pattern: str = "*",
                                  create_structure: bool = True,
-                                 auto_decompress: bool = True) -> Dict[str, Union[str, List[str]]]:
+                                 auto_decompress: bool = True,
+                                 workflow_id: Optional[str] = None) -> Dict[str, Union[str, List[str]]]:
     """
     便捷函数：从MinIO智能下载（准确区分文件和目录）
     
@@ -356,7 +357,7 @@ def download_directory_from_minio(minio_url: str,
         if url_type == "file":
             # 文件：直接下载
             logger.info(f"[下载函数] 检测为文件，直接下载: {normalized_url}")
-            return download_single_file(normalized_url, local_dir, auto_decompress)
+            return download_single_file(normalized_url, local_dir, auto_decompress, workflow_id)
         elif url_type == "directory":
             # 目录：下载目录内容
             logger.info(f"[下载函数] 检测为目录，下载目录内容: {normalized_url}")
@@ -473,7 +474,7 @@ def classify_minio_url_type(minio_url: str) -> str:
         return "unknown"
 
 
-def download_single_file(minio_url: str, local_dir: str, auto_decompress: bool = True) -> Dict[str, Union[str, List[str]]]:
+def download_single_file(minio_url: str, local_dir: str, auto_decompress: bool = True, workflow_id: Optional[str] = None) -> Dict[str, Union[str, List[str]]]:
     """
     下载单个文件，如果启用自动解压且文件是压缩包，则解压
     
@@ -500,7 +501,8 @@ def download_single_file(minio_url: str, local_dir: str, auto_decompress: bool =
             downloader = MinioDirectoryDownloader()
             result = downloader.download_and_extract_archive(
                 minio_url=minio_url,
-                local_dir=local_dir
+                local_dir=local_dir,
+                workflow_id=workflow_id
             )
             result["processed_path"] = local_dir
             result["is_archive_file"] = True
@@ -561,5 +563,6 @@ def download_keyframes_directory(minio_url: str,
         local_dir=local_dir,
         file_pattern=file_pattern,
         create_structure=True,
-        auto_decompress=auto_decompress
+        auto_decompress=auto_decompress,
+        workflow_id=workflow_id
     )

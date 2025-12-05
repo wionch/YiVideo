@@ -513,7 +513,8 @@ def create_stitched_images(self: Task, context: dict) -> dict:
                 minio_url=download_url,
                 local_dir=local_download_dir,
                 create_structure=True,
-                auto_decompress=auto_decompress
+                auto_decompress=auto_decompress,
+                workflow_id=workflow_context.workflow_id
             )
 
             if not download_result["success"]:
@@ -851,7 +852,8 @@ def perform_ocr(self: Task, context: dict) -> dict:
                 minio_url=minio_url,
                 local_dir=multi_frames_download_dir,
                 create_structure=True,
-                auto_decompress=True  # OCR任务也支持压缩包
+                auto_decompress=True,  # OCR任务也支持压缩包
+                workflow_id=workflow_context.workflow_id
             )
 
             if not download_result["success"]:
