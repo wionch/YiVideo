@@ -94,7 +94,13 @@
       "SlashCommand(/openspec:proposal:*)",
       "mcp__serena__think_about_task_adherence",
       "Bash(openspec validate:*)",
-      "Bash(openspec:*)"
+      "Bash(openspec:*)",
+      "mcp__n8n-mcp__tools_documentation",
+      "mcp__n8n-mcp__get_database_statistics",
+      "mcp__n8n-mcp__search_nodes",
+      "mcp__n8n-mcp__search_templates",
+      "mcp__n8n-mcp__n8n_get_workflow",
+      "mcp__n8n-mcp__n8n_create_workflow"
     ],
     "deny": [
       "Bash(docker build:*)"

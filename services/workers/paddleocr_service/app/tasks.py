@@ -1054,6 +1054,16 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
             fallback_from_stage="paddleocr.perform_ocr"
         )
         
+        # [修复] 支持从 input_data 获取 ocr_results_file URL 并下载
+        if not ocr_results_path or not os.path.exists(str(ocr_results_path) if ocr_results_path else ""):
+            ocr_results_file_url = get_param_with_fallback("ocr_results_file", resolved_params, workflow_context)
+            if ocr_results_file_url and str(ocr_results_file_url).startswith(('http://', 'https://', 'minio://')):
+                logger.info(f"[{stage_name}] 检测到 ocr_results_file URL，尝试下载: {ocr_results_file_url}")
+                file_service = get_file_service()
+                download_dir = os.path.join(workflow_context.shared_storage_path, f"download_ocr_{int(time.time())}")
+                ocr_results_path = file_service.resolve_and_download(ocr_results_file_url, download_dir)
+                logger.info(f"[{stage_name}] OCR结果文件下载成功: {ocr_results_path}")
+        
         if not ocr_results_path or not os.path.exists(ocr_results_path):
             raise ValueError(f"上下文中缺少或无效的 'ocr_results_path' 信息: {ocr_results_path}")
         

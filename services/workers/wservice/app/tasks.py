@@ -493,6 +493,12 @@ def get_speaker_data(stage_output: dict) -> dict:
 def generate_subtitle_files(self, context: dict) -> dict:
     """
     独立字幕文件生成任务节点
+    
+    支持单任务模式调用，通过input_data传入参数：
+    - segments_file: 转录数据文件路径（JSON格式，包含segments数组）
+    - audio_duration: 音频时长（可选）
+    - language: 语言代码（可选，默认'unknown'）
+    - output_filename: 输出文件名前缀（可选，默认'subtitle'）
     """
     start_time = time.time()
     workflow_context = WorkflowContext(**context)
@@ -501,25 +507,99 @@ def generate_subtitle_files(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
-        transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
-        if not transcribe_stage or transcribe_stage.status not in ['SUCCESS', 'COMPLETED']:
-            raise ValueError("无法获取转录结果：请确保 faster_whisper.transcribe_audio 任务已成功完成")
+        # --- Parameter Resolution (采用项目标准模式) ---
+        from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
+        
+        resolved_params = {}
+        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
+        if node_params:
+            try:
+                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
+                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
+            except ValueError as e:
+                logger.error(f"[{stage_name}] 参数解析失败: {e}")
+                raise e
+        
+        # 记录实际使用的输入参数
+        recorded_input_params = resolved_params.copy() if resolved_params else {}
+        
+        # --- 文件下载准备 ---
+        file_service = get_file_service()
+        
+        # --- 智能参数获取：支持单任务模式和工作流模式 ---
+        segments = None
+        audio_path = None
+        audio_duration = 0
+        language = 'unknown'
+        enable_word_timestamps = True
+        data_source = None
+        
+        # 1. 优先从 input_data / node_params 获取 segments_file（单任务模式）
+        segments_file = get_param_with_fallback(
+            'segments_file',
+            resolved_params,
+            workflow_context,
+            fallback_from_input_data=True
+        )
+        
+        if segments_file:
+            # 单任务模式：从文件加载segments
+            logger.info(f"[{stage_name}] 单任务模式：从 segments_file 加载数据: {segments_file}")
+            # 下载文件（支持MinIO URL）
+            segments_file = file_service.resolve_and_download(segments_file, workflow_context.shared_storage_path)
+            segments = load_segments_from_file(segments_file)
+            
+            if not segments:
+                raise ValueError(f"无法从文件加载segments数据: {segments_file}")
+            
+            # 从参数获取其他可选信息
+            audio_duration = get_param_with_fallback('audio_duration', resolved_params, workflow_context) or 0
+            language = get_param_with_fallback('language', resolved_params, workflow_context) or 'unknown'
+            enable_word_timestamps = any('words' in seg and seg['words'] for seg in segments)
+            
+            # 生成输出文件名：优先使用参数，其次从segments_file提取
+            output_filename = get_param_with_fallback('output_filename', resolved_params, workflow_context)
+            if not output_filename:
+                output_filename = os.path.splitext(os.path.basename(segments_file))[0]
+                # 清理常见后缀
+                for suffix in ['_segments', '_transcribe_data', '_transcription']:
+                    if output_filename.endswith(suffix):
+                        output_filename = output_filename[:-len(suffix)]
+                        break
+            
+            audio_path = output_filename  # 用于生成文件名
+            data_source = 'input_data.segments_file'
+            recorded_input_params['segments_file'] = segments_file
+            recorded_input_params['data_source'] = data_source
+        else:
+            # 2. 回退到工作流模式：从 faster_whisper.transcribe_audio 阶段获取
+            transcribe_stage = workflow_context.stages.get('faster_whisper.transcribe_audio')
+            if not transcribe_stage or transcribe_stage.status not in ['SUCCESS', 'COMPLETED']:
+                raise ValueError("无法获取转录结果：请提供 segments_file 参数，或确保 faster_whisper.transcribe_audio 任务已成功完成")
 
+            transcribe_output = transcribe_stage.output
+            if not transcribe_output or not isinstance(transcribe_output, dict):
+                raise ValueError("转录结果数据格式错误")
+
+            segments = get_segments_data(transcribe_output, 'segments')
+            audio_path = transcribe_output.get('audio_path')
+            audio_duration = transcribe_output.get('audio_duration', 0)
+            language = transcribe_output.get('language', 'unknown')
+            enable_word_timestamps = transcribe_output.get('enable_word_timestamps', True)
+            data_source = 'faster_whisper.transcribe_audio'
+            recorded_input_params['data_source'] = data_source
+
+            if not segments or not audio_path:
+                raise ValueError("转录结果中缺少必要的数据（segments 或 audio_path）")
+        
+        # 记录输入参数
+        workflow_context.stages[stage_name].input_params = recorded_input_params
+        
+        logger.info(f"[{stage_name}] 数据来源: {data_source}, segments数量: {len(segments)}")
+        
+        # --- 说话人信息处理（仅工作流模式） ---
         diarize_stage = workflow_context.stages.get('pyannote_audio.diarize_speakers')
         has_speaker_info = False
-        transcribe_output = transcribe_stage.output
-
-        if not transcribe_output or not isinstance(transcribe_output, dict):
-            raise ValueError("转录结果数据格式错误")
-
-        segments = get_segments_data(transcribe_output, 'segments')
-        audio_path = transcribe_output.get('audio_path')
-        audio_duration = transcribe_output.get('audio_duration', 0)
-        language = transcribe_output.get('language', 'unknown')
-        enable_word_timestamps = transcribe_output.get('enable_word_timestamps', True)
-
-        if not segments or not audio_path:
-            raise ValueError("转录结果中缺少必要的数据（segments 或 audio_path）")
 
         service_config = CONFIG.get('faster_whisper_service', {})
         speaker_segments = None
@@ -590,6 +670,26 @@ def generate_subtitle_files(self, context: dict) -> dict:
                 f.write(json_content)
             # 移除重复的word_timestamps_json_path字段，统一通过subtitle_files访问
             output_data["subtitle_files"]["word_timestamps"] = word_timestamps_json_path
+
+        # 始终生成完整的JSON格式字幕文件（包含所有元数据）
+        json_subtitle_filename = f"{base_filename}_subtitle.json"
+        json_subtitle_path = os.path.join(subtitles_dir, json_subtitle_filename)
+        json_subtitle_content = {
+            "format": "yivideo_subtitle",
+            "version": "1.0",
+            "metadata": {
+                "language": language,
+                "audio_duration": audio_duration,
+                "total_segments": len(segments),
+                "has_word_timestamps": enable_word_timestamps,
+                "data_source": data_source
+            },
+            "segments": segments
+        }
+        with open(json_subtitle_path, "w", encoding="utf-8") as f:
+            json.dump(json_subtitle_content, f, ensure_ascii=False, indent=2)
+        output_data["json_path"] = json_subtitle_path
+        output_data["subtitle_files"]["json"] = json_subtitle_path
 
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
