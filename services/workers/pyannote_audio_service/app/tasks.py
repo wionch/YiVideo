@@ -353,6 +353,10 @@ def get_speaker_segments(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     """
     获取指定说话人的片段
 
+    支持单任务模式调用，通过input_data传入参数：
+    - diarization_file: 说话人分离结果文件路径
+    - speaker: 目标说话人标签（可选，不指定则返回所有说话人统计）
+
     Args:
         context: 工作流上下文
 
@@ -377,14 +381,44 @@ def get_speaker_segments(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         
         # 保存到当前 stage 的 input_params
         workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-        workflow_context.stages[stage_name].input_params = resolved_params
+        workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
         
-        input_params = workflow_context.input_params
+        # --- 文件下载准备 ---
+        file_service = get_file_service()
+        
+        # 使用统一的参数获取逻辑，支持单任务模式
+        # 优先级：node_params > input_data > 上游节点 (pyannote_audio.diarize_speakers)
+        diarization_file = get_param_with_fallback(
+            "diarization_file",
+            resolved_params,
+            workflow_context,
+            fallback_from_input_data=True,
+            fallback_from_stage="pyannote_audio.diarize_speakers"
+        )
+        
+        target_speaker = get_param_with_fallback(
+            "speaker",
+            resolved_params,
+            workflow_context,
+            fallback_from_input_data=True
+        )
+        
+        # 记录实际使用的输入参数
+        if diarization_file:
+            workflow_context.stages[stage_name].input_params['diarization_file'] = diarization_file
+        if target_speaker:
+            workflow_context.stages[stage_name].input_params['speaker'] = target_speaker
+        
+        if not diarization_file:
+            raise ValueError("无法获取说话人分离结果文件：请提供 diarization_file 参数，或确保 pyannote_audio.diarize_speakers 任务已成功完成")
+        
+        # --- 文件下载 ---
+        if not os.path.exists(diarization_file):
+            logger.info(f"[{workflow_id}] 开始下载说话人分离文件: {diarization_file}")
+            diarization_file = file_service.resolve_and_download(diarization_file, workflow_context.shared_storage_path)
+            logger.info(f"[{workflow_id}] 说话人分离文件下载完成: {diarization_file}")
 
-        diarization_file = input_params.get('diarization_file')
-        target_speaker = input_params.get('speaker', None)
-
-        if not diarization_file or not os.path.exists(diarization_file):
+        if not os.path.exists(diarization_file):
             raise FileNotFoundError(f"说话人分离结果文件不存在: {diarization_file}")
 
         # 加载结果文件
@@ -435,6 +469,9 @@ def validate_diarization(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     """
     验证说话人分离结果的质量
 
+    支持单任务模式调用，通过input_data传入参数：
+    - diarization_file: 说话人分离结果文件路径
+
     Args:
         context: 工作流上下文
 
@@ -459,13 +496,35 @@ def validate_diarization(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         
         # 保存到当前 stage 的 input_params
         workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-        workflow_context.stages[stage_name].input_params = resolved_params
+        workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
         
-        input_params = workflow_context.input_params
+        # --- 文件下载准备 ---
+        file_service = get_file_service()
+        
+        # 使用统一的参数获取逻辑，支持单任务模式
+        # 优先级：node_params > input_data > 上游节点 (pyannote_audio.diarize_speakers)
+        diarization_file = get_param_with_fallback(
+            "diarization_file",
+            resolved_params,
+            workflow_context,
+            fallback_from_input_data=True,
+            fallback_from_stage="pyannote_audio.diarize_speakers"
+        )
+        
+        # 记录实际使用的输入参数
+        if diarization_file:
+            workflow_context.stages[stage_name].input_params['diarization_file'] = diarization_file
+        
+        if not diarization_file:
+            raise ValueError("无法获取说话人分离结果文件：请提供 diarization_file 参数，或确保 pyannote_audio.diarize_speakers 任务已成功完成")
+        
+        # --- 文件下载 ---
+        if not os.path.exists(diarization_file):
+            logger.info(f"[{workflow_id}] 开始下载说话人分离文件: {diarization_file}")
+            diarization_file = file_service.resolve_and_download(diarization_file, workflow_context.shared_storage_path)
+            logger.info(f"[{workflow_id}] 说话人分离文件下载完成: {diarization_file}")
 
-        diarization_file = input_params.get('diarization_file')
-
-        if not diarization_file or not os.path.exists(diarization_file):
+        if not os.path.exists(diarization_file):
             raise FileNotFoundError(f"说话人分离结果文件不存在: {diarization_file}")
 
         # 加载结果文件
