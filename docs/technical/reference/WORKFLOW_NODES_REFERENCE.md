@@ -873,11 +873,12 @@ Audio Separator 服务提供基于 UVR-MDX 模型的专业音频分离功能，�
 **输入参数**：
 
 - `audio_path` (string, 节点可选): 指定音频文件路径。仅在上游 `ffmpeg.extract_audio` 无输出时生效。
-- `audio_separator_config` (object, 节点可选): 细粒度控制，支持：
+- `audio_separator_config` (object, 节点/单任务可选): 细粒度控制，支持：
     - `quality_mode`: `"fast"|"default"|"high_quality"`
     - `model_type`: `"demucs"|"mdx"|"vr"`
     - `model_name`: 覆盖具体模型名
     - `use_vocal_optimization` / `vocal_optimization_level`
+- **优先级**：`node_params.audio_separator_config` > 单任务 `input_data.audio_separator_config`（或直接提供 `model_name`/`quality_mode` 字段）> `config.yml.audio_separator_service` 默认值。显式请求会覆盖全局配置。
 
 **配置来源说明**：
 
@@ -910,9 +911,17 @@ audio_separator_service:
 
 ```json
 {
-    "audio_list": ["/share/workflows/{workflow_id}/audio/audio_separated/video_(Vocals)_htdemucs.flac", "/share/workflows/{workflow_id}/audio/audio_separated/video_(Other)_htdemucs.flac"],
-    "vocal_audio": "/share/workflows/{workflow_id}/audio/audio_separated/video_(Vocals)_htdemucs.flac",
-    "model_used": "htdemucs",
+    "vocal_audio": "/share/workflows/{workflow_id}/audio/audio_separated/video_(Vocals)_UVR.flac",
+    "all_audio_files": [
+        "/share/workflows/{workflow_id}/audio/audio_separated/video_(Vocals)_UVR.flac",
+        "/share/workflows/{workflow_id}/audio/audio_separated/video_(Instrumental)_UVR.flac"
+    ],
+    "vocal_audio_minio_url": "http://host.docker.internal:9000/yivideo/{workflow_id}/audio/audio_separated/video_(Vocals)_UVR.flac",
+    "all_audio_minio_urls": [
+        "http://host.docker.internal:9000/yivideo/{workflow_id}/audio/audio_separated/video_(Vocals)_UVR.flac",
+        "http://host.docker.internal:9000/yivideo/{workflow_id}/audio/audio_separated/video_(Instrumental)_UVR.flac"
+    ],
+    "model_used": "UVR-MDX-NET-Inst_HQ_5.onnx",
     "quality_mode": "default"
 }
 ```
@@ -973,7 +982,7 @@ audio_separator_service:
 **输入参数**:
 
 - `audio_path` (string, 可选): 指定音频文件路径，以覆盖智能音频源选择逻辑
-- `model_name` (string, 可选): 指定要使用的分离模型名称
+- `audio_separator_config` (object, 可选): 传入 `model_name` / `model_type` / `quality_mode` 等字段。如果未嵌套对象，也可以直接在 `input_data` 顶层提供 `model_name`、`quality_mode` 等字段
 - `quality_mode` (string, 可选): 质量模式，可选值: `"fast"`, `"default"`, `"high_quality"`
 
 **单任务调用示例**:
@@ -983,16 +992,23 @@ audio_separator_service:
     "task_name": "audio_separator.separate_vocals",
     "input_data": {
         "audio_path": "/share/audio/sample.wav",
-        "quality_mode": "high_quality",
-        "model_name": "UVR-MDX-NET-Inst_HQ_3"
+        "audio_separator_config": {
+            "model_name": "UVR-MDX-NET-Inst_HQ_5.onnx",
+            "quality_mode": "high_quality"
+        }
     }
 }
 ```
 
 **参数来源说明**:
 
-- `audio_path`, `model_name`, `quality_mode`: **节点参数** (在请求体中的 `audio_separator.separate_vocals` 对象内提供)
+- `audio_path`, `audio_separator_config.*`: **节点参数** 或 **单任务请求参数**，显式值优先于 `config.yml`
 - 其他分离参数（如输出格式、采样率、标准化等）均为全局配置，请在 `config.yml` 中修改
+
+**输出说明（单任务模式）**：
+
+- 回调 JSON 中的 `result.output.vocal_audio` 提供人声文件路径，`result.output.all_audio_files` 列出该次分离产生的所有音频轨道路径（模型可能拆出 2~4 个不同 stem）。
+- `vocal_audio_minio_url` 和 `all_audio_minio_urls` 提供对应的 MinIO 下载 URL，可直接用于 n8n 等工作流继续处理。
 
 **注意事项**：
 

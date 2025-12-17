@@ -9,7 +9,7 @@ import os
 import time
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from celery import Task
 
 from services.common.locks import gpu_lock
@@ -178,10 +178,38 @@ def separate_vocals(self, context: dict) -> dict:
         use_vocal_optimization = False
         vocal_optimization_level = config.get('vocal_optimization_level')
         model_type = config.get('model_type')
-        
-        # 从input_params中获取覆盖参数 (优先使用 resolved_params)
-        audio_separator_config = resolved_params.get('audio_separator_config', 
-                                                   workflow_context.input_params.get('audio_separator_config', {}))
+
+        # --- 组装不同来源的 audio_separator_config，确保优先级：node_params > input_data/global > config ---
+        def _safe_dict(source):
+            return source if isinstance(source, dict) else {}
+
+        input_data_params = _safe_dict(workflow_context.input_params.get("input_data", {}))
+        input_data_audio_config = _safe_dict(input_data_params.get("audio_separator_config", {}))
+
+        # 兼容直接在 input_data 中传 quality/model 字段
+        direct_keys = ["model_name", "model_type", "quality_mode",
+                       "use_vocal_optimization", "vocal_optimization_level"]
+        direct_override = {}
+        for key in direct_keys:
+            if key in input_data_params and input_data_params[key] is not None:
+                direct_override[key] = input_data_params[key]
+        if direct_override:
+            input_data_audio_config = {**input_data_audio_config, **direct_override}
+
+        # 全局 workflow 输入中也可能带 audio_separator_config
+        workflow_level_config = _safe_dict(workflow_context.input_params.get("audio_separator_config", {}))
+
+        request_level_config = {}
+        for source in (input_data_audio_config, workflow_level_config):
+            if source:
+                request_level_config.update(source)
+
+        node_level_config = _safe_dict(resolved_params.get('audio_separator_config', {}))
+
+        # 应用优先级：先请求级，再节点级
+        audio_separator_config = request_level_config.copy()
+        audio_separator_config.update(node_level_config)
+
         quality_mode = audio_separator_config.get('quality_mode', quality_mode)
         use_vocal_optimization = audio_separator_config.get('use_vocal_optimization', use_vocal_optimization)
         vocal_optimization_level = audio_separator_config.get('vocal_optimization_level', vocal_optimization_level)
@@ -195,6 +223,8 @@ def separate_vocals(self, context: dict) -> dict:
         if audio_separator_config or quality_mode != "default" or model_type:
             recorded_input_params['quality_mode'] = quality_mode
             recorded_input_params['model_type'] = model_type
+            if audio_separator_config.get('model_name'):
+                recorded_input_params['model_name'] = audio_separator_config['model_name']
             if use_vocal_optimization:
                 recorded_input_params['use_vocal_optimization'] = True
                 if vocal_optimization_level:
@@ -207,6 +237,7 @@ def separate_vocals(self, context: dict) -> dict:
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
         # 4. 确定使用的模型
+        model_type = (model_type or config.get('model_type') or "mdx")
         if model_type.lower() == "demucs":
             model_name = config.get('demucs_default_model')
             if audio_separator_config and 'model_name' in audio_separator_config:
@@ -252,34 +283,73 @@ def separate_vocals(self, context: dict) -> dict:
         logger.info(f"[{stage_name}] 背景音文件: {result.get('instrumental')}")
 
         # 8. 准备输出数据结构
-        audio_list = list(result.get('all_tracks', {}).values())
+        all_audio_files = list(result.get('all_tracks', {}).values())
         vocal_audio = result.get('vocals')
+        instrumental_audio = result.get('instrumental')
 
         # 确保保存的是完整路径而非文件名
         if vocal_audio and not os.path.isabs(vocal_audio):
             # 如果是相对路径，补充为完整路径
             vocal_audio = str(task_output_dir / vocal_audio)
             logger.info(f"[{stage_name}] 转换人声文件路径为完整路径: {vocal_audio}")
+        if instrumental_audio and not os.path.isabs(instrumental_audio):
+            instrumental_audio = str(task_output_dir / instrumental_audio)
+            logger.info(f"[{stage_name}] 转换背景音文件路径为完整路径: {instrumental_audio}")
 
-        # 处理 audio_list，确保所有路径都是完整的
+        # 处理 all_audio_files，确保所有路径都是完整的
         full_audio_list = []
-        for audio_file in audio_list:
+        for audio_file in all_audio_files:
             if audio_file and not os.path.isabs(audio_file):
                 full_audio_list.append(str(task_output_dir / audio_file))
             else:
                 full_audio_list.append(audio_file)
-        audio_list = full_audio_list
+        all_audio_files = full_audio_list
 
         if not vocal_audio:
             logger.error(f"[{stage_name}] 未能确定人声音频文件")
             raise ValueError("无法确定人声音频文件")
+        if not instrumental_audio:
+            logger.warning(f"[{stage_name}] 未能确定背景声音频文件，将回退到音频列表")
+            if all_audio_files:
+                instrumental_audio = all_audio_files[0] if all_audio_files[0] != vocal_audio else (all_audio_files[1] if len(all_audio_files) > 1 else vocal_audio)
 
-        # 9. 更新 WorkflowContext
+        # 9. 上传音频文件到 MinIO，便于外部系统直接使用
+        uploaded_paths: Dict[str, str] = {}
+
+        def upload_track(local_path: Optional[str], label: str) -> Optional[str]:
+            if not local_path:
+                return None
+            if not os.path.exists(local_path):
+                logger.warning(f"[{stage_name}] 无法上传 {label}，文件不存在: {local_path}")
+                return None
+            if local_path in uploaded_paths:
+                return uploaded_paths[local_path]
+            object_name = f"{task_id}/audio/audio_separated/{os.path.basename(local_path)}"
+            try:
+                minio_url = file_service.upload_to_minio(local_path, object_name)
+                uploaded_paths[local_path] = minio_url
+                logger.info(f"[{stage_name}] 已上传 {label} 到 MinIO: {minio_url}")
+                return minio_url
+            except Exception as exc:
+                logger.error(f"[{stage_name}] 上传 {label} 到 MinIO 失败: {exc}", exc_info=True)
+                return None
+
+        vocal_audio_minio_url = upload_track(vocal_audio, 'vocals')
+        all_audio_minio_urls: List[str] = []
+
+        for track_path in all_audio_files:
+            url = upload_track(track_path, 'all_tracks')
+            if url and url not in all_audio_minio_urls:
+                all_audio_minio_urls.append(url)
+
+        # 10. 更新 WorkflowContext
         workflow_context.stages[stage_name] = StageExecution(
             status="SUCCESS",
             output={
-                'audio_list': audio_list,
+                'all_audio_files': all_audio_files,
                 'vocal_audio': vocal_audio,
+                'vocal_audio_minio_url': vocal_audio_minio_url,
+                'all_audio_minio_urls': all_audio_minio_urls,
                 'model_used': model_name,
                 'quality_mode': quality_mode
             },

@@ -344,20 +344,32 @@ class SingleTaskExecutor:
     def _extract_file_paths(self, result: Dict[str, Any]) -> List[str]:
         """从结果中提取文件路径"""
         file_paths = []
-        
+        tracked_keys = [
+            'audio_path', 'video_path', 'subtitle_path', 'output_path',
+            'keyframe_dir', 'audio_segments_dir', 'cropped_images_path',
+            'vocal_audio', 'instrumental_audio', 'background_audio',
+            'all_audio_files'
+        ]
+
+        def maybe_append_path(value, key_name=None):
+            if isinstance(value, str) and os.path.exists(value):
+                file_paths.append(value)
+                if key_name:
+                    logger.info(f"找到文件路径: {key_name} = {value}")
+
         def extract_paths_recursive(obj):
             if isinstance(obj, dict):
                 for key, value in obj.items():
-                    if key in ['audio_path', 'video_path', 'subtitle_path', 'output_path',
-                              'keyframe_dir', 'audio_segments_dir', 'cropped_images_path']:
-                        if isinstance(value, str) and os.path.exists(value):
-                            file_paths.append(value)
-                            logger.info(f"找到文件路径: {key} = {value}")
+                    if key in tracked_keys:
+                        maybe_append_path(value, key)
+                    elif key in ['audio_list', 'all_audio_files'] and isinstance(value, list):
+                        for item in value:
+                            maybe_append_path(item, f"{key}[]")
                     extract_paths_recursive(value)
             elif isinstance(obj, list):
                 for item in obj:
                     extract_paths_recursive(item)
-        
+
         logger.info(f"开始提取文件路径，result keys: {list(result.keys())}")
         extract_paths_recursive(result)
         logger.info(f"提取到 {len(file_paths)} 个文件路径: {file_paths}")

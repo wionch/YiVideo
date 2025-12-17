@@ -142,14 +142,17 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
             if not audio_path:
                 separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
                 if separator_stage and separator_stage.output:
-                    # 优先使用vocal_audio，其次使用instrumental_audio
-                    for audio_key in ['vocal_audio', 'instrumental_audio']:
-                        potential_path = separator_stage.output.get(audio_key)
-                        if potential_path:
-                            audio_path = potential_path
+                    potential_path = separator_stage.output.get('vocal_audio')
+                    if potential_path:
+                        audio_path = potential_path
+                        audio_source = "audio_separator.separate_vocals"
+                        logger.info(f"[{workflow_id}] 成功获取分离后的人声音频: {audio_path}")
+                    if not audio_path:
+                        all_tracks = separator_stage.output.get('all_audio_files') or []
+                        if isinstance(all_tracks, list) and all_tracks:
+                            audio_path = all_tracks[0]
                             audio_source = "audio_separator.separate_vocals"
-                            logger.info(f"[{workflow_id}] 成功获取分离后的音频({audio_key}): {audio_path}")
-                            break
+                            logger.info(f"[{workflow_id}] 使用分离结果列表中的音频: {audio_path}")
         
         if not audio_path:
             raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 或 audio_separator.separate_vocals 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
