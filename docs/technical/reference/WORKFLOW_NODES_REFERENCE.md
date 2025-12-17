@@ -713,11 +713,11 @@ Faster-Whisper 服务是一个纯粹的音频转录服务，提供基于 faster-
 
 **输入参数**：
 
-- `audio_path` (string, 节点可选): 指定音频文件路径，以覆盖智能音频源选择逻辑。支持 `${{...}}` 格式的参数引用。
+- `audio_path` (string, 节点可选): 指定音频文件路径，支持 `${{...}}` 引用。单任务模式下可直接提供；工作流模式下仅在上游无音频输出时生效。
 
 **配置来源说明**：
 
-- `audio_path`: **节点参数** (在请求体中的 `faster_whisper.transcribe_audio` 对象内提供)。
+- `audio_path`: **节点参数** (在请求体中的 `faster_whisper.transcribe_audio` 对象或 `input_data` 中提供)。
 - **其他模型参数**: 如模型大小 (`model_size`)、语言 (`language`)、计算精度、VAD 过滤等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
 
 **全局配置示例 (config.yml)**:
@@ -734,9 +734,9 @@ faster_whisper_service:
 
 **智能音频源选择**（按优先级）：
 
-1. 人声音频 (`audio_separator.separate_vocals` 输出的 `vocal_audio`)
-2. 默认音频 (`ffmpeg.extract_audio` 输出的 `audio_path`)
-3. 参数传入的 `audio_path`
+1. 节点参数 / 单任务输入的 `audio_path`
+2. 人声音频 (`audio_separator.separate_vocals` 输出的 `vocal_audio`)
+3. 默认音频 (`ffmpeg.extract_audio` 输出的 `audio_path`)
 
 **前置依赖**：
 
@@ -746,14 +746,20 @@ faster_whisper_service:
 
 ```json
 {
-    "segments_file": "/share/workflows/{workflow_id}/transcription/segments.json",
-    "audio_path": "/share/workflows/{workflow_id}/audio/audio.wav",
+    "segments_file": "/share/workflows/{workflow_id}/transcribe_data_{id}.json",
     "audio_duration": 125.5,
     "language": "zh",
-    "model_used": "base",
-    "total_words": 850,
+    "transcribe_duration": 45.2,
+    "model_name": "base",
+    "device": "cuda",
     "enable_word_timestamps": true,
-    "processing_time": 45.2
+    "statistics": {
+        "total_segments": 120,
+        "total_words": 850,
+        "transcribe_duration": 45.2,
+        "average_segment_duration": 1.2
+    },
+    "segments_count": 120
 }
 ```
 
@@ -806,9 +812,7 @@ faster_whisper_service:
         "workflow_chain": ["ffmpeg.extract_audio", "faster_whisper.transcribe_audio"]
     }
 }
-// 注：此节点的大部分参数（如模型大小、语言、解码选项）
-// 均为全局配置，请在 config.yml 中设置。
-// 唯一可选的节点参数是 audio_path，用于覆盖默认的音频源。
+// 注：模型大小、语言、解码选项为全局配置；可通过 audio_path 覆盖默认音频源。
 ```
 
 **依赖关系**：
@@ -868,13 +872,16 @@ Audio Separator 服务提供基于 UVR-MDX 模型的专业音频分离功能，�
 
 **输入参数**：
 
-- `audio_path` (string, 节点可选): 指定音频文件路径，以覆盖智能音频源选择逻辑。
-- `model_name` (string, 节点可选): 指定要使用的分离模型名称，如 "UVR-MDX-NET-Inst_HQ_3"。如果未提供，则根据 `quality_mode` 从全局配置中选择默认模型。
-- `quality_mode` (string, 节点可选): 质量模式，会影响默认模型的选择。可选值: `"fast"`, `"default"`, `"high_quality"`。
+- `audio_path` (string, 节点可选): 指定音频文件路径。仅在上游 `ffmpeg.extract_audio` 无输出时生效。
+- `audio_separator_config` (object, 节点可选): 细粒度控制，支持：
+    - `quality_mode`: `"fast"|"default"|"high_quality"`
+    - `model_type`: `"demucs"|"mdx"|"vr"`
+    - `model_name`: 覆盖具体模型名
+    - `use_vocal_optimization` / `vocal_optimization_level`
 
 **配置来源说明**：
 
-- `audio_path`, `model_name`, `quality_mode`: **节点参数** (在请求体中的 `audio_separator.separate_vocals` 对象内提供)。
+- `audio_path`, `audio_separator_config.*`: **节点参数** (在请求体中的 `audio_separator.separate_vocals` 对象内提供)。
 - **其他分离参数**: 如 `output_format`, `sample_rate`, `normalize` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
 
 **全局配置示例 (config.yml)**:
@@ -891,9 +898,9 @@ audio_separator_service:
 
 **智能音频源选择**（按优先级）：
 
-1. `ffmpeg.extract_audio` 输出的 `audio_path`
-2. `input_params` 中的 `audio_path`
-3. `input_params` 中的 `video_path`（自动提取音频）
+1. `ffmpeg.extract_audio` 输出的 `audio_path`（优先使用已提取音频）
+2. 显式/单任务输入的 `audio_path`
+3. `video_path`（作为回退，直接从原视频提取）
 
 **前置依赖**：
 
@@ -1505,94 +1512,51 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 
 ### 1. paddleocr.detect_subtitle_area
 
-通过关键帧分析检测视频中的字幕区域位置，支持多种输入模式。
+通过关键帧分析检测视频中的字幕区域位置。
 
-**功能描述**：分析视频关键帧，使用计算机视觉技术检测字幕通常出现的区域位置。支持本地目录、远程 MinIO 目录等多种输入源，提供灵活的使用方式。
+**功能描述**：分析视频关键帧，使用计算机视觉技术检测字幕通常出现的区域位置。
 
 **输入参数**：
 
-- `keyframe_dir` (string, 节点可选): 直接指定关键帧目录路径，支持本地路径或 MinIO URL（如 `minio://bucket/path/to/keyframes`）
-- `download_from_minio` (bool, 节点可选): 是否从 MinIO 下载关键帧，默认 false
-- `local_keyframe_dir` (string, 节点可选): 本地保存下载关键帧的目录，默认使用共享存储路径
-- `keyframe_sample_count` (int, 节点可选): 关键帧采样数量（保留参数，当前未使用）
+- `keyframe_dir` (string, 节点可选): 关键帧目录路径，支持本地路径或 MinIO URL（如 `minio://bucket/path/to/keyframes`）。支持 `${{...}}` 动态引用。
+- `download_from_minio` (bool, 节点可选): 是否从 MinIO 下载关键帧，默认 false。
+- `local_keyframe_dir` (string, 节点可选): 本地保存下载关键帧的目录，默认使用共享存储路径。
+- `keyframe_sample_count` (int, 节点可选): 关键帧采样数量（保留参数，当前未使用）。
 
 **配置来源说明**：
 
 - 所有列出的参数均为 **节点参数** (在请求体中的 `paddleocr.detect_subtitle_area` 对象内提供)。
 
-**智能输入源选择**（按优先级）：
+**智能参数选择**：
 
-1. **参数指定目录** (`keyframe_dir`): 如果提供了 `keyframe_dir` 参数，将直接使用
-2. **MinIO URL**: 如果 `keyframe_dir` 是 MinIO URL 且 `download_from_minio=true`，将从 MinIO 下载
-3. **工作流上下文**: 如果未提供参数，将从 `ffmpeg.extract_keyframes` 输出获取
-
-**支持的三种输入模式**：
-
-#### 模式 1：工作流模式（默认）
-
-从前置阶段自动获取关键帧目录，保持向后兼容性：
-
-```json
-{
-    "workflow_config": {
-        "workflow_chain": ["ffmpeg.extract_keyframes", "paddleocr.detect_subtitle_area"]
-    }
-}
-```
-
-#### 模式 2：参数模式（直接指定本地目录）
-
-```json
-{
-    "workflow_config": {
-        "workflow_chain": ["paddleocr.detect_subtitle_area"]
-    },
-    "paddleocr.detect_subtitle_area": {
-        "keyframe_dir": "/local/path/to/keyframes"
-    }
-}
-```
-
-#### 模式 3：远程模式（MinIO 目录下载）
-
-```json
-{
-    "workflow_config": {
-        "workflow_chain": ["paddleocr.detect_subtitle_area"]
-    },
-    "paddleocr.detect_subtitle_area": {
-        "keyframe_dir": "minio://yivideo/workflow_123/keyframes",
-        "download_from_minio": true,
-        "local_keyframe_dir": "/shared/workflows/custom_dir"
-    }
-}
-```
+- `keyframe_dir` (按优先级)：
+    1. 显式传入的节点参数（支持 MinIO URL 自动下载）
+    2. `input_data` 中的参数
+    3. `ffmpeg.extract_keyframes` 输出的 `keyframe_dir`
 
 **前置依赖**：
 
-- **工作流模式**: `ffmpeg.extract_keyframes`
-- **参数模式**: 无（直接指定目录）
-- **远程模式**: MinIO 存储桶中有对应的关键帧目录
+- 无（可选依赖 `ffmpeg.extract_keyframes` - 如果未提供 `keyframe_dir` 参数）
 
 **输出格式**：
 
 ```json
 {
-  "subtitle_area": [0, 918, 1920, 1080],
-  "detection_confidence": 0.95,
-  "keyframes_analyzed": 100,
-  "detection_method": "unified_bottom_detection",
-  "input_source": "parameter_local|parameter_minio|workflow_ffmpeg|workflow_minio",
-  "minio_download_result": {
-    "total_files": 50,
-    "downloaded_files": ["frame_001.jpg", "frame_002.jpg", ...]
-  }
+    "subtitle_area": [0, 918, 1920, 1080],
+    "detection_confidence": 0.95,
+    "keyframes_analyzed": 100,
+    "detection_method": "unified_bottom_detection",
+    "input_source": "parameter_local|parameter_minio|workflow_ffmpeg|workflow_minio",
+    "minio_download_result": {
+        "total_files": 50,
+        "downloaded_files": ["frame_001.jpg", "frame_002.jpg"]
+    }
 }
 ```
 
 **输出字段说明**：
 
-- `subtitle_area`: 检测到的字幕区域坐标
+- `subtitle_area`: 检测到的字幕区域坐标 `[x1, y1, x2, y2]`
 - `detection_confidence`: 检测置信度
 - `keyframes_analyzed`: 分析的关键帧数量
 - `detection_method`: 使用的检测方法
@@ -1601,7 +1565,7 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 
 **使用示例**：
 
-**示例 1：工作流模式（传统）**：
+**示例 1：工作流模式（自动获取）**：
 
 ```json
 {
@@ -1611,35 +1575,7 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 }
 ```
 
-**示例 2：参数模式（单任务）**：
-
-```json
-{
-    "task_name": "paddleocr.detect_subtitle_area",
-    "input_data": {
-        "paddleocr.detect_subtitle_area": {
-            "keyframe_dir": "/share/my_project/keyframes"
-        }
-    }
-}
-```
-
-**示例 3：MinIO 远程模式**：
-
-```json
-{
-    "task_name": "paddleocr.detect_subtitle_area",
-    "input_data": {
-        "paddleocr.detect_subtitle_area": {
-            "keyframe_dir": "minio://yivideo/project-456/keyframes",
-            "download_from_minio": true,
-            "local_keyframe_dir": "/shared/workflows/downloaded_frames"
-        }
-    }
-}
-```
-
-**示例 4：动态引用模式**：
+**示例 2：动态引用模式**：
 
 ```json
 {
@@ -1654,49 +1590,21 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
 
 **依赖关系**：
 
-- **默认模式**: `ffmpeg.extract_keyframes`
-- **参数模式**: 无（直接指定目录）
-- **MinIO 模式**: 需要 MinIO 服务可用
+- 可选：`ffmpeg.extract_keyframes`（如果未直接提供 `keyframe_dir` 参数）
 
-**新增特性**：
-
-#### 1. 自定义参数支持
-
-- 支持通过 `node_params` 传入自定义参数
-- 与工作流参数系统完全集成
-- 支持 `${{...}}` 动态引用语法
-
-#### 2. 远程目录下载
+**技术特性**：
 
 - 支持从 MinIO 下载整个关键帧目录
 - 自动处理目录结构和文件匹配
 - 支持 JPEG 文件自动过滤
 - 下载失败时的优雅降级处理
-
-#### 3. 智能源选择
-
-- 三种输入模式的自动切换
-- 优先级明确，行为可预测
-- 完整的错误处理和日志记录
-
-#### 4. 向后兼容性
-
 - 完全兼容现有的工作流配置
-- 无需修改现有代码和配置
-- 新功能通过显式参数启用
-
-**检测原理**：
-
-- 分析多帧字幕位置分布
-- 识别字幕出现的规律区域
-- 计算最佳字幕区域坐标
-- 支持多种字幕位置检测
 
 **单任务模式支持**：
 
 **输入参数**:
 
-- `keyframe_dir` (string, 可选): 直接指定关键帧目录路径，支持本地路径或 MinIO URL
+- `keyframe_dir` (string, 可选): 关键帧目录路径，支持本地路径或 MinIO URL
 - `download_from_minio` (bool, 可选): 是否从 MinIO 下载关键帧，默认 false
 - `local_keyframe_dir` (string, 可选): 本地保存下载关键帧的目录，默认使用共享存储路径
 - `keyframe_sample_count` (int, 可选): 关键帧采样数量（保留参数，当前未使用）
@@ -1708,8 +1616,7 @@ PaddleOCR 服务提供基于 PaddleOCR 模型的文字识别功能，专门用�
     "task_name": "paddleocr.detect_subtitle_area",
     "input_data": {
         "keyframe_dir": "/share/my_project/keyframes",
-        "download_from_minio": false,
-        "local_keyframe_dir": "/shared/workflows/custom_dir"
+        "download_from_minio": false
     }
 }
 ```
@@ -2440,13 +2347,15 @@ WService 服务提供全面的字幕处理能力，包括基于转录数据生�
 
 **输入参数**：
 
-- `segments_file` (string, 节点可选): 指定转录数据文件路径，以覆盖智能输入源选择逻辑。支持 `${{...}}` 格式的动态引用。
-- `diarization_file` (string, 节点可选): 指定说话人分离数据文件路径，以覆盖智能输入源选择逻辑。支持 `${{...}}` 格式的动态引用。
+- `segments_file` (string, 节点可选): 转录数据文件路径（JSON，包含 segments），支持 `${{...}}` 引用。单任务模式推荐提供。
+- `audio_duration` (number, 节点可选): 搭配 `segments_file` 传入时用于元数据。
+- `language` (string, 节点可选): 搭配 `segments_file` 传入时用于元数据。
+- `output_filename` (string, 节点可选): 搭配 `segments_file` 自定义输出文件名前缀。
 
 **配置来源说明**：
 
-- `segments_file`, `diarization_file`: **节点参数** (在请求体中的 `wservice.generate_subtitle_files` 对象内提供)。
-
+- `segments_file` 及相关元数据: **节点参数/单任务输入** (在 `wservice.generate_subtitle_files` 对象或 `input_data` 中提供)。
+- **说话人信息**: 仅通过上游 `pyannote_audio.diarize_speakers` 阶段输出获取，当前不支持节点参数直传。
 - **其他字幕格式化参数**: 如 `max_chars_per_line`, `max_lines_per_subtitle`, `min_subtitle_duration` 等，均为 **全局配置**，请在 `config.yml` 文件中修改。它们**不是**节点参数。
 
 **全局配置示例 (config.yml)**:
@@ -2463,13 +2372,13 @@ faster_whisper_service:
 
 **前置依赖**：
 
-- `faster_whisper.transcribe_audio` (必需)
-- `pyannote_audio.diarize_speakers` (可选，用于说话人信息)
+- 必需：`segments_file` 输入，或上游 `faster_whisper.transcribe_audio` 输出同时提供 `segments_file` 与 `audio_path`。缺失必需数据会直接报错。
+- 可选：`pyannote_audio.diarize_speakers` (用于说话人信息)
 
 **智能输入源选择**（按优先级）：
 
-1. **`segments_file`** **参数**: 如果在节点参数中明确提供了 `segments_file`（支持动态引用），将直接使用该文件
-2. **`faster_whisper.transcribe_audio`** **输出**: 自动获取 `faster_whisper.transcribe_audio` 阶段的 `segments_file`
+1. 节点参数/单任务输入提供的 `segments_file`（推荐）
+2. `faster_whisper.transcribe_audio` 阶段输出的 `segments_file`（需要同时具备 `audio_path` 才能通过校验）
 
 **输出格式**：
 
@@ -2510,7 +2419,7 @@ faster_whisper_service:
 
 **依赖关系**：
 
-- 必需：`faster_whisper.transcribe_audio`
+- 必需：`segments_file`（节点参数或上游输出）；若依赖上游，需同时提供 `audio_path` 元数据，否则会报错
 - 可选：`pyannote_audio.diarize_speakers`
 
 **输出文件说明**：
@@ -2532,8 +2441,8 @@ faster_whisper_service:
 
 **输入参数**:
 
-- `segments_file` (string, 可选): 指定转录数据文件路径，支持 `${{...}}` 动态引用
-- `diarization_file` (string, 可选): 指定说话人分离数据文件路径，支持 `${{...}}` 动态引用
+- `segments_file` (string, 推荐): 指定转录数据文件路径，支持 `${{...}}` 动态引用
+- `audio_duration` / `language` / `output_filename` (可选): 搭配 `segments_file` 传入
 
 **单任务调用示例**:
 
@@ -2542,14 +2451,15 @@ faster_whisper_service:
     "task_name": "wservice.generate_subtitle_files",
     "input_data": {
         "segments_file": "/share/transcription/segments.json",
-        "diarization_file": "/share/diarization/speaker_segments.json"
+        "audio_duration": 125.5,
+        "language": "zh"
     }
 }
 ```
 
 **参数来源说明**:
 
-- `segments_file`, `diarization_file`: **节点参数** (在请求体中的 `wservice.generate_subtitle_files` 对象内提供)
+- `segments_file` 及元数据: **节点参数/单任务输入**
 - 其他字幕格式化参数（如 max_chars_per_line, max_lines_per_subtitle, min_subtitle_duration 等）均为全局配置，在 config.yml 文件中设置
 
 ---

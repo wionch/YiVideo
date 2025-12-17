@@ -47,10 +47,26 @@ Before outputting any code, perform this internal check:
 -   Search existing work: `openspec spec list --long`, `openspec list` (use `rg` only for full-text search)
 -   Decide scope: new capability vs modify existing capability
 -   Pick a unique `change-id`: kebab-case, verb-led (`add-`, `update-`, `remove-`, `refactor-`)
+-   Pre-proposal research: first create `openspec/changes/<change-id>/research.md` (mandatory MCP toolchain; see below).
 -   Scaffold: `proposal.md`, `tasks.md`, `design.md` (only if needed), and delta specs per affected capability
 -   Write deltas: use `## ADDED|MODIFIED|REMOVED|RENAMED Requirements`; include at least one `#### Scenario:` per requirement
 -   Validate: `openspec validate [change-id] --strict` and fix issues
 -   Request approval: Do not start implementation until proposal is approved
+
+## Proposal: Mandatory MCP Tooling (Required)
+
+Before generating `openspec/changes/<change-id>/proposal.md`, you MUST complete the following steps and write the results to `openspec/changes/<change-id>/research.md`:
+
+1. sequential-thinking: Break down the request into (a) clarifying questions, (b) impact surface, (c) risks, and (d) candidate approaches.
+2. serena: Perform semantic search across the codebase.
+    - Identify the most likely affected modules / entry points / call chains.
+    - List the files that need changes (include full paths).
+3. context7: Pull version-specific documentation highlights for the key dependencies/frameworks involved in this change.
+
+Output requirements:
+
+-   `research.md` MUST include: conclusions, evidence links, open questions to confirm, and the recommended approach with trade-offs.
+-   If any tool is unavailable, you MUST record the reason and provide an alternative approach.
 
 ## Three-Stage Workflow
 
@@ -88,9 +104,10 @@ Skip proposal for:
 **Workflow**
 
 1. Review `openspec/project.md`, `openspec list`, and `openspec list --specs` to understand current context.
-2. Choose a unique verb-led `change-id` and scaffold `proposal.md`, `tasks.md`, optional `design.md`, and spec deltas under `openspec/changes/<id>/`.
-3. Draft spec deltas using `## ADDED|MODIFIED|REMOVED Requirements` with at least one `#### Scenario:` per requirement.
-4. Run `openspec validate <id> --strict` and resolve any issues before sharing the proposal.
+2. Choose a unique verb-led `change-id` and scaffold `proposal.md`, `tasks.md`, optional `design.md`, `research.md`, and spec deltas under `openspec/changes/<id>/`.
+3. BEFORE writing `proposal.md`: run the mandatory MCP research flow and write `openspec/changes/<id>/research.md` (see "Proposal 阶段：MCP 工具使用规程").
+4. Draft spec deltas using `## ADDED|MODIFIED|REMOVED Requirements` with at least one `#### Scenario:` per requirement.
+5. Run `openspec validate <id> --strict` and resolve any issues before sharing the proposal.
 
 ### Stage 2: Implementing Changes
 
@@ -186,6 +203,7 @@ openspec/
 │   ├── [change-name]/
 │   │   ├── proposal.md     # Why, what, impact
 │   │   ├── tasks.md        # Implementation checklist
+│   │   ├── research.md      # Pre-proposal research (MCP-backed; mandatory in this repo)
 │   │   ├── design.md       # Technical decisions (optional; see criteria)
 │   │   └── specs/          # Delta changes
 │   │       └── [capability]/
