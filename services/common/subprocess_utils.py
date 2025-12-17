@@ -74,6 +74,7 @@ def run_with_popen(
     cwd: Optional[str] = None,
     env: Optional[Dict[str, str]] = None,
     encoding: str = 'utf-8',
+    stage_name: Optional[str] = None,
     log_prefix: str = "subprocess",
     real_time_logging: bool = True,
     max_log_lines: Optional[int] = None,
@@ -94,6 +95,7 @@ def run_with_popen(
         log_prefix: 日志前缀
         real_time_logging: 是否启用实时日志输出
         max_log_lines: 最大日志行数限制，避免内存溢出
+        stage_name: 可选阶段名称，若提供则用于日志前缀
         **kwargs: 其他subprocess.Popen参数
     
     Returns:
@@ -119,6 +121,10 @@ def run_with_popen(
     # 输出收集列表
     stdout_lines = []
     stderr_lines = []
+
+    if stage_name:
+        # 兼容旧调用，将 stage_name 作为日志前缀，且不透传给 Popen
+        log_prefix = stage_name
     
     logger.info(f"[{log_prefix}] 开始执行命令: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
     

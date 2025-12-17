@@ -324,6 +324,18 @@ def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
             "use_paid_api": use_paid_api
         }
 
+        # 上传结果到 MinIO，失败不阻断主流程
+        try:
+            minio_object = f"{workflow_id}/diarization/{Path(output_file).name}"
+            diarization_minio_url = file_service.upload_to_minio(
+                local_file_path=str(output_file),
+                object_name=minio_object
+            )
+            output_data["diarization_file_minio_url"] = diarization_minio_url
+            logger.info(f"[{workflow_id}] 说话人分离结果已上传 MinIO: {diarization_minio_url}")
+        except Exception as e:
+            logger.warning(f"[{workflow_id}] 说话人分离结果上传 MinIO 失败: {e}", exc_info=True)
+
         # 更新阶段状态 - 成功
         workflow_context.stages[stage_name].status = 'SUCCESS'
         workflow_context.stages[stage_name].output = output_data
