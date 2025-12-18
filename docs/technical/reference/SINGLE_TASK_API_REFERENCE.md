@@ -100,6 +100,7 @@
 ### FFmpeg 系列
 
 #### ffmpeg.extract_keyframes
+功能概述（ffmpeg.extract_keyframes）：从输入视频抽取关键帧并支持采样数量、压缩与可选上传到 MinIO，便于后续检测或裁剪。
 请求体：
 ```json
 {
@@ -159,6 +160,7 @@ WorkflowContext 示例：
 | `delete_local_keyframes_after_upload` | bool | 否 | false | 上传后删除本地关键帧 |
 
 #### ffmpeg.extract_audio
+功能概述（ffmpeg.extract_audio）：提取视频音频轨生成标准音频文件，支持 HTTP/MinIO/本地源，产出音频路径供后续转写或分离。
 请求体：同通用示例，仅 `task_name` 变更。
 WorkflowContext 示例：见通用 `/status` 示例（输出 `audio_path`）。
 参数表：
@@ -167,6 +169,7 @@ WorkflowContext 示例：见通用 `/status` 示例（输出 `audio_path`）。
 | `video_path` | string | 是 | - | 输入视频路径 |
 
 #### ffmpeg.crop_subtitle_images
+功能概述（ffmpeg.crop_subtitle_images）：按字幕区域批量裁剪视频帧，可选压缩并上传裁剪图目录，输出裁剪路径及文件数。
 请求体：
 ```json
 {
@@ -235,6 +238,7 @@ WorkflowContext 示例：
 | `decode_processes` | integer | 否 | 10 | 解码并发进程数 |
 
 #### ffmpeg.split_audio_segments
+功能概述（ffmpeg.split_audio_segments）：基于字幕或说话人信息切分音频片段，支持并发/分组与格式控制，输出分段目录及统计。
 请求体：
 ```json
 {
@@ -325,6 +329,7 @@ WorkflowContext 示例：
 ### Faster-Whisper
 
 #### faster_whisper.transcribe_audio
+功能概述（faster_whisper.transcribe_audio）：使用 Faster-Whisper 将音频转写为文本，可启用词级时间戳，输出转录文件及语言/时长统计并可上传。
 请求体：
 ```json
 {
@@ -389,6 +394,7 @@ WorkflowContext 示例：
 ### Audio Separator
 
 #### audio_separator.separate_vocals
+功能概述（audio_separator.separate_vocals）：对输入音频进行人声与伴奏分离，支持模型选择与质量模式，输出分轨文件及 MinIO 上传地址。
 请求体：
 ```json
 {
@@ -461,6 +467,7 @@ WorkflowContext 示例：
 ### Pyannote Audio
 
 #### pyannote_audio.diarize_speakers
+功能概述（pyannote_audio.diarize_speakers）：对音频执行说话人分离，输出带说话人标签的分段文件、统计信息及可选上传链接，用于下游切分与合并。
 请求体：
 ```json
 {
@@ -523,6 +530,7 @@ WorkflowContext 示例：
 | `use_paid_api` | bool | 否 | false | 是否使用付费接口（需配置密钥） |
 
 #### pyannote_audio.get_speaker_segments
+功能概述（pyannote_audio.get_speaker_segments）：基于说话人分离结果筛选指定说话人或全部说话人片段，返回片段列表与汇总信息，支持直接使用现有 diarization 文件。
 请求体：
 ```json
 {
@@ -570,6 +578,7 @@ TaskStatusResponse 示例（结果字段承载任务返回）：
 | `speaker` | string | 否 | - | 目标说话人标签，不填则返回全部片段统计 |
 
 #### pyannote_audio.validate_diarization
+功能概述（pyannote_audio.validate_diarization）：校验说话人分离结果的有效性与统计（片段数、总时长、问题列表），用于质量检查与回退决策。
 请求体：
 ```json
 {
@@ -621,6 +630,7 @@ TaskStatusResponse 示例（结果字段承载任务返回）：
 ### PaddleOCR
 
 #### paddleocr.detect_subtitle_area
+功能概述（paddleocr.detect_subtitle_area）：检测视频中的字幕区域，输出坐标与置信度，并提供关键帧目录供后续裁剪或 OCR 使用。
 请求体：
 ```json
 {
@@ -669,6 +679,7 @@ WorkflowContext 示例：
 | `video_path` | string | 是 | - | 输入视频路径 |
 
 #### paddleocr.create_stitched_images
+功能概述（paddleocr.create_stitched_images）：将裁剪字幕图批量拼接成长图/manifest，支持自动解压与压缩上传，输出拼接目录与 MinIO URL。
 请求体：
 ```json
 {
@@ -736,6 +747,7 @@ WorkflowContext 示例：
 | `pipeline.stitching_workers` | integer | 否 | 10 | 拼接并发数（来自配置） |
 
 #### paddleocr.perform_ocr
+功能概述（paddleocr.perform_ocr）：对拼接字幕图执行 OCR 识别，支持从 manifest/目录拉取输入并上传识别结果，输出 OCR 结果文件及 MinIO 地址。
 请求体：
 ```json
 {
@@ -791,6 +803,7 @@ WorkflowContext 示例：
 | `delete_local_ocr_results_after_upload` | bool | 否 | false | 上传后删除本地结果 |
 
 #### paddleocr.postprocess_and_finalize
+功能概述（paddleocr.postprocess_and_finalize）：对 OCR 结果进行后处理与时间轴对齐，生成最终字幕文件（SRT/JSON）并可上传。
 请求体：
 ```json
 {
@@ -848,6 +861,7 @@ WorkflowContext 示例：
 ### IndexTTS
 
 #### indextts.generate_speech
+功能概述（indextts.generate_speech）：将文本转换为语音，可指定参考音频/音色/情感强度，输出合成音频文件并可上传到 MinIO。
 请求体：
 ```json
 {
@@ -912,6 +926,7 @@ WorkflowContext 示例：
 ### WService 字幕优化
 
 #### wservice.generate_subtitle_files
+功能概述（wservice.generate_subtitle_files）：基于转录片段生成多格式字幕（含说话人/词级时间戳），输出 SRT/JSON 等文件并可供后续优化合并使用。
 请求体：
 ```json
 {
@@ -969,6 +984,7 @@ WorkflowContext 示例：
 | `output_filename` | string | 否 | 自动推断 | 输出文件前缀 |
 
 #### wservice.correct_subtitles
+功能概述（wservice.correct_subtitles）：对现有字幕进行校对与修订，提升文本质量和时序准确性，输出修正版字幕路径。
 请求体：
 ```json
 {
@@ -1015,6 +1031,7 @@ WorkflowContext 示例：
 | `subtitle_path` | string | 是 | - | 输入字幕文件 |
 
 #### wservice.ai_optimize_subtitles
+功能概述（wservice.ai_optimize_subtitles）：通过 AI 优化字幕的措辞与分段，输出优化后的字幕文件，便于继续合并或配音。
 请求体：
 ```json
 {
@@ -1061,6 +1078,7 @@ WorkflowContext 示例：
 | `subtitle_path` | string | 是 | - | 需要优化的字幕文件 |
 
 #### wservice.merge_speaker_segments
+功能概述（wservice.merge_speaker_segments）：将转录结果与说话人分段合并，生成带说话人标签的合并片段及统计，用于区分角色或下游编辑。
 请求体：
 ```json
 {
@@ -1121,6 +1139,7 @@ WorkflowContext 示例：
 | `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
 
 #### wservice.merge_with_word_timestamps
+功能概述（wservice.merge_with_word_timestamps）：合并转录与说话人信息并保留词级时间戳，输出包含 words 的片段列表和统计，便于精细对齐。
 请求体：
 ```json
 {
@@ -1182,6 +1201,7 @@ WorkflowContext 示例：
 | `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
 
 #### wservice.prepare_tts_segments
+功能概述（wservice.prepare_tts_segments）：为文本转语音准备清洗后的字幕片段，聚合/筛选后输出待合成的片段列表及统计来源。
 请求体：
 ```json
 {
