@@ -326,11 +326,15 @@ async def get_supported_tasks():
             "audio_separator.separate_vocals"
         ],
         "pyannote_audio": [
-            "pyannote_audio.diarize_speakers"
+            "pyannote_audio.diarize_speakers",
+            "pyannote_audio.get_speaker_segments",
+            "pyannote_audio.validate_diarization"
         ],
         "paddleocr": [
             "paddleocr.detect_subtitle_area",
-            "paddleocr.perform_ocr"
+            "paddleocr.create_stitched_images",
+            "paddleocr.perform_ocr",
+            "paddleocr.postprocess_and_finalize"
         ],
         "indextts": [
             "indextts.generate_speech"
@@ -338,7 +342,10 @@ async def get_supported_tasks():
         "wservice": [
             "wservice.generate_subtitle_files",
             "wservice.correct_subtitles",
-            "wservice.ai_optimize_subtitles"
+            "wservice.ai_optimize_subtitles",
+            "wservice.merge_speaker_segments",
+            "wservice.merge_with_word_timestamps",
+            "wservice.prepare_tts_segments"
         ]
     }
     

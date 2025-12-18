@@ -522,6 +522,102 @@ WorkflowContext 示例：
 | `audio_path` | string | 否 | 智能源选择 | 未提供则尝试人声/默认音频 |
 | `use_paid_api` | bool | 否 | false | 是否使用付费接口（需配置密钥） |
 
+#### pyannote_audio.get_speaker_segments
+请求体：
+```json
+{
+  "task_name": "pyannote_audio.get_speaker_segments",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
+    "speaker": "SPEAKER_00"
+  }
+}
+```
+TaskStatusResponse 示例（结果字段承载任务返回）：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "status": "completed",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "pyannote_audio.get_speaker_segments",
+    "input_data": {
+      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
+      "speaker": "SPEAKER_00"
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "result": {
+    "success": true,
+    "data": {
+      "segments": [
+        {"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00", "duration": 5.2}
+      ],
+      "summary": "说话人 SPEAKER_00 的片段: 1 个"
+    }
+  },
+  "error": null,
+  "updated_at": "2025-12-17T12:00:05Z"
+}
+```
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
+| `speaker` | string | 否 | - | 目标说话人标签，不填则返回全部片段统计 |
+
+#### pyannote_audio.validate_diarization
+请求体：
+```json
+{
+  "task_name": "pyannote_audio.validate_diarization",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+  }
+}
+```
+TaskStatusResponse 示例（结果字段承载任务返回）：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "status": "completed",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "pyannote_audio.validate_diarization",
+    "input_data": {
+      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "result": {
+    "success": true,
+    "data": {
+      "validation": {
+        "valid": true,
+        "total_segments": 148,
+        "total_speakers": 2,
+        "total_duration": 280.5,
+        "avg_segment_duration": 1.9,
+        "issues": []
+      },
+      "summary": "说话人分离结果有效"
+    }
+  },
+  "error": null,
+  "updated_at": "2025-12-17T12:00:06Z"
+}
+```
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
+
 ### PaddleOCR
 
 #### paddleocr.detect_subtitle_area
@@ -647,8 +743,9 @@ WorkflowContext 示例：
   "task_id": "task-demo-001",
   "callback": "http://localhost:5678/webhook/demo-t1",
   "input_data": {
-    "cropped_images_path": "http://localhost:9000/yivideo/task-demo-001/cropped_images",
-    "subtitle_area": [0, 918, 1920, 1080]
+    "manifest_path": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+    "multi_frames_path": "http://localhost:9000/yivideo/task-demo-001/multi_frames",
+    "upload_ocr_results_to_minio": true
   }
 }
 ```
@@ -660,8 +757,9 @@ WorkflowContext 示例：
   "input_params": {
     "task_name": "paddleocr.perform_ocr",
     "input_data": {
-      "cropped_images_path": "http://localhost:9000/yivideo/task-demo-001/cropped_images",
-      "subtitle_area": [0, 918, 1920, 1080]
+      "manifest_path": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+      "multi_frames_path": "http://localhost:9000/yivideo/task-demo-001/multi_frames",
+      "upload_ocr_results_to_minio": true
     },
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
@@ -670,13 +768,12 @@ WorkflowContext 示例：
     "paddleocr.perform_ocr": {
       "status": "SUCCESS",
       "input_params": {
-        "cropped_images_path": "http://localhost:9000/yivideo/task-demo-001/cropped_images",
-        "subtitle_area": [0, 918, 1920, 1080]
+        "manifest_path": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+        "multi_frames_path": "http://localhost:9000/yivideo/task-demo-001/multi_frames"
       },
       "output": {
-        "subtitle_path": "http://localhost:9000/yivideo/task-demo-001/raw_subtitle.srt",
-        "ocr_json_path": "http://localhost:9000/yivideo/task-demo-001/ocr_result.json",
-        "frames_processed": 150
+        "ocr_results_path": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
+        "ocr_results_minio_url": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json"
       },
       "error": null,
       "duration": 20.0
@@ -688,8 +785,65 @@ WorkflowContext 示例：
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `cropped_images_path` | string | 是 | - | 裁剪图目录 |
-| `subtitle_area` | array | 否 | 自动检测 | OCR 时字幕区域 |
+| `manifest_path` | string | 否 | 智能源选择 | 拼接图 manifest，本地或 MinIO/HTTP URL，未提供则回退 `paddleocr.create_stitched_images` 输出 |
+| `multi_frames_path` | string | 否 | 智能源选择 | 拼接图目录，本地或 MinIO/HTTP URL，未提供则回退 `paddleocr.create_stitched_images` 输出 |
+| `upload_ocr_results_to_minio` | bool | 否 | true | 是否上传 OCR 结果到 MinIO |
+| `delete_local_ocr_results_after_upload` | bool | 否 | false | 上传后删除本地结果 |
+
+#### paddleocr.postprocess_and_finalize
+请求体：
+```json
+{
+  "task_name": "paddleocr.postprocess_and_finalize",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
+    "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+    "upload_final_results_to_minio": true
+  }
+}
+```
+WorkflowContext 示例：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "paddleocr.postprocess_and_finalize",
+    "input_data": {
+      "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
+      "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+      "upload_final_results_to_minio": true
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "stages": {
+    "paddleocr.postprocess_and_finalize": {
+      "status": "SUCCESS",
+      "input_params": {
+        "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
+        "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json"
+      },
+      "output": {
+        "srt_file": "/share/workflows/task-demo-001/demo.srt",
+        "json_file": "/share/workflows/task-demo-001/demo.json"
+      },
+      "error": null,
+      "duration": 10.0
+    }
+  },
+  "error": null
+}
+```
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `ocr_results_file` | string | 否 | 智能源选择 | OCR 结果文件，本地或 MinIO/HTTP URL，未提供则回退 `paddleocr.perform_ocr` 输出 |
+| `manifest_file` | string | 否 | 智能源选择 | 拼接图 manifest，本地或 MinIO/HTTP URL，未提供则回退 `paddleocr.create_stitched_images` 输出 |
+| `upload_final_results_to_minio` | bool | 否 | true | 是否上传最终字幕到 MinIO |
+| `delete_local_results_after_upload` | bool | 否 | false | 上传后删除本地结果 |
 
 ### IndexTTS
 
@@ -905,6 +1059,184 @@ WorkflowContext 示例：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
 | `subtitle_path` | string | 是 | - | 需要优化的字幕文件 |
+
+#### wservice.merge_speaker_segments
+请求体：
+```json
+{
+  "task_name": "wservice.merge_speaker_segments",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+    "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+  }
+}
+```
+WorkflowContext 示例：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "wservice.merge_speaker_segments",
+    "input_data": {
+      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "stages": {
+    "wservice.merge_speaker_segments": {
+      "status": "SUCCESS",
+      "input_params": {
+        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+        "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+      },
+      "output": {
+        "merged_segments": [
+          {"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00", "text": "示例文本"}
+        ],
+        "input_summary": {
+          "transcript_segments_count": 148,
+          "speaker_segments_count": 148,
+          "merged_segments_count": 148,
+          "data_source": "faster_whisper.transcribe_audio"
+        }
+      },
+      "error": null,
+      "duration": 5.0
+    }
+  },
+  "error": null
+}
+```
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `segments_data` | array | 否 | - | 直接传入转录片段数据 |
+| `speaker_segments_data` | array | 否 | - | 直接传入说话人片段数据 |
+| `segments_file` | string | 否 | 智能源选择 | 未提供则回退 `faster_whisper.transcribe_audio` 输出 |
+| `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
+
+#### wservice.merge_with_word_timestamps
+请求体：
+```json
+{
+  "task_name": "wservice.merge_with_word_timestamps",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+    "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+  }
+}
+```
+WorkflowContext 示例：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "wservice.merge_with_word_timestamps",
+    "input_data": {
+      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "stages": {
+    "wservice.merge_with_word_timestamps": {
+      "status": "SUCCESS",
+      "input_params": {
+        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+        "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+      },
+      "output": {
+        "merged_segments": [
+          {"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00", "text": "示例文本", "words": []}
+        ],
+        "input_summary": {
+          "transcript_segments_count": 148,
+          "speaker_segments_count": 148,
+          "merged_segments_count": 148,
+          "data_source": "faster_whisper.transcribe_audio",
+          "word_timestamps_required": true
+        }
+      },
+      "error": null,
+      "duration": 5.5
+    }
+  },
+  "error": null
+}
+```
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `segments_data` | array | 否 | - | 直接传入含词级时间戳的转录片段 |
+| `speaker_segments_data` | array | 否 | - | 直接传入说话人片段数据 |
+| `segments_file` | string | 否 | 智能源选择 | 未提供则回退 `faster_whisper.transcribe_audio` 输出 |
+| `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
+
+#### wservice.prepare_tts_segments
+请求体：
+```json
+{
+  "task_name": "wservice.prepare_tts_segments",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json"
+  }
+}
+```
+WorkflowContext 示例：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "wservice.prepare_tts_segments",
+    "input_data": {
+      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json"
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "stages": {
+    "wservice.prepare_tts_segments": {
+      "status": "SUCCESS",
+      "input_params": {
+        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json"
+      },
+      "output": {
+        "prepared_segments": [
+          {"start": 0.0, "end": 5.2, "text": "示例文本"}
+        ],
+        "source_stage": "wservice.generate_subtitle_files",
+        "total_segments": 100,
+        "input_summary": {
+          "original_segments_count": 120,
+          "prepared_segments_count": 100,
+          "data_source": "wservice.generate_subtitle_files"
+        }
+      },
+      "error": null,
+      "duration": 4.0
+    }
+  },
+  "error": null
+}
+```
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `segments_data` | array | 否 | - | 直接传入字幕片段数据 |
+| `segments_file` | string | 否 | 智能源选择 | 未提供则回退上游字幕输出 |
+| `source_stage_names` | array | 否 | 默认搜索列表 | 自定义查找片段的上游阶段列表 |
 
 ## 文件操作接口 (`/v1/files`)
 

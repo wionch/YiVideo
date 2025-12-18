@@ -42,6 +42,7 @@ class TaskStatusResponse(BaseModel):
     message: str = Field(..., description="状态消息")
     result: Optional[Dict[str, Any]] = Field(None, description="任务结果数据")
     minio_files: Optional[List[Dict[str, str]]] = Field(None, description="MinIO文件信息列表")
+    create_at: Optional[str] = Field(None, description="任务创建时间（保持与WorkflowContext字段一致）")
     created_at: Optional[str] = Field(None, description="任务创建时间")
     updated_at: Optional[str] = Field(None, description="任务更新时间")
     callback_status: Optional[str] = Field(None, description="callback发送状态")
