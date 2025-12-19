@@ -112,7 +112,7 @@
   }
 }
 ```
-WorkflowContext 示例：
+WorkflowContext 示例（含下载诊断，上传开启时追加 minio 字段）：
 ```json
 {
   "workflow_id": "task-demo-001",
@@ -148,6 +148,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：本地轨迹字段（all_audio_files/vocal_audio）恒返回；`*_minio_url`/`all_audio_minio_urls` 仅在 `core.auto_upload_to_minio=true` 且节点上传参数允许时出现，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -162,7 +163,21 @@ WorkflowContext 示例：
 #### ffmpeg.extract_audio
 功能概述（ffmpeg.extract_audio）：提取视频音频轨生成标准音频文件，支持 HTTP/MinIO/本地源，产出音频路径供后续转写或分离。
 请求体：同通用示例，仅 `task_name` 变更。
-WorkflowContext 示例：见通用 `/status` 示例（输出 `audio_path`）。
+WorkflowContext 示例（本地+可选远程）：
+```json
+{
+  "stages": {
+    "ffmpeg.extract_audio": {
+      "status": "SUCCESS",
+      "output": {
+        "audio_path": "/share/workflows/task-demo-001/audio/demo.wav",
+        "audio_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.wav"
+      }
+    }
+  }
+}
+```
+说明：本地路径恒返回；当 `core.auto_upload_to_minio=true` 且上传成功时附带 `audio_path_minio_url`/`minio_files`。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -225,6 +240,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：`multi_frames_path`/`manifest_path` 等本地字段恒存在；`multi_frames_minio_url`/`manifest_minio_url` 仅在 `core.auto_upload_to_minio=true` 且 `upload_stitched_images_to_minio=true` 时返回，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -269,28 +285,31 @@ WorkflowContext 示例：
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
   "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "ffmpeg.split_audio_segments": {
-      "status": "SUCCESS",
-      "input_params": {},
-      "output": {
-        "audio_segments_dir": "/share/workflows/task-demo-001/audio_segments",
-        "audio_source": "/share/workflows/task-demo-001/demo.wav",
-        "subtitle_source": "/share/workflows/task-demo-001/subtitle.srt",
-        "total_segments": 148,
-        "successful_segments": 148,
-        "failed_segments": 0,
-        "total_duration": 1200.5,
-        "processing_time": 45.2,
-        "audio_format": "wav",
-        "sample_rate": 16000,
-        "channels": 1,
-        "split_info_file": "/share/workflows/task-demo-001/audio_segments/split_info.json",
-        "segments_count": 148,
-        "speaker_summary": {
-          "SPEAKER_00": {
-            "count": 80,
-            "duration": 650.3
+      "stages": {
+        "ffmpeg.split_audio_segments": {
+          "status": "SUCCESS",
+          "input_params": {},
+          "output": {
+            "audio_segments_dir": "/share/workflows/task-demo-001/audio_segments",
+            "audio_segments_dir_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio_segments/",
+            "audio_source": "/share/workflows/task-demo-001/demo.wav",
+            "audio_source_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+            "subtitle_source": "/share/workflows/task-demo-001/subtitle.srt",
+            "total_segments": 148,
+            "successful_segments": 148,
+            "failed_segments": 0,
+            "total_duration": 1200.5,
+            "processing_time": 45.2,
+            "audio_format": "wav",
+            "sample_rate": 16000,
+            "channels": 1,
+            "split_info_file": "/share/workflows/task-demo-001/audio_segments/split_info.json",
+            "split_info_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio_segments/split_info.json",
+            "segments_count": 148,
+            "speaker_summary": {
+              "SPEAKER_00": {
+                "count": 80,
+                "duration": 650.3
           },
           "SPEAKER_01": {
             "count": 68,
@@ -305,6 +324,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：本地字段恒返回；当 `core.auto_upload_to_minio=true` 时，state_manager 会追加 `*_minio_url`，保留原始本地路径。
 参数表（常用）：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -349,21 +369,22 @@ WorkflowContext 示例：
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
   "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "faster_whisper.transcribe_audio": {
-      "status": "SUCCESS",
-      "input_params": {
-        "audio_source": "input_data",
-        "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
-        "enable_word_timestamps": true
-      },
-      "output": {
-        "segments_file": "/share/workflows/task-demo-001/transcribe_data_abcd1234.json",
-        "audio_duration": 125.5,
-        "language": "zh",
-        "transcribe_duration": 45.2,
-        "model_name": "base",
-        "device": "cuda",
+      "stages": {
+        "faster_whisper.transcribe_audio": {
+          "status": "SUCCESS",
+          "input_params": {
+            "audio_source": "input_data",
+            "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+            "enable_word_timestamps": true
+          },
+          "output": {
+            "segments_file": "/share/workflows/task-demo-001/transcribe_data_abcd1234.json",
+            "segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_abcd1234.json",
+            "audio_duration": 125.5,
+            "language": "zh",
+            "transcribe_duration": 45.2,
+            "model_name": "base",
+            "device": "cuda",
         "enable_word_timestamps": true,
         "statistics": {
           "total_segments": 120,
@@ -380,6 +401,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：本地结果文件恒存在；当 `core.auto_upload_to_minio=true` 时追加 `*_minio_url`，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -450,6 +472,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：`all_audio_files`/`vocal_audio` 等本地路径恒存在；`*_minio_url`/`all_audio_minio_urls` 仅在 `core.auto_upload_to_minio=true` 且上传开启时返回，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -488,19 +511,19 @@ WorkflowContext 示例：
   },
   "shared_storage_path": "/share/workflows/task-demo-001",
   "stages": {
-    "pyannote_audio.diarize_speakers": {
-      "status": "SUCCESS",
-      "input_params": {
-        "audio_path": "/share/workflows/task-demo-001/demo.wav"
-      },
-      "output": {
-        "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
-        "diarization_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
-        "detected_speakers": ["SPEAKER_00", "SPEAKER_01"],
-        "speaker_statistics": {
-          "SPEAKER_00": {"segments": 80, "duration": 650.3},
-          "SPEAKER_01": {"segments": 68, "duration": 550.2}
-        },
+        "pyannote_audio.diarize_speakers": {
+          "status": "SUCCESS",
+          "input_params": {
+            "audio_path": "/share/workflows/task-demo-001/demo.wav"
+          },
+          "output": {
+            "diarization_file": "/share/workflows/task-demo-001/diarization/diarization_result.json",
+            "diarization_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
+            "detected_speakers": ["SPEAKER_00", "SPEAKER_01"],
+            "speaker_statistics": {
+              "SPEAKER_00": {"segments": 80, "duration": 650.3},
+              "SPEAKER_01": {"segments": 68, "duration": 550.2}
+            },
         "total_speakers": 2,
         "total_segments": 148,
         "summary": "检测到 2 个说话人，共 148 个说话片段 (使用免费接口: base)",
@@ -518,6 +541,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：本地输出字段恒存在；当 `core.auto_upload_to_minio=true` 时，state_manager 会为输出文件追加 `*_minio_url`，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -550,6 +574,7 @@ WorkflowContext 示例：
   }
 }
 ```
+说明：本地 `segments_file` 恒存在；当 `core.auto_upload_to_minio=true` 时追加 `segments_file_minio_url`，并保持本地字段不变。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -586,6 +611,7 @@ WorkflowContext 示例：
   }
 }
 ```
+说明：`diarization_file` 恒为本地路径；当 `core.auto_upload_to_minio=true` 时追加 `diarization_file_minio_url`，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -628,7 +654,16 @@ WorkflowContext 示例：
       "output": {
         "subtitle_area": [0, 918, 1920, 1080],
         "confidence": 0.93,
-        "keyframe_dir": "/share/workflows/task-demo-001/keyframes"
+        "keyframe_dir": "/share/workflows/task-demo-001/keyframes",
+        "keyframe_dir_minio_url": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
+        "downloaded_keyframes_dir": "/share/workflows/task-demo-001/downloaded_keyframes",
+        "input_source": "url_download",
+        "url_download_result": {
+          "total_files": 100,
+          "downloaded_files_count": 100,
+          "downloaded_local_dir": "/share/workflows/task-demo-001/downloaded_keyframes",
+          "original_url": "/share/workflows/task-demo-001/downloaded_keyframes"
+        }
       },
       "error": null,
       "duration": 6.5
@@ -637,6 +672,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：本地 `keyframe_dir` 恒存在；当 `core.auto_upload_to_minio=true` 时追加 `keyframe_dir_minio_url`，本地字段不被覆盖。若输入为远程/压缩包，输出还会包含 `downloaded_keyframes_dir`、`input_source`、`url_download_result` 等下载诊断信息。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -701,6 +737,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：`multi_frames_path`/`manifest_path` 本地字段恒存在；`multi_frames_minio_url`/`manifest_minio_url` 仅在 `core.auto_upload_to_minio=true` 且 `upload_stitched_images_to_minio=true` 时返回，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -760,7 +797,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
-说明：`ocr_results_minio_url` 仅在开启上传后返回，本地路径统一为 `/share/.../ocr_results.json`。
+说明：本地 `ocr_results_path` 恒存在；`ocr_results_minio_url` 仅在 `core.auto_upload_to_minio=true` 且 `upload_ocr_results_to_minio=true` 时返回，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -799,25 +836,28 @@ WorkflowContext 示例：
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
   "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "paddleocr.postprocess_and_finalize": {
-      "status": "SUCCESS",
-      "input_params": {
-        "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
-        "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-        "video_path": "/share/workflows/task-demo-001/demo.mp4"
+      "stages": {
+        "paddleocr.postprocess_and_finalize": {
+          "status": "SUCCESS",
+          "input_params": {
+            "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
+            "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+            "video_path": "/share/workflows/task-demo-001/demo.mp4"
+          },
+          "output": {
+            "srt_file": "/share/workflows/task-demo-001/demo.srt",
+            "srt_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.srt",
+            "json_file": "/share/workflows/task-demo-001/demo.json",
+            "json_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.json"
+          },
+          "error": null,
+          "duration": 10.0
+        }
       },
-      "output": {
-        "srt_file": "/share/workflows/task-demo-001/demo.srt",
-        "json_file": "/share/workflows/task-demo-001/demo.json"
-      },
-      "error": null,
-      "duration": 10.0
-    }
-  },
   "error": null
 }
 ```
+说明：本地字幕文件路径恒存在；当 `core.auto_upload_to_minio=true` 时，state_manager 可追加对应 `*_minio_url`，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -847,6 +887,7 @@ WorkflowContext 示例：
 {
   "status": "success",
   "output_path": "/share/workflows/task-demo-001/tts.wav",
+  "output_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/tts.wav",
   "processing_time": 3.2,
   "task_id": "task-demo-001",
   "workflow_id": "task-demo-001",
@@ -860,6 +901,7 @@ WorkflowContext 示例：
   }
 }
 ```
+说明：`output_path` 恒为本地路径；当 `core.auto_upload_to_minio=true` 时追加 `output_path_minio_url`，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -923,6 +965,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：`optimized_file_path`/`original_file_path` 为本地路径，state_manager 当前不会为这些字段追加 MinIO URL（字段名不在上传列表），远程地址默认不返回。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -957,22 +1000,24 @@ WorkflowContext 示例：
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
   "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.correct_subtitles": {
-      "status": "SUCCESS",
-      "input_params": {
-        "subtitle_path": "/share/workflows/task-demo-001/subtitle.srt"
-      },
-      "output": {
-        "corrected_subtitle_path": "http://localhost:9000/yivideo/task-demo-001/subtitle_corrected.srt"
-      },
-      "error": null,
+      "stages": {
+        "wservice.correct_subtitles": {
+          "status": "SUCCESS",
+          "input_params": {
+            "subtitle_path": "/share/workflows/task-demo-001/subtitle.srt"
+          },
+          "output": {
+            "corrected_subtitle_path": "/share/workflows/task-demo-001/subtitle_corrected.srt",
+            "corrected_subtitle_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/subtitle_corrected.srt"
+          },
+          "error": null,
       "duration": 4.0
     }
   },
   "error": null
 }
 ```
+说明：该节点输出为合并结果数据，不生成新的文件路径，因此无 MinIO URL 字段；输入文件仍为本地路径，若全局开关开启且文件字段匹配 state_manager 上传列表（如 segments_file/diarization_file），则可能额外出现对应 `*_minio_url`，本地字段不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1045,6 +1090,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：该节点输出为合并后的片段数据，不新增文件路径；若 `segments_file`/`diarization_file` 来自本地，state_manager 在上传开启时可能追加对应 `*_minio_url`，原本地字段不覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1106,6 +1152,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：本节点输出为片段数据，不生成新文件；输入文件字段若匹配 state_manager 上传列表且开关开启，可能额外出现 `*_minio_url`，原本地字段不覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1168,6 +1215,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：输出为待合成片段数据，不包含新文件；若 `segments_file` 为本地且上传开关开启，state_manager 可能追加 `segments_file_minio_url`，原字段不覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |

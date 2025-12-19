@@ -33,6 +33,7 @@ from services.common.context import WorkflowContext
 # 日志已统一管理，使用 services.common.logger
 
 # 使用统一的配置加载器，确保与环境变量配置一致
+from services.common.config_loader import get_config
 from services.common.config_loader import get_redis_config
 
 # 使用config.yml中为状态存储定义的DB
@@ -55,6 +56,20 @@ except ValueError as e:
 except Exception as e:
     logger.error(f"状态管理器无法连接到Redis. 错误: {e}")
     redis_client = None
+
+def _is_auto_upload_enabled() -> bool:
+    """读取全局开关，控制是否自动上传到 MinIO。"""
+    try:
+        config = get_config() or {}
+        raw_value = config.get("core", {}).get("auto_upload_to_minio", True)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, str):
+            return raw_value.lower() in ("true", "1", "yes", "on")
+    except Exception as e:
+        logger.warning(f"读取 auto_upload_to_minio 配置失败，使用默认 True: {e}", exc_info=True)
+    return True
+
 
 # --- 核心功能 ---
 def _upload_files_to_minio(context: WorkflowContext) -> None:
@@ -101,9 +116,9 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
                         # 上传到MinIO
                         minio_url = file_service.upload_to_minio(file_path, minio_path)
                         
-                        # 更新输出中的路径为MinIO URL
-                        stage.output[key] = minio_url
-                        logger.info(f"文件已上传并更新路径: {key} = {minio_url}")
+                        # 追加 MinIO URL，保留原始本地路径
+                        stage.output[f"{key}_minio_url"] = minio_url
+                        logger.info(f"文件已上传: {key}_minio_url = {minio_url}")
                         
                     except Exception as e:
                         logger.warning(f"上传文件失败: {file_path}, 错误: {e}", exc_info=True)
@@ -150,12 +165,11 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
                         )
                         
                         if upload_result["success"]:
-                            # 更新输出中的路径为MinIO基础URL
-                            stage.output[key] = upload_result["minio_base_url"]
-                            # 添加额外的元数据字段
+                            # 追加 MinIO URL，保留原始本地目录
+                            stage.output[f"{key}_minio_url"] = upload_result["minio_base_url"]
                             stage.output[f"{key}_files_count"] = len(upload_result["uploaded_files"])
                             stage.output[f"{key}_uploaded_files"] = upload_result["uploaded_files"]
-                            logger.info(f"目录上传成功: {key} = {upload_result['minio_base_url']}, 文件数: {len(upload_result['uploaded_files'])}")
+                            logger.info(f"目录上传成功: {key}_minio_url = {upload_result['minio_base_url']}, 文件数: {len(upload_result['uploaded_files'])}")
                         else:
                             logger.warning(f"目录上传失败: {dir_path}, 错误: {upload_result.get('error', '未知错误')}")
                             # 即使上传失败也保留原始目录路径
@@ -272,8 +286,11 @@ def update_workflow_state(context: WorkflowContext) -> None:
         logger.error("Redis未连接，无法更新工作流状态。")
         return
 
-    # 自动上传文件到MinIO
-    _upload_files_to_minio(context)
+    # 自动上传文件到MinIO（尊重配置开关）
+    if _is_auto_upload_enabled():
+        _upload_files_to_minio(context)
+    else:
+        logger.info("auto_upload_to_minio 已关闭，跳过上传。")
 
     key = _get_key(context.workflow_id)
     state_json = context.model_dump_json()
