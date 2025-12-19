@@ -595,36 +595,22 @@ def create_stitched_images(self: Task, context: dict) -> dict:
                     else:
                         logger.info(f"[{stage_name}] 拼接图片上传成功: {upload_result['archive_url']}")
                     
-                    # [新增] 压缩包上传成功后清理本地文件
+                    # [新增] 压缩包上传成功后清理输入下载类临时文件（保留产物目录供后续使用）
                     try:
-                        logger.info(f"[{stage_name}] 开始清理本地临时文件...")
-                        
-                        # 1. 清理下载的压缩包和解压缩的图片目录
+                        logger.info(f"[{stage_name}] 开始清理输入阶段的临时目录...")
+
                         if 'cropped_images_local_compression' in output_data and os.path.exists(output_data['cropped_images_local_compression']):
                             shutil.rmtree(output_data['cropped_images_local_compression'])
                             logger.info(f"[{stage_name}] 已清理下载压缩包目录: {output_data['cropped_images_local_compression']}")
-                        
+
                         if 'cropped_images_local_dir' in output_data and os.path.exists(output_data['cropped_images_local_dir']):
                             shutil.rmtree(output_data['cropped_images_local_dir'])
                             logger.info(f"[{stage_name}] 已清理解压缩图片目录: {output_data['cropped_images_local_dir']}")
-                        
-                        # 2. 清理执行后合并图片的目录和压缩包文件
-                        # 注意：upload_directory_compressed 已经处理了 delete_local 参数
-                        # 这里主要是清理其他可能的临时文件
-                        
-                        if os.path.exists(output_data["multi_frames_path"]):
-                            # 如果 delete_local=False，这里需要手动清理
-                            if not delete_local_images:
-                                shutil.rmtree(output_data["multi_frames_path"])
-                                logger.info(f"[{stage_name}] 已清理拼接图片目录: {output_data['multi_frames_path']}")
-                        
-                        # 清理可能的临时压缩包文件（如果存在）
-                        # 注意：upload_directory_compressed 会自动处理这个
-                        
-                        logger.info(f"[{stage_name}] 本地文件清理完成")
-                        
+
+                        logger.info(f"[{stage_name}] 输入类临时目录清理完成（保留拼接产物目录供后续复用）")
+
                     except Exception as cleanup_error:
-                        logger.warning(f"[{stage_name}] 清理本地文件时出现警告: {cleanup_error}")
+                        logger.warning(f"[{stage_name}] 清理输入临时目录时出现警告: {cleanup_error}")
                         # 不将清理错误标记为失败，只记录警告
                         output_data["local_cleanup_warning"] = str(cleanup_error)
                     
@@ -958,42 +944,6 @@ def perform_ocr(self: Task, context: dict) -> dict:
             except Exception as e:
                 logger.warning(f"[{stage_name}] 清理下载目录失败: {e}")
 
-        # 临时文件清理：multi_frames 目录、manifest 文件和OCR结果文件在完成后删除
-        if get_cleanup_temp_files_config():
-            try:
-                # 删除 multi_frames 目录
-                if multi_frames_path and os.path.isdir(multi_frames_path):
-                    shutil.rmtree(multi_frames_path)
-                    # logger.info(f"[{stage_name}] 清理临时多帧图像目录: {multi_frames_path}")
-
-                # 删除 manifest 文件
-                if manifest_path and os.path.exists(manifest_path):
-                    os.remove(manifest_path)
-                    # logger.info(f"[{stage_name}] 清理临时清单文件: {manifest_path}")
-
-                # 删除 OCR 结果文件（如果未上传到MinIO或上传后删除了本地文件）
-                should_clean_ocr_results = True
-                if upload_to_minio and not delete_local_results:
-                    should_clean_ocr_results = False
-                
-                if should_clean_ocr_results and ocr_results_path and os.path.exists(ocr_results_path):
-                    os.remove(ocr_results_path)
-                    # logger.info(f"[{stage_name}] 清理临时OCR结果文件: {ocr_results_path}")
-
-                # 删除整个 cropped_images 目录（现在应该只剩空目录或其他临时文件）
-                if multi_frames_path:
-                    cropped_images_parent = Path(multi_frames_path).parent
-                    if cropped_images_parent.exists() and cropped_images_parent.name == "cropped_images":
-                        try:
-                            shutil.rmtree(str(cropped_images_parent))
-                            # logger.info(f"[{stage_name}] 清理整个裁剪图像目录: {cropped_images_parent}")
-                        except Exception as e:
-                            # 如果删除失败，可能是目录不为空，记录警告但不影响主流程
-                            logger.warning(f"[{stage_name}] 清理cropped_images目录失败（可能不为空）: {e}")
-
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 清理多帧图像文件失败: {e}")
-
         # [新增] 强制清理PaddleOCR相关进程和GPU显存
         try:
             from services.common.gpu_memory_manager import cleanup_paddleocr_processes, log_gpu_memory_state
@@ -1123,12 +1073,4 @@ def postprocess_and_finalize(self: Task, context: dict) -> dict:
         workflow_context.stages[stage_name].duration = time.time() - start_time
         state_manager.update_workflow_state(workflow_context)
         
-        # 临时文件清理：OCR结果文件在后处理完成后删除
-        if get_cleanup_temp_files_config():
-            prev_ocr_stage = workflow_context.stages.get('paddleocr.perform_ocr')
-            ocr_results_path_to_clean = prev_ocr_stage.output.get("ocr_results_path") if prev_ocr_stage else None
-            if ocr_results_path_to_clean and os.path.exists(ocr_results_path_to_clean):
-                os.remove(ocr_results_path_to_clean)
-                # logger.info(f"[{stage_name}] 清理临时OCR结果文件: {ocr_results_path_to_clean}")
-
     return workflow_context.model_dump()

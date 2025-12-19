@@ -73,6 +73,7 @@
 -   ✅ `/v1/files/exists/{file_path}` - 检查文件存在性
 -   ✅ `/v1/files/url/{file_path}` - 获取预签名 URL（支持自定义有效期）
 -   ✅ `/v1/files/health` - 健康检查
+-   ✅ `/v1/files/directories?directory_path=/share/...` - 显式删除本地工作流目录（唯一支持的本地清理入口，上传后不再自动删除本地产物）
 -   ✅ 路径安全性验证：防止路径遍历攻击
 -   ✅ 完整的错误处理和响应格式
 
