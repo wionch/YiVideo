@@ -52,7 +52,7 @@
         "video_path": "/share/workflows/task-demo-001/demo.mp4"
       },
       "output": {
-        "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav"
+        "audio_path": "/share/workflows/task-demo-001/audio/demo.wav"
       },
       "error": null,
       "duration": 2.6
@@ -272,12 +272,7 @@ WorkflowContext 示例：
   "stages": {
     "ffmpeg.split_audio_segments": {
       "status": "SUCCESS",
-      "input_params": {
-        "audio_path": "/share/workflows/task-demo-001/demo.wav",
-        "subtitle_path": "/share/workflows/task-demo-001/subtitle.srt",
-        "group_by_speaker": true,
-        "output_format": "wav"
-      },
+      "input_params": {},
       "output": {
         "audio_segments_dir": "/share/workflows/task-demo-001/audio_segments",
         "audio_source": "/share/workflows/task-demo-001/demo.wav",
@@ -363,7 +358,7 @@ WorkflowContext 示例：
         "enable_word_timestamps": true
       },
       "output": {
-        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_abcd1234.json",
+        "segments_file": "/share/workflows/task-demo-001/transcribe_data_abcd1234.json",
         "audio_duration": 125.5,
         "language": "zh",
         "transcribe_duration": 45.2,
@@ -543,32 +538,16 @@ WorkflowContext 示例：
   }
 }
 ```
-TaskStatusResponse 示例（结果字段承载任务返回）：
+响应示例（直接返回 success/data 结构，而非完整 WorkflowContext）：
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "status": "completed",
-  "create_at": "2025-12-17T12:00:00Z",
-  "input_params": {
-    "task_name": "pyannote_audio.get_speaker_segments",
-    "input_data": {
-      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
-      "speaker": "SPEAKER_00"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
-  },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "result": {
-    "success": true,
-    "data": {
-      "segments": [
-        {"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00", "duration": 5.2}
-      ],
-      "summary": "说话人 SPEAKER_00 的片段: 1 个"
-    }
-  },
-  "error": null,
-  "updated_at": "2025-12-17T12:00:05Z"
+  "success": true,
+  "data": {
+    "segments": [
+      {"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00", "duration": 5.2}
+    ],
+    "summary": "说话人 SPEAKER_00 的片段: 1 个"
+  }
 }
 ```
 参数表：
@@ -590,36 +569,21 @@ TaskStatusResponse 示例（结果字段承载任务返回）：
   }
 }
 ```
-TaskStatusResponse 示例（结果字段承载任务返回）：
+响应示例（直接返回 success/data 结构，而非完整 WorkflowContext）：
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "status": "completed",
-  "create_at": "2025-12-17T12:00:00Z",
-  "input_params": {
-    "task_name": "pyannote_audio.validate_diarization",
-    "input_data": {
-      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
+  "success": true,
+  "data": {
+    "validation": {
+      "valid": true,
+      "total_segments": 148,
+      "total_speakers": 2,
+      "total_duration": 280.5,
+      "avg_segment_duration": 1.9,
+      "issues": []
     },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
-  },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "result": {
-    "success": true,
-    "data": {
-      "validation": {
-        "valid": true,
-        "total_segments": 148,
-        "total_speakers": 2,
-        "total_duration": 280.5,
-        "avg_segment_duration": 1.9,
-        "issues": []
-      },
-      "summary": "说话人分离结果有效"
-    }
-  },
-  "error": null,
-  "updated_at": "2025-12-17T12:00:06Z"
+    "summary": "说话人分离结果有效"
+  }
 }
 ```
 参数表：
@@ -630,7 +594,7 @@ TaskStatusResponse 示例（结果字段承载任务返回）：
 ### PaddleOCR
 
 #### paddleocr.detect_subtitle_area
-功能概述（paddleocr.detect_subtitle_area）：检测视频中的字幕区域，输出坐标与置信度，并提供关键帧目录供后续裁剪或 OCR 使用。
+功能概述（paddleocr.detect_subtitle_area）：检测关键帧中的字幕区域，输出坐标与置信度，可直接消费 `ffmpeg.extract_keyframes` 产物或从 MinIO/HTTP 下载目录。
 请求体：
 ```json
 {
@@ -638,7 +602,8 @@ TaskStatusResponse 示例（结果字段承载任务返回）：
   "task_id": "task-demo-001",
   "callback": "http://localhost:5678/webhook/demo-t1",
   "input_data": {
-    "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4"
+    "keyframe_dir": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
+    "download_from_minio": true
   }
 }
 ```
@@ -650,7 +615,8 @@ WorkflowContext 示例：
   "input_params": {
     "task_name": "paddleocr.detect_subtitle_area",
     "input_data": {
-      "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4"
+      "keyframe_dir": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
+      "download_from_minio": true
     },
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
@@ -658,13 +624,11 @@ WorkflowContext 示例：
   "stages": {
     "paddleocr.detect_subtitle_area": {
       "status": "SUCCESS",
-      "input_params": {
-        "video_path": "/share/workflows/task-demo-001/demo.mp4"
-      },
+      "input_params": {},
       "output": {
         "subtitle_area": [0, 918, 1920, 1080],
         "confidence": 0.93,
-        "keyframe_dir": "http://localhost:9000/yivideo/task-demo-001/keyframes/"
+        "keyframe_dir": "/share/workflows/task-demo-001/keyframes"
       },
       "error": null,
       "duration": 6.5
@@ -676,7 +640,9 @@ WorkflowContext 示例：
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `video_path` | string | 是 | - | 输入视频路径 |
+| `keyframe_dir` | string | 是 | - | 关键帧目录（本地 `/share` 或 MinIO/HTTP URL）；可复用 `ffmpeg.extract_keyframes` 输出 |
+| `download_from_minio` | bool | 否 | false | 关键帧为 MinIO/HTTP URL 时是否下载到本地后再检测 |
+| `auto_decompress` | bool | 否 | true | 下载压缩包时自动解压 |
 
 #### paddleocr.create_stitched_images
 功能概述（paddleocr.create_stitched_images）：将裁剪字幕图批量拼接成长图/manifest，支持自动解压与压缩上传，输出拼接目录与 MinIO URL。
@@ -784,7 +750,7 @@ WorkflowContext 示例：
         "multi_frames_path": "http://localhost:9000/yivideo/task-demo-001/multi_frames"
       },
       "output": {
-        "ocr_results_path": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
+        "ocr_results_path": "/share/workflows/task-demo-001/ocr_results.json",
         "ocr_results_minio_url": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json"
       },
       "error": null,
@@ -794,6 +760,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
+说明：`ocr_results_minio_url` 仅在开启上传后返回，本地路径统一为 `/share/.../ocr_results.json`。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -803,7 +770,7 @@ WorkflowContext 示例：
 | `delete_local_ocr_results_after_upload` | bool | 否 | false | 上传后删除本地结果 |
 
 #### paddleocr.postprocess_and_finalize
-功能概述（paddleocr.postprocess_and_finalize）：对 OCR 结果进行后处理与时间轴对齐，生成最终字幕文件（SRT/JSON）并可上传。
+功能概述（paddleocr.postprocess_and_finalize）：对 OCR 结果进行后处理与时间轴对齐，生成最终字幕文件（SRT/JSON）。
 请求体：
 ```json
 {
@@ -813,7 +780,7 @@ WorkflowContext 示例：
   "input_data": {
     "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
     "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-    "upload_final_results_to_minio": true
+    "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4"
   }
 }
 ```
@@ -827,7 +794,7 @@ WorkflowContext 示例：
     "input_data": {
       "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
       "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-      "upload_final_results_to_minio": true
+      "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4"
     },
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
@@ -837,7 +804,8 @@ WorkflowContext 示例：
       "status": "SUCCESS",
       "input_params": {
         "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
-        "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json"
+        "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+        "video_path": "/share/workflows/task-demo-001/demo.mp4"
       },
       "output": {
         "srt_file": "/share/workflows/task-demo-001/demo.srt",
@@ -855,8 +823,7 @@ WorkflowContext 示例：
 | :--- | :--- | :--- | :--- | :--- |
 | `ocr_results_file` | string | 否 | 智能源选择 | OCR 结果文件，本地或 MinIO/HTTP URL，未提供则回退 `paddleocr.perform_ocr` 输出 |
 | `manifest_file` | string | 否 | 智能源选择 | 拼接图 manifest，本地或 MinIO/HTTP URL，未提供则回退 `paddleocr.create_stitched_images` 输出 |
-| `upload_final_results_to_minio` | bool | 否 | true | 是否上传最终字幕到 MinIO |
-| `delete_local_results_after_upload` | bool | 否 | false | 上传后删除本地结果 |
+| `video_path` | string | 是 | - | 原始视频路径，用于计算 FPS（必需） |
 
 ### IndexTTS
 
@@ -871,45 +838,26 @@ WorkflowContext 示例：
   "input_data": {
     "text": "你好，欢迎使用 YiVideo。",
     "output_path": "/share/workflows/task-demo-001/tts.wav",
-    "spk_audio_prompt": "http://localhost:9000/yivideo/task-demo-001/ref.wav",
-    "voice": "zh_female_1"
+    "spk_audio_prompt": "http://localhost:9000/yivideo/task-demo-001/ref.wav"
   }
 }
 ```
-WorkflowContext 示例：
+响应示例（返回普通任务字典，不写入 WorkflowContext）：
 ```json
 {
+  "status": "success",
+  "output_path": "/share/workflows/task-demo-001/tts.wav",
+  "processing_time": 3.2,
+  "task_id": "task-demo-001",
   "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "stage_name": "indextts.generate_speech",
   "input_params": {
-    "task_name": "indextts.generate_speech",
-    "input_data": {
-      "text": "你好，欢迎使用 YiVideo。",
-      "output_path": "/share/workflows/task-demo-001/tts.wav",
-      "spk_audio_prompt": "http://localhost:9000/yivideo/task-demo-001/ref.wav",
-      "voice": "zh_female_1"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
-  },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "indextts.generate_speech": {
-      "status": "SUCCESS",
-      "input_params": {
-        "reference_audio": "http://localhost:9000/yivideo/task-demo-001/ref.wav",
-        "text_length": 12
-      },
-      "output": {
-        "status": "success",
-        "output_path": "/share/workflows/task-demo-001/tts.wav",
-        "processing_time": 3.2,
-        "task_id": "task-demo-001"
-      },
-      "error": null,
-      "duration": 3.2
-    }
-  },
-  "error": null
+    "text_length": 12,
+    "reference_audio": "/share/workflows/task-demo-001/ref.wav",
+    "emotion_reference": null,
+    "emotion_alpha": 0.65,
+    "use_random": false
+  }
 }
 ```
 参数表：
@@ -917,8 +865,8 @@ WorkflowContext 示例：
 | :--- | :--- | :--- | :--- | :--- |
 | `text` | string | 是 | - | 合成文本 |
 | `output_path` | string | 是 | - | 目标输出路径（/share/ 下） |
-| `spk_audio_prompt` | string | 是 | - | 说话人参考音频（HTTP/MinIO/本地） |
-| `voice` | string | 否 | 默认音色 | 语音角色 |
+| `spk_audio_prompt` | string | 是 | - | 说话人参考音频（HTTP/MinIO/本地），为必填 |
+| `voice` | string | 否 | 默认音色 | 语音角色（当前实现未消费，可忽略） |
 | `emotion_reference` | string | 否 | - | 情感参考音频 |
 | `emotion_alpha` | number | 否 | 0.65 | 情感强度 |
 | `use_random` | bool | 否 | false | 是否随机采样 |
@@ -955,17 +903,17 @@ WorkflowContext 示例：
     "wservice.generate_subtitle_files": {
       "status": "SUCCESS",
       "input_params": {
-        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
         "data_source": "input_data.segments_file"
       },
       "output": {
-        "subtitle_path": "http://localhost:9000/yivideo/task-demo-001/subtitles/subtitle.srt",
-        "json_path": "http://localhost:9000/yivideo/task-demo-001/subtitles/subtitle_subtitle.json",
+        "subtitle_path": "/share/workflows/task-demo-001/subtitles/subtitle.srt",
+        "json_path": "/share/workflows/task-demo-001/subtitles/subtitle_subtitle.json",
         "subtitle_files": {
-          "basic": "http://localhost:9000/yivideo/task-demo-001/subtitles/subtitle.srt",
-          "with_speakers": "http://localhost:9000/yivideo/task-demo-001/subtitles/subtitle_with_speakers.srt",
-          "word_timestamps": "http://localhost:9000/yivideo/task-demo-001/subtitles/subtitle_word_timestamps.json",
-          "json": "http://localhost:9000/yivideo/task-demo-001/subtitles/subtitle_subtitle.json"
+          "basic": "/share/workflows/task-demo-001/subtitles/subtitle.srt",
+          "with_speakers": "/share/workflows/task-demo-001/subtitles/subtitle_with_speakers.srt",
+          "word_timestamps": "/share/workflows/task-demo-001/subtitles/subtitle_word_timestamps.json",
+          "json": "/share/workflows/task-demo-001/subtitles/subtitle_subtitle.json"
         }
       },
       "error": null,
@@ -1039,7 +987,12 @@ WorkflowContext 示例：
   "task_id": "task-demo-001",
   "callback": "http://localhost:5678/webhook/demo-t1",
   "input_data": {
-    "subtitle_path": "http://localhost:9000/yivideo/task-demo-001/subtitle_corrected.srt"
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+    "subtitle_optimization": {
+      "enabled": true,
+      "provider": "deepseek",
+      "batch_size": 50
+    }
   }
 }
 ```
@@ -1051,7 +1004,12 @@ WorkflowContext 示例：
   "input_params": {
     "task_name": "wservice.ai_optimize_subtitles",
     "input_data": {
-      "subtitle_path": "http://localhost:9000/yivideo/task-demo-001/subtitle_corrected.srt"
+      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+      "subtitle_optimization": {
+        "enabled": true,
+        "provider": "deepseek",
+        "batch_size": 50
+      }
     },
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
@@ -1060,10 +1018,25 @@ WorkflowContext 示例：
     "wservice.ai_optimize_subtitles": {
       "status": "SUCCESS",
       "input_params": {
-        "subtitle_path": "/share/workflows/task-demo-001/subtitle_corrected.srt"
+        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
+        "subtitle_optimization": {
+          "enabled": true,
+          "provider": "deepseek",
+          "batch_size": 50
+        }
       },
       "output": {
-        "optimized_subtitle_path": "http://localhost:9000/yivideo/task-demo-001/subtitle_optimized.srt"
+        "optimized_file_path": "/share/workflows/task-demo-001/subtitle_optimized.srt",
+        "original_file_path": "/share/workflows/task-demo-001/transcribe_data.json",
+        "provider_used": "deepseek",
+        "processing_time": 12.3,
+        "subtitles_count": 120,
+        "commands_applied": 200,
+        "batch_mode": true,
+        "statistics": {
+          "total_commands": 200,
+          "optimization_rate": 1.67
+        }
       },
       "error": null,
       "duration": 4.5
@@ -1075,7 +1048,10 @@ WorkflowContext 示例：
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `subtitle_path` | string | 是 | - | 需要优化的字幕文件 |
+| `segments_file` | string | 否 | 智能源选择 | 转录 JSON（含 segments）；未提供则尝试 `faster_whisper.transcribe_audio` 输出 |
+| `subtitle_optimization.enabled` | bool | 是 | false | 开启后才执行优化；未开启则任务标记为 SKIPPED |
+| `subtitle_optimization.provider` | string | 否 | deepseek | AI 提供商 |
+| `subtitle_optimization.batch_size` | integer | 否 | 50 | 批次大小 |
 
 #### wservice.merge_speaker_segments
 功能概述（wservice.merge_speaker_segments）：将转录结果与说话人分段合并，生成带说话人标签的合并片段及统计，用于区分角色或下游编辑。

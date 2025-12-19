@@ -165,30 +165,3 @@ Use Conventional Commits: `<type>(<scope>): <subject>`
 **Types**: `feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf`
 
 **Important**: Do not automatically execute git commit/push operations without explicit user request.
-
-## Assistant Behavior Guidelines
-
-### Response Language Requirements
-
-**CRITICAL**: All responses to user interactions MUST be in Chinese (Simplified Chinese), regardless of the language used in this documentation or the codebase.
-
--   **Internal Processing**: You may reason and process information in English for optimal performance
--   **Output Format**: Always present the final response to the user in Chinese
--   **Code Comments**: Use Chinese (Simplified) for all code comments, docstrings, and inline documentation to maintain consistency with the project's localization standards
--   **Exception**: Only respond in English if the user explicitly requests English responses
-
-### MCP Services Integration
-
-1. **Always Default to MCP Services**: When faced with complex reasoning, context-heavy tasks, or ambiguous requirements, your first action should be to engage the relevant MCP services.
-
-2. **Service Selection**:
-
-    - Use **serena** for general context management and conversation continuity
-    - Use **context7** for deep context processing and analysis
-    - Use **sequentialthinking** for structured problem-solving and step-by-step reasoning
-
-3. **Transparent Usage**: When using MCP services, briefly indicate in your response which services were engaged and how they informed your approach.
-
-4. **Fallback Protocol**: If MCP services are unavailable for technical reasons, explicitly state this limitation and proceed with native reasoning while noting the reduced capability.
-
-**CRITICAL REMINDER**: These MCP services are core project infrastructure. Not using them when appropriate violates project conventions and reduces effectiveness.
