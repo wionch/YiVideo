@@ -91,6 +91,12 @@ class SingleTaskExecutor:
 
         # 创建任务状态记录（累积写入现有阶段）
         self._create_task_record(task_id, context, "pending")
+
+        # 将当前 Redis 状态作为调度上下文，确保已有阶段不丢失
+        context_from_state = self._get_task_state(task_id)
+        if context_from_state and not context_from_state.get("error"):
+            context = context_from_state
+            context["status"] = "pending"
         
         try:
             # 构建Celery任务签名

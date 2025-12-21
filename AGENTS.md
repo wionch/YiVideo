@@ -115,3 +115,16 @@ This project expects the assistant to proactively use MCP services to improve sp
     -   D: Dependency Inversion
 -   YAGNI (You Aren't Gonna Need It): do not implement “maybe useful later” features. Add functionality only when the current requirement clearly needs it; prefer minimal viable change to avoid feature creep.
 -   KISS (Keep It Simple): prefer the simplest understandable design and implementation. Avoid extra abstractions, complex frameworks, or over-engineering unless there is a clear benefit (performance/security/maintainability/extensibility).
+
+## Active Technologies
+- Python 3.8+ + FastAPI、Celery、Redis、MinIO、Pydantic (001-callback-reuse-fix)
+- Redis DB3（状态）、MinIO（产物存储）、本地 /share 挂载 (001-callback-reuse-fix)
+- Python 3.8+ + FastAPI, Celery, Redis (DB3), MinIO, Pydantic (001-fix-callback-reuse)
+- Redis（状态），MinIO（产物），本地 `/share` 挂载 (001-fix-callback-reuse)
+
+-   Python 3.8+ + FastAPI, Pydantic, Redis (redis-py), Celery (001-fix-callback-reuse-overwrite)
+-   Redis (DB3 for state management), MinIO (file storage) (001-fix-callback-reuse-overwrite)
+
+## Recent Changes
+
+-   001-fix-callback-reuse-overwrite: Added Python 3.8+ + FastAPI, Pydantic, Redis (redis-py), Celery

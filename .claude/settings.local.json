@@ -105,7 +105,10 @@
       "mcp__n8n-mcp__n8n_update_partial_workflow",
       "mcp__n8n-mcp__n8n_update_full_workflow",
       "mcp__n8n-mcp__n8n_validate_workflow",
-      "mcp__n8n-mcp__get_node_essentials"
+      "mcp__n8n-mcp__get_node_essentials",
+      "Bash(grep:*)",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh --json --paths-only)",
+      "mcp__exa__get_code_context_exa"
     ],
     "deny": [
       "Bash(docker build:*)"

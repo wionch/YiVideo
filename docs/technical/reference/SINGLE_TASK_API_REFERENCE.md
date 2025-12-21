@@ -122,6 +122,7 @@
 ### FFmpeg 系列
 
 #### ffmpeg.extract_keyframes
+复用判定：`stages.ffmpeg.extract_keyframes.status=SUCCESS` 且 `output.keyframe_dir` 非空即命中复用并直接返回缓存结果；若该阶段为 `pending/running`，同步响应 `status=pending`、`reuse_info.state=pending`；未命中按正常流程调度。
 功能概述（ffmpeg.extract_keyframes）：从输入视频抽取关键帧并支持采样数量、压缩与可选上传到 MinIO，便于后续检测或裁剪。
 请求体：
 ```json
@@ -183,6 +184,7 @@ WorkflowContext 示例（含下载诊断，上传开启时追加 minio 字段）
 | `delete_local_keyframes_after_upload` | bool | 否 | false | 上传后删除本地关键帧 |
 
 #### ffmpeg.extract_audio
+复用判定：`stages.ffmpeg.extract_audio.status=SUCCESS` 且 `output.audio_path` 非空即命中复用；`pending/running` 返回等待态并不重复调度；未命中按正常流程执行。
 功能概述（ffmpeg.extract_audio）：提取视频音频轨生成标准音频文件，支持 HTTP/MinIO/本地源，产出音频路径供后续转写或分离。
 请求体：同通用示例，仅 `task_name` 变更。
 WorkflowContext 示例（本地+可选远程）：
@@ -206,6 +208,7 @@ WorkflowContext 示例（本地+可选远程）：
 | `video_path` | string | 是 | - | 输入视频路径 |
 
 #### ffmpeg.crop_subtitle_images
+复用判定：`stages.ffmpeg.crop_subtitle_images.status=SUCCESS` 且 `output.cropped_images_path` 非空即命中复用；等待态返回 `status=pending`；未命中正常调度。
 功能概述（ffmpeg.crop_subtitle_images）：按字幕区域批量裁剪视频帧，可选压缩并上传裁剪图目录，输出裁剪路径及文件数。
 请求体：
 ```json
@@ -276,6 +279,7 @@ WorkflowContext 示例：
 | `decode_processes` | integer | 否 | 10 | 解码并发进程数 |
 
 #### ffmpeg.split_audio_segments
+复用判定：`stages.ffmpeg.split_audio_segments.status=SUCCESS` 且 `output.audio_segments_dir` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（ffmpeg.split_audio_segments）：基于字幕或说话人信息切分音频片段，支持并发/分组与格式控制，输出分段目录及统计。
 请求体：
 ```json
@@ -366,6 +370,7 @@ WorkflowContext 示例：
 ### Faster-Whisper
 
 #### faster_whisper.transcribe_audio
+复用判定：`stages.faster_whisper.transcribe_audio.status=SUCCESS` 且 `output.segments_file` 或转写输出非空即命中复用；等待态返回 `status=pending`、`reuse_info.state=pending`；未命中按正常流程执行。
 功能概述（faster_whisper.transcribe_audio）：使用 Faster-Whisper 将音频转写为文本，可启用词级时间戳，输出转录文件及语言/时长统计并可上传。
 请求体：
 ```json
@@ -433,6 +438,7 @@ WorkflowContext 示例：
 ### Audio Separator
 
 #### audio_separator.separate_vocals
+复用判定：`stages.audio_separator.separate_vocals.status=SUCCESS` 且 `output.vocal_audio`（或 `all_audio_files`）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（audio_separator.separate_vocals）：对输入音频进行人声与伴奏分离，支持模型选择与质量模式，输出分轨文件及 MinIO 上传地址。
 请求体：
 ```json
@@ -507,6 +513,7 @@ WorkflowContext 示例：
 ### Pyannote Audio
 
 #### pyannote_audio.diarize_speakers
+复用判定：`stages.pyannote_audio.diarize_speakers.status=SUCCESS` 且 `output.diarization_file` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（pyannote_audio.diarize_speakers）：对音频执行说话人分离，输出带说话人标签的分段文件、统计信息及可选上传链接，用于下游切分与合并。
 请求体：
 ```json
@@ -571,6 +578,7 @@ WorkflowContext 示例：
 | `use_paid_api` | bool | 否 | false | 是否使用付费接口（需配置密钥） |
 
 #### pyannote_audio.get_speaker_segments
+复用判定：`stages.pyannote_audio.get_speaker_segments.status=SUCCESS` 且 `output.speaker_segments_file` 或分段列表非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（pyannote_audio.get_speaker_segments）：基于说话人分离结果筛选指定说话人或全部说话人片段，返回片段列表与汇总信息，支持直接使用现有 diarization 文件。
 请求体：
 ```json
@@ -604,6 +612,7 @@ WorkflowContext 示例：
 | `speaker` | string | 否 | - | 目标说话人标签，不填则返回全部片段统计 |
 
 #### pyannote_audio.validate_diarization
+复用判定：`stages.pyannote_audio.validate_diarization.status=SUCCESS` 且 `output.validation`/`validation_report` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（pyannote_audio.validate_diarization）：校验说话人分离结果的有效性与统计（片段数、总时长、问题列表），用于质量检查与回退决策。
 请求体：
 ```json
@@ -642,6 +651,7 @@ WorkflowContext 示例：
 ### PaddleOCR
 
 #### paddleocr.detect_subtitle_area
+复用判定：`stages.paddleocr.detect_subtitle_area.status=SUCCESS` 且 `output.subtitle_area` 或检测结果非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（paddleocr.detect_subtitle_area）：检测关键帧中的字幕区域，输出坐标与置信度，可直接消费 `ffmpeg.extract_keyframes` 产物或从 MinIO/HTTP 下载目录。
 请求体：
 ```json
@@ -703,6 +713,7 @@ WorkflowContext 示例：
 | `auto_decompress` | bool | 否 | true | 下载压缩包时自动解压 |
 
 #### paddleocr.create_stitched_images
+复用判定：`stages.paddleocr.create_stitched_images.status=SUCCESS` 且 `output.stitched_images_dir` 或拼接产物非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（paddleocr.create_stitched_images）：将裁剪字幕图批量拼接成长图/manifest，支持自动解压与压缩上传，输出拼接目录与 MinIO URL。
 请求体：
 ```json
@@ -772,6 +783,7 @@ WorkflowContext 示例：
 | `pipeline.stitching_workers` | integer | 否 | 10 | 拼接并发数（来自配置） |
 
 #### paddleocr.perform_ocr
+复用判定：`stages.paddleocr.perform_ocr.status=SUCCESS` 且 `output.ocr_result_file`（或识别结果目录）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（paddleocr.perform_ocr）：对拼接字幕图执行 OCR 识别，支持从 manifest/目录拉取输入并上传识别结果，输出 OCR 结果文件及 MinIO 地址。
 请求体：
 ```json
@@ -829,6 +841,7 @@ WorkflowContext 示例：
 | `delete_local_ocr_results_after_upload` | bool | 否 | false | 上传后删除本地结果 |
 
 #### paddleocr.postprocess_and_finalize
+复用判定：`stages.paddleocr.postprocess_and_finalize.status=SUCCESS` 且 `output.subtitle_path` 等最终字幕结果非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（paddleocr.postprocess_and_finalize）：对 OCR 结果进行后处理与时间轴对齐，生成最终字幕文件（SRT/JSON）。
 请求体：
 ```json
@@ -890,6 +903,7 @@ WorkflowContext 示例：
 ### IndexTTS
 
 #### indextts.generate_speech
+复用判定：`stages.indextts.generate_speech.status=SUCCESS` 且 `output.audio_path`（或生成语音列表）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（indextts.generate_speech）：将文本转换为语音，可指定参考音频/音色/情感强度，输出合成音频文件并可上传到 MinIO。
 请求体：
 ```json
@@ -938,6 +952,7 @@ WorkflowContext 示例：
 ### WService 字幕优化
 
 #### wservice.generate_subtitle_files
+复用判定：`stages.wservice.generate_subtitle_files.status=SUCCESS` 且 `output.srt_file`/`json_file` 等字幕产物非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（wservice.generate_subtitle_files）：基于转录片段生成多格式字幕（含说话人/词级时间戳），输出 SRT/JSON 等文件并可供后续优化合并使用。
 请求体：
 ```json
@@ -997,6 +1012,7 @@ WorkflowContext 示例：
 | `output_filename` | string | 否 | 自动推断 | 输出文件前缀 |
 
 #### wservice.correct_subtitles
+复用判定：`stages.wservice.correct_subtitles.status=SUCCESS` 且 `output.corrected_srt_file`/`corrected_json_file` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（wservice.correct_subtitles）：对现有字幕进行校对与修订，提升文本质量和时序准确性，输出修正版字幕路径。
 请求体：
 ```json
@@ -1046,6 +1062,7 @@ WorkflowContext 示例：
 | `subtitle_path` | string | 是 | - | 输入字幕文件 |
 
 #### wservice.ai_optimize_subtitles
+复用判定：`stages.wservice.ai_optimize_subtitles.status=SUCCESS` 且优化后字幕文件非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（wservice.ai_optimize_subtitles）：通过 AI 优化字幕的措辞与分段，输出优化后的字幕文件，便于继续合并或配音。
 请求体：
 ```json
@@ -1122,6 +1139,7 @@ WorkflowContext 示例：
 | `subtitle_optimization.batch_size` | integer | 否 | 50 | 批次大小 |
 
 #### wservice.merge_speaker_segments
+复用判定：`stages.wservice.merge_speaker_segments.status=SUCCESS` 且 `output.merged_subtitle_path`（或合并结果列表）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（wservice.merge_speaker_segments）：将转录结果与说话人分段合并，生成带说话人标签的合并片段及统计，用于区分角色或下游编辑。
 请求体：
 ```json
@@ -1184,6 +1202,7 @@ WorkflowContext 示例：
 | `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
 
 #### wservice.merge_with_word_timestamps
+复用判定：`stages.wservice.merge_with_word_timestamps.status=SUCCESS` 且 `output.word_level_subtitle_path`（或包含 words 的片段列表）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（wservice.merge_with_word_timestamps）：合并转录与说话人信息并保留词级时间戳，输出包含 words 的片段列表和统计，便于精细对齐。
 请求体：
 ```json
@@ -1247,6 +1266,7 @@ WorkflowContext 示例：
 | `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
 
 #### wservice.prepare_tts_segments
+复用判定：`stages.wservice.prepare_tts_segments.status=SUCCESS` 且 `output.tts_segments_file` 或片段列表非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（wservice.prepare_tts_segments）：为文本转语音准备清洗后的字幕片段，聚合/筛选后输出待合成的片段列表及统计来源。
 请求体：
 ```json
