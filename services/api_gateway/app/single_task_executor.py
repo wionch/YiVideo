@@ -46,6 +46,28 @@ class SingleTaskExecutor:
         
         logger.info("单任务执行器初始化完成")
     
+    def _filter_context_for_response(self, context: Dict[str, Any], task_name: str) -> Dict[str, Any]:
+        """
+        过滤上下文，仅保留指定 task_name 的 stage 数据。
+        用于 API 响应和回调载荷，确保单任务视图的一致性。
+        """
+        if not context or "stages" not in context:
+            return context
+        
+        filtered_context = deepcopy(context)
+        original_stages = filtered_context.get("stages", {})
+        
+        # 仅保留目标 task_name 的 stage
+        if task_name in original_stages:
+            filtered_context["stages"] = {task_name: original_stages[task_name]}
+        else:
+            # 如果目标 task_name 不在 stages 中（理论上不应发生，除非数据异常），
+            # 保持为空或原样？根据需求应仅保留完全匹配的。
+            # 这里选择置空，因为明确要求“仅包含当前请求的 task_name”
+            filtered_context["stages"] = {}
+            
+        return filtered_context
+
     def execute_task(self, task_name: str, task_id: str, input_data: Dict[str, Any],
                     callback_url: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -320,20 +342,26 @@ class SingleTaskExecutor:
                 if callback_url:
                     self._send_reuse_callback_async(task_id, state_copy, minio_files, callback_url)
 
+                # Filter context for response
+                filtered_context = self._filter_context_for_response(state_copy, task_name)
+
                 return {
                     "reuse_hit": True,
                     "state": "completed",
                     "reuse_info": reuse_info,
-                    "context": state_copy
+                    "context": filtered_context
                 }
 
             if status in ["pending", "running"]:
                 reuse_info["state"] = status
+                # Filter context for response
+                filtered_context = self._filter_context_for_response(existing_state, task_name)
+                
                 return {
                     "reuse_hit": True,
                     "state": status,
                     "reuse_info": reuse_info,
-                    "context": existing_state
+                    "context": filtered_context
                 }
 
             return {"reuse_hit": False, "state": "miss", "reuse_info": None, "context": existing_state}
@@ -350,7 +378,11 @@ class SingleTaskExecutor:
                 if not self.callback_manager.validate_callback_url(callback_url):
                     cb_status = "invalid_url"
                 else:
-                    success = self.callback_manager.send_result(task_id, payload, minio_files, callback_url)
+                    # Filter payload for callback consistency
+                    task_name = payload.get("reuse_info", {}).get("task_name")
+                    filtered_payload = self._filter_context_for_response(payload, task_name) if task_name else payload
+                    
+                    success = self.callback_manager.send_result(task_id, filtered_payload, minio_files, callback_url)
                     cb_status = "sent" if success else "failed"
             except Exception as e:
                 logger.error(f"复用callback发送失败: {task_id}, 错误: {e}")
@@ -552,9 +584,13 @@ class SingleTaskExecutor:
                 })
                 return
             
+            # Filter result for callback consistency
+            task_name = state.get("input_params", {}).get("task_name")
+            filtered_result = self._filter_context_for_response(result, task_name) if task_name else result
+
             # 发送callback
             success = self.callback_manager.send_result(
-                task_id, result, minio_files, callback_url
+                task_id, filtered_result, minio_files, callback_url
             )
             
             callback_status = "sent" if success else "failed"

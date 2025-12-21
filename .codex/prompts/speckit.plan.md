@@ -1,121 +1,121 @@
 ---
-description: Execute the implementation planning workflow using the plan template to generate design artifacts.
+description: 使用计划模板执行实施规划工作流以生成设计文档。
 handoffs:
-    - label: Create Tasks
+    - label: 创建任务
       agent: speckit.tasks
-      prompt: Break the plan into tasks
+      prompt: 将计划分解为任务
       send: true
-    - label: Create Checklist
+    - label: 创建检查清单
       agent: speckit.checklist
-      prompt: Create a checklist for the following domain...
+      prompt: 为以下领域创建检查清单...
 ---
 
-## Language expectations
+## 语言期望
 
--   Planning-time messages and explanations are written in English in this command file, but:
-    -   The generated design artifacts (`research.md`, `data-model.md`, `quickstart.md`, etc.)
-        SHOULD use Chinese for narrative text aimed at the user or stakeholders.
-    -   Contracts such as OpenAPI/GraphQL schemas MAY keep standard English naming.
-    -   File paths, commands, and code snippets remain in their original language.
+-   此命令文件中的规划时消息和解释是用英文编写的，但是：
+    -   生成的设计文档（`research.md`，`data-model.md`，`quickstart.md` 等）
+        **应该**使用中文编写针对用户或利益相关者的叙述性文本。
+    -   诸如 OpenAPI/GraphQL 模式之类的契约**可以**保留标准英文命名。
+    -   文件路径、命令和代码片段保留其原始语言。
 
-## User Input
+## 用户输入
 
 ```text
 $ARGUMENTS
 
 ```
 
-You **MUST** consider the user input before proceeding (if not empty).
+在继续之前（如果不为空），你**必须**考虑用户输入。
 
-## Outline
+## 概要
 
-1. **Setup**: Run `.specify/scripts/bash/setup-plan.sh --json` from repo root and parse JSON for FEATURE_SPEC, IMPL_PLAN, SPECS_DIR, and FEATURE_NAME. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'''m Groot' (or double-quote if possible: "I'm Groot").
-2. **Load context**: Read FEATURE_SPEC and `.specify/memory/constitution.md`. Load IMPL_PLAN template (already copied).
-3. **Execute plan workflow**: Follow the structure in IMPL_PLAN template to:
+1. **设置**：从仓库根目录运行 `.specify/scripts/bash/setup-plan.sh --json` 并解析 JSON 以获取 FEATURE_SPEC, IMPL_PLAN, SPECS_DIR, 和 FEATURE_NAME。对于像 "I'm Groot" 这样的参数中的单引号，请使用转义语法：例如 'I'''m Groot'（或者如果可能的话使用双引号："I'm Groot"）。
+2. **加载上下文**：读取 FEATURE_SPEC 和 `.specify/memory/constitution.md`。加载 IMPL_PLAN 模板（已复制）。
+3. **执行计划工作流**：遵循 IMPL_PLAN 模板中的结构以：
 
--   Fill Technical Context (mark unknowns as "NEEDS CLARIFICATION")
--   Fill Constitution Check section from constitution
--   Evaluate gates (ERROR if violations unjustified)
--   Phase 0: Generate research.md (resolve all NEEDS CLARIFICATION)
--   Phase 1: Generate data-model.md, contracts/, quickstart.md
--   Phase 1: Update agent context by running the agent script
--   Re-evaluate Constitution Check post-design
+-   填写技术上下文（将未知数标记为 "NEEDS CLARIFICATION"）
+-   填写来自宪章的宪章检查部分
+-   评估门控（如果违规未被证明合理则报错）
+-   阶段 0：生成 research.md（解决所有 NEEDS CLARIFICATION）
+-   阶段 1：生成 data-model.md, contracts/, quickstart.md
+-   阶段 1：通过运行代理脚本更新代理上下文
+-   设计后重新评估宪章检查
 
-4. **Stop and report**: Command ends after Phase 2 planning. Report feature name, IMPL_PLAN path, and generated artifacts.
+4. **停止并报告**：命令在阶段 2 规划后结束。报告功能名称、IMPL_PLAN 路径和生成的文档。
 
-## Phases
+## 阶段
 
-### Phase 0: Outline & Research
+### 阶段 0：大纲与研究
 
-#### MCP usage requirements (REQUIRED)
+#### MCP 使用要求 (必需)
 
--   Before generating `research.md` or making key technology decisions, the planner SHOULD:
+-   在生成 `research.md` 或做出关键技术决策之前，规划者**应该**：
 
-1. Use `sequential-thinking` to:
+1. 使用 `sequential-thinking` 来：
 
--   Break down each NEEDS CLARIFICATION into concrete research questions.
--   Prioritize by impact, risk, and dependency.
+-   将每个 NEEDS CLARIFICATION 分解为具体的研究问题。
+-   按影响、风险和依赖关系进行优先排序。
 
-2. Use `context7` to:
+2. 使用 `context7` 来：
 
--   Consult official or otherwise authoritative sources.
--   Capture URLs/versions/dates and key conclusions in `research.md`.
+-   查阅官方或权威来源。
+-   在 `research.md` 中捕获 URL/版本/日期和关键结论。
 
-3. Use `serena` to:
+3. 使用 `serena` 来：
 
--   Reconcile planned architecture with the current repository structure and conventions.
+-   协调计划的架构与当前的仓库结构和惯例。
 
-1. **Extract unknowns from Technical Context** above:
+1. **从上方的技术上下文中提取未知数**：
 
--   For each NEEDS CLARIFICATION → research task
--   For each dependency → best practices task
--   For each integration → patterns task
+-   对于每个 NEEDS CLARIFICATION → 研究任务
+-   对于每个依赖项 → 最佳实践任务
+-   对于每个集成 → 模式任务
 
-2. **Generate and dispatch research agents**:
+2. **生成并分派研究代理**：
 
 ```text
-For each unknown in Technical Context:
-  Task: "Research {unknown} for {feature context}"
-For each technology choice:
-  Task: "Find best practices for {tech} in {domain}"
+对于技术上下文中的每个未知数：
+  任务: "Research {unknown} for {feature context}"
+对于每个技术选择：
+  任务: "Find best practices for {tech} in {domain}"
 
 ```
 
-3. **Consolidate findings** in `research.md` using format:
+3. **在 `research.md` 中整合发现**，使用格式：
 
--   Decision: [what was chosen]
--   Rationale: [why chosen]
--   Alternatives considered: [what else evaluated]
+-   决策：[选择了什么]
+-   理由：[为什么选择]
+-   考虑的替代方案：[评估了其他什么]
 
-**Output**: research.md with all NEEDS CLARIFICATION resolved
+**输出**：research.md，解决了所有 NEEDS CLARIFICATION
 
-### Phase 1: Design & Contracts
+### 阶段 1：设计与契约
 
-**Prerequisites:** `research.md` complete
+**先决条件：** `research.md` 完成
 
-1. **Extract entities from feature spec** → `data-model.md`:
+1. **从功能规范中提取实体** → `data-model.md`：
 
--   Entity name, fields, relationships
--   Validation rules from requirements
--   State transitions if applicable
+-   实体名称、字段、关系
+-   来自需求的验证规则
+-   状态转换（如果适用）
 
-2. **Generate API contracts** from functional requirements:
+2. **从功能需求生成 API 契约**：
 
--   For each user action → endpoint
--   Use standard REST/GraphQL patterns
--   Output OpenAPI/GraphQL schema to `/contracts/`
+-   对于每个用户动作 → 端点
+-   使用标准 REST/GraphQL 模式
+-   输出 OpenAPI/GraphQL 模式到 `/contracts/`
 
-3. **Agent context update**:
+3. **代理上下文更新**：
 
--   Run `.specify/scripts/bash/update-agent-context.sh codex`
--   These scripts detect which AI agent is in use
--   Update the appropriate agent-specific context file
--   Add only new technology from current plan
--   Preserve manual additions between markers
+-   运行 `.specify/scripts/bash/update-agent-context.sh codex`
+-   这些脚本检测正在使用哪个 AI 代理
+-   更新适当的代理特定上下文文件
+-   仅添加当前计划中的新技术
+-   保留标记之间的手动添加
 
-**Output**: data-model.md, /contracts/\*, quickstart.md, agent-specific file
+**输出**：data-model.md, /contracts/\*, quickstart.md, 代理特定文件
 
-## Key rules
+## 关键规则
 
--   Use absolute paths
--   ERROR on gate failures or unresolved clarifications
+-   使用绝对路径
+-   在门控失败或未解决的澄清上报错

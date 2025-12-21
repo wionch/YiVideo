@@ -1,182 +1,176 @@
 ---
-description: Generate an actionable, dependency-ordered tasks.md for the feature based on available design artifacts.
+description: 根据可用的设计文档，为该功能生成可操作的、按依赖顺序排列的 tasks.md。
 handoffs:
-    - label: Analyze For Consistency
+    - label: 分析一致性
       agent: speckit.analyze
-      prompt: Run a project analysis for consistency
+      prompt: 运行项目一致性分析
       send: true
-    - label: Implement Project
+    - label: 实施项目
       agent: speckit.implement
-      prompt: Start the implementation in phases
+      prompt: 分阶段开始实施
       send: true
 ---
 
-## User Input
+## 用户输入
 
 ```text
 $ARGUMENTS
 ```
 
-You **MUST** consider the user input before proceeding (if not empty).
+在继续之前（如果不为空），你**必须**考虑用户输入。
 
-## Outline
+## 概要
 
-1. **Setup**: Run `.specify/scripts/bash/check-prerequisites.sh --json` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+1. **设置**：从仓库根目录运行 `.specify/scripts/bash/check-prerequisites.sh --json` 并解析 FEATURE_DIR 和 AVAILABLE_DOCS 列表。所有路径必须是绝对路径。对于像 "I'm Groot" 这样的参数中的单引号，请使用转义语法：例如 'I'\''m Groot'（或者如果可能的话使用双引号："I'm Groot"）。
 
-2. **Load design documents**: Read from FEATURE_DIR:
+2. **加载设计文档**：从 FEATURE_DIR 读取：
 
-    - **Required**: plan.md (tech stack, libraries, structure), spec.md (user stories with priorities)
-    - **Optional**: data-model.md (entities), contracts/ (API endpoints), research.md (decisions), quickstart.md (test scenarios)
-    - Note: Not all projects have all documents. Generate tasks based on what's available.
+    - **必需**：plan.md（技术栈、库、结构），spec.md（具有优先级的用户故事）
+    - **可选**：data-model.md（实体），contracts/（API 端点），research.md（决策），quickstart.md（测试场景）
+    - 注意：并非所有项目都有所有文档。根据可用内容生成任务。
 
-3. **Execute task generation workflow**:
+3. **执行任务生成工作流**：
 
-    - Load plan.md and extract tech stack, libraries, project structure
-    - Load spec.md and extract user stories with their priorities (P1, P2, P3, etc.)
-    - If data-model.md exists: Extract entities and map to user stories
-    - If contracts/ exists: Map endpoints to user stories
-    - If research.md exists: Extract decisions for setup tasks
-    - Generate tasks organized by user story (see Task Generation Rules below)
-    - Generate dependency graph showing user story completion order
-    - Create parallel execution examples per user story
-    - Validate task completeness (each user story has all needed tasks, independently testable)
+    - 加载 plan.md 并提取技术栈、库、项目结构
+    - 加载 spec.md 并提取用户故事及其优先级（P1, P2, P3 等）
+    - 如果 data-model.md 存在：提取实体并映射到用户故事
+    - 如果 contracts/ 存在：将端点映射到用户故事
+    - 如果 research.md 存在：提取决策用于设置任务
+    - 按用户故事组织生成任务（见下文任务生成规则）
+    - 生成显示用户故事完成顺序的依赖图
+    - 创建每个用户故事的并行执行示例
+    - 验证任务完整性（每个用户故事具有所有需要的任务，可独立测试）
 
-4. **Generate tasks.md**: Use `.specify/templates/tasks-template.md` as structure, fill with:
+4. **生成 tasks.md**：使用 `.specify/templates/tasks-template.md` 作为结构，填充：
 
-    - Correct feature name from plan.md
-    - Phase 1: Setup tasks (project initialization)
-    - Phase 2: Foundational tasks (blocking prerequisites for all user stories)
-    - Phase 3+: One phase per user story (in priority order from spec.md)
-    - Each phase includes: story goal, independent test criteria, tests (if requested), implementation tasks
-    - Final Phase: Polish & cross-cutting concerns
-    - All tasks must follow the strict checklist format (see Task Generation Rules below)
-    - Clear file paths for each task
-    - Dependencies section showing story completion order
-    - Parallel execution examples per story
-    - Implementation strategy section (MVP first, incremental delivery)
+    - 来自 plan.md 的正确功能名称
+    - 阶段 1：设置任务（项目初始化）
+    - 阶段 2：基础任务（所有用户故事的阻塞性先决条件）
+    - 阶段 3+：每个用户故事一个阶段（按 spec.md 中的优先级顺序）
+    - 每个阶段包括：故事目标、独立测试标准、测试（如果要求）、实施任务
+    - 最后阶段：完善和横切关注点
+    - 所有任务必须遵循严格的检查清单格式（见下文任务生成规则）
+    - 每个任务的清晰文件路径
+    - 显示故事完成顺序的依赖部分
+    - 每个故事的并行执行示例
+    - 实施策略部分（MVP 优先，增量交付）
 
-5. **Report**: Output path to generated tasks.md and summary:
-    - Total task count
-    - Task count per user story
-    - Parallel opportunities identified
-    - Independent test criteria for each story
-    - Suggested MVP scope (typically just User Story 1)
-    - Format validation: Confirm ALL tasks follow the checklist format (checkbox, ID, labels, file paths)
+5. **报告**：输出生成的 tasks.md 的路径和摘要：
+    - 总任务数
+    - 每个用户故事的任务数
+    - 识别的并行机会
+    - 每个故事的独立测试标准
+    - 建议的 MVP 范围（通常只是用户故事 1）
+    - 格式验证：确认所有任务遵循检查清单格式（复选框、ID、标签、文件路径）
 
-Context for task generation: $ARGUMENTS
+任务生成上下文：$ARGUMENTS
 
-The tasks.md should be immediately executable - each task must be specific enough that an LLM can complete it without additional context.
+tasks.md 应该立即可执行 - 每个任务必须足够具体，以便 LLM 可以在没有额外上下文的情况下完成它。
 
-### Language expectations
+### 语言期望
 
--   All user-facing task descriptions, section titles, and explanations in the generated `tasks.md`
-    MUST be written in Chinese, unless they are:
-    -   File paths, commands, code snippets, or proper technical names (library/framework/protocol names).
--   The command description and rules in this file remain in English, but the produced artifact
-    (`tasks.md`) is expected to be in Chinese.
+-   生成的 `tasks.md` 中所有面向用户的任务描述、部分标题和解释**必须**用中文编写，除非它们是：
+    -   文件路径、命令、代码片段或专有技术名称（库/框架/协议名称）。
+-   此命令描述和本文件中的规则保留英文，但生成的工件（`tasks.md`）预期为中文。
 
-## Task Generation Rules
+## 任务生成规则
 
-**CRITICAL**: Tasks MUST be organized by user story to enable independent implementation and testing.
+**关键**：任务**必须**按用户故事组织，以实现独立实施和测试。
 
-**Tests are OPTIONAL**: Only generate test tasks if explicitly requested in the feature specification or if user requests TDD approach.
+**测试是可选的**：仅在功能规范中明确要求或用户要求 TDD 方法时才生成测试任务。
 
-### Checklist Format (REQUIRED)
+### 检查清单格式 (必需)
 
-Every task MUST strictly follow this format:
+每个任务**必须**严格遵循此格式：
 
 ```text
-- [ ] [TaskID] [P?] [Story?] Description with file path
+- [ ] [TaskID] [P?] [Story?] 带有文件路径的描述
 ```
 
-**Format Components**:
+**格式组件**：
 
-1. **Checkbox**: ALWAYS start with `- [ ]` (markdown checkbox)
-2. **Task ID**: Sequential number (T001, T002, T003...) in execution order
-3. **[P] marker**: Include ONLY if task is parallelizable (different files, no dependencies on incomplete tasks)
-4. **[Story] label**: REQUIRED for user story phase tasks only
-    - Format: [US1], [US2], [US3], etc. (maps to user stories from spec.md)
-    - Setup phase: NO story label
-    - Foundational phase: NO story label
-    - User Story phases: MUST have story label
-    - Polish phase: NO story label
-5. **Description**: Clear action with exact file path
+1. **复选框**：始终以 `- [ ]`（markdown 复选框）开头
+2. **任务 ID**：按执行顺序的序列号（T001, T002, T003...）
+3. **[P] 标记**：仅当任务可并行化（不同的文件，不依赖于未完成的任务）时包含
+4. **[Story] 标签**：仅对于用户故事阶段任务**必需**
+    - 格式：[US1], [US2], [US3] 等（映射到 spec.md 中的用户故事）
+    - 设置阶段：无故事标签
+    - 基础阶段：无故事标签
+    - 用户故事阶段：必须有故事标签
+    - 完善阶段：无故事标签
+5. **描述**：带有确切文件路径的清晰动作
 
-**Examples**:
+**示例**：
 
--   ✅ CORRECT: `- [ ] T001 Create project structure per implementation plan`
--   ✅ CORRECT: `- [ ] T005 [P] Implement authentication middleware in src/middleware/auth.py`
--   ✅ CORRECT: `- [ ] T012 [P] [US1] Create User model in src/models/user.py`
--   ✅ CORRECT: `- [ ] T014 [US1] Implement UserService in src/services/user_service.py`
--   ❌ WRONG: `- [ ] Create User model` (missing ID and Story label)
--   ❌ WRONG: `T001 [US1] Create model` (missing checkbox)
--   ❌ WRONG: `- [ ] [US1] Create User model` (missing Task ID)
--   ❌ WRONG: `- [ ] T001 [US1] Create model` (missing file path)
+-   ✅ 正确：`- [ ] T001 根据实施计划创建项目结构`
+-   ✅ 正确：`- [ ] T005 [P] 在 src/middleware/auth.py 中实现认证中间件`
+-   ✅ 正确：`- [ ] T012 [P] [US1] 在 src/models/user.py 中创建用户模型`
+-   ✅ 正确：`- [ ] T014 [US1] 在 src/services/user_service.py 中实现用户服务`
+-   ❌ 错误：`- [ ] Create User model`（缺少 ID 和故事标签）
+-   ❌ 错误：`T001 [US1] Create model`（缺少复选框）
+-   ❌ 错误：`- [ ] [US1] Create User model`（缺少任务 ID）
+-   ❌ 错误：`- [ ] T001 [US1] Create model`（缺少文件路径）
 
-### Task Organization
+### 任务组织
 
-1. **From User Stories (spec.md)** - PRIMARY ORGANIZATION:
+1. **来自用户故事 (spec.md)** - 主要组织：
 
-    - Each user story (P1, P2, P3...) gets its own phase
-    - Map all related components to their story:
-        - Models needed for that story
-        - Services needed for that story
-        - Endpoints/UI needed for that story
-        - If tests requested: Tests specific to that story
-    - Mark story dependencies (most stories should be independent)
+    - 每个用户故事（P1, P2, P3...）都有自己的阶段
+    - 将所有相关组件映射到它们的故事：
+        - 该故事所需的模型
+        - 该故事所需的服务
+        - 该故事所需的端点/UI
+        - 如果要求测试：特定于该故事的测试
+    - 标记故事依赖关系（大多数故事应该是独立的）
 
-2. **From Contracts**:
+2. **来自契约**：
 
-    - Map each contract/endpoint → to the user story it serves
-    - If tests requested: Each contract → contract test task [P] before implementation in that story's phase
+    - 将每个契约/端点 → 映射到它服务的用户故事
+    - 如果要求测试：每个契约 → 在该故事阶段实施之前的契约测试任务 [P]
 
-3. **From Data Model**:
+3. **来自数据模型**：
 
-    - Map each entity to the user story(ies) that need it
-    - If entity serves multiple stories: Put in earliest story or Setup phase
-    - Relationships → service layer tasks in appropriate story phase
+    - 将每个实体映射到需要它的用户故事
+    - 如果实体服务于多个故事：放在最早的故事或设置阶段
+    - 关系 → 适当故事阶段的服务层任务
 
-4. **From Setup/Infrastructure**:
-    - Shared infrastructure → Setup phase (Phase 1)
-    - Foundational/blocking tasks → Foundational phase (Phase 2)
-    - Story-specific setup → within that story's phase
+4. **来自设置/基础设施**：
+    - 共享基础设施 → 设置阶段（阶段 1）
+    - 基础/阻塞任务 → 基础阶段（阶段 2）
+    - 故事特定的设置 → 在该故事的阶段内
 
-### Phase Structure
+### 阶段结构
 
--   **Phase 1**: Setup (project initialization)
--   **Phase 2**: Foundational (blocking prerequisites - MUST complete before user stories)
--   **Phase 3+**: User Stories in priority order (P1, P2, P3...)
-    -   Within each story: Tests (if requested) → Models → Services → Endpoints → Integration
-    -   Each phase should be a complete, independently testable increment
--   **Final Phase**: Polish & Cross-Cutting Concerns
+-   **阶段 1**：设置（项目初始化）
+-   **阶段 2**：基础（阻塞性先决条件 - **必须**在用户故事之前完成）
+-   **阶段 3+**：用户故事按优先级顺序（P1, P2, P3...）
+    -   在每个故事内：测试（如果要求）→ 模型 → 服务 → 端点 → 集成
+    -   每个阶段应该是一个完整的、可独立测试的增量
+-   **最后阶段**：完善和横切关注点
 
-### Atomicity requirements for tasks (REQUIRED)
+### 任务原子性要求 (必需)
 
--   Each task MUST be atomic enough that it can be completed in a single, well‑scoped edit session,
-    without relying on implicit context beyond what is referenced in the task itself.
--   A task MUST target at least one of the following granular “execution units”:
-    -   Code-level unit: concrete file path PLUS a class/function/constant/module name, or a clearly
-        described code block range.
-    -   Documentation-level unit: concrete file path PLUS a heading level (H2/H3) and section title.
-    -   Information-source unit: concrete URL/version/date PLUS a short list (≤ 5) of expected
-        conclusion bullet points.
--   Each task description MUST explicitly include three aspects (they can be inline, but MUST be clear):
-    -   **Input**: which files/symbols/decisions it depends on (paths or explicit references).
-    -   **Output**: what new or modified content is expected (paths + symbols/sections).
-    -   **Acceptance**: objective criteria to decide whether the task is complete (avoid vague wording
-        like “looks better” or “more clear”).
+-   每个任务**必须**足够原子化，以便可以在单个、范围明确的编辑会话中完成，而无需依赖任务本身引用之外的隐式上下文。
+-   任务**必须**针对以下至少一个粒度“执行单元”：
+    -   代码级单元：具体文件路径加上类/函数/常量/模块名称，或清晰描述的代码块范围。
+    -   文档级单元：具体文件路径加上标题级别 (H2/H3) 和部分标题。
+    -   信息源单元：具体 URL/版本/日期加上预期结论要点的简短列表（≤ 5）。
+-   每个任务描述**必须**明确包含三个方面（它们可以是内联的，但必须清晰）：
+    -   **输入**：它依赖于哪些文件/符号/决策（路径或显式引用）。
+    -   **输出**：预期什么新内容或修改内容（路径 + 符号/部分）。
+    -   **验收**：决定任务是否完成的客观标准（避免“看起来更好”或“更清晰”等模糊措辞）。
 
-### MCP usage requirements (REQUIRED)
+### MCP 使用要求 (必需)
 
--   When generating tasks, if there is any uncertainty about:
-    -   where exactly in the codebase to apply a change,
-    -   how to split work into atomic tasks,
-    -   or which best practices to follow,
-        the workflow MUST prefer using MCP services in this order:
-    1. `sequential-thinking`: to decompose and order tasks, and to identify dependencies and risks.
-    2. `serena`: to locate files/symbols/references and nearby implementation patterns in the repo.
-    3. `context7`: to consult external authoritative sources and capture links/versions in decisions.
--   If MCP services are unavailable, the generator MUST add an explicit “note task” explaining:
-    -   which MCP service was expected,
-    -   why it could not be used,
-    -   and which alternative information sources (files/commits/URLs) should be consulted instead.
+-   在生成任务时，如果对以下任何内容存在不确定性：
+    -   在代码库中的确切位置应用更改，
+    -   如何将工作拆分为原子任务，
+    -   或者遵循哪些最佳实践，
+        工作流**必须**按此顺序优先使用 MCP 服务：
+    1. `sequential-thinking`：分解和排序任务，并识别依赖关系和风险。
+    2. `serena`：定位仓库中的文件/符号/引用和附近的实现模式。
+    3. `context7`：查阅外部权威来源并在决策中捕获链接/版本。
+-   如果 MCP 服务不可用，生成器**必须**添加一个显式的“注释任务”来解释：
+    -   预期哪个 MCP 服务，
+    -   为什么无法使用，
+    -   以及应查阅哪些替代信息源（文件/提交/URL）。

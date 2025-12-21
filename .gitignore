@@ -241,9 +241,9 @@ services/workers/pyannote_audio_service/src/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/
-.kilocode/
-.gemini/
-specs/
+
+
+
 
 # Model checkpoints
 services/workers/indextts_service/checkpoints/"services/workers/indextts_service/checkpoints/" 

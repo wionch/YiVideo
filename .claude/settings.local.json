@@ -108,7 +108,9 @@
       "mcp__n8n-mcp__get_node_essentials",
       "Bash(grep:*)",
       "Bash(.specify/scripts/bash/check-prerequisites.sh --json --paths-only)",
-      "mcp__exa__get_code_context_exa"
+      "mcp__exa__get_code_context_exa",
+      "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/update-agent-context.sh:*)",
+      "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/check-prerequisites.sh:*)"
     ],
     "deny": [
       "Bash(docker build:*)"

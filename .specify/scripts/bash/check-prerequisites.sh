@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-# Consolidated prerequisite checking script
-# Optimized for flexible git workflows
+# 综合先决条件检查脚本
+# 针对灵活的 git 工作流进行了优化
 
 set -e
 
-# Parse command line arguments
+# 解析命令行参数
 JSON_MODE=false
 REQUIRE_TASKS=false
 INCLUDE_TASKS=false
@@ -17,29 +17,29 @@ for arg in "$@"; do
         --require-tasks) REQUIRE_TASKS=true ;;
         --include-tasks) INCLUDE_TASKS=true ;;
         --paths-only) PATHS_ONLY=true ;;
-        --help|-h)
-            echo "Usage: check-prerequisites.sh [OPTIONS]"
+        --help|-h) 
+            echo "用法: check-prerequisites.sh [选项]"
             exit 0
             ;;
-        *)
-            echo "ERROR: Unknown option '$arg'." >&2
+        *) 
+            echo "错误: 未知选项 '$arg'." >&2
             exit 1
             ;;
     esac
 done
 
-# Source common functions
+# 源公共函数
 SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-# Get feature paths
+# 获取功能路径
 eval $(get_feature_paths)
 
-# [OPTIMIZED] Validate branch but do not exit on mismatch
-# This allows working on 'main' while targeting a spec folder
+# [优化] 验证分支但不因不匹配而退出
+# 这允许在针对规范文件夹的同时在 'main' 上工作
 check_feature_branch "$CURRENT_BRANCH" "$HAS_GIT" || true
 
-# If paths-only mode, output paths and exit
+# 如果是仅路径模式，输出路径并退出
 if $PATHS_ONLY; then
     if $JSON_MODE; then
         printf '{"REPO_ROOT":"%s","BRANCH":"%s","FEATURE_NAME":"%s","FEATURE_DIR":"%s","FEATURE_SPEC":"%s","IMPL_PLAN":"%s","TASKS":"%s"}\n' \
@@ -56,29 +56,29 @@ if $PATHS_ONLY; then
     exit 0
 fi
 
-# Validate required directories and files
-# We rely on directory existence rather than git branch name
+# 验证所需的目录和文件
+# 我们依赖目录的存在而不是 git 分支名称
 if [[ ! -d "$FEATURE_DIR" ]]; then
-    echo "ERROR: Feature directory not found: $FEATURE_DIR" >&2
-    echo "Current context points to: $FEATURE_NAME" >&2
-    echo "Run /speckit.specify first to create the feature structure." >&2
+    echo "错误: 未找到功能目录: $FEATURE_DIR" >&2
+    echo "当前上下文指向: $FEATURE_NAME" >&2
+    echo "请先运行 /speckit.specify 以创建功能结构。" >&2
     exit 1
 fi
 
 if [[ ! -f "$IMPL_PLAN" ]]; then
-    echo "ERROR: plan.md not found in $FEATURE_DIR" >&2
-    echo "Run /speckit.plan first to create the implementation plan." >&2
+    echo "错误: 在 $FEATURE_DIR 中未找到 plan.md" >&2
+    echo "请先运行 /speckit.plan 以创建实施计划。" >&2
     exit 1
 fi
 
-# Check for tasks.md if required
+# 如果需要，检查 tasks.md
 if $REQUIRE_TASKS && [[ ! -f "$TASKS" ]]; then
-    echo "ERROR: tasks.md not found in $FEATURE_DIR" >&2
-    echo "Run /speckit.tasks first to create the task list." >&2
+    echo "错误: 在 $FEATURE_DIR 中未找到 tasks.md" >&2
+    echo "请先运行 /speckit.tasks 以创建任务列表。" >&2
     exit 1
 fi
 
-# Build list of available documents
+# 构建可用文档列表
 docs=()
 [[ -f "$RESEARCH" ]] && docs+=("research.md")
 [[ -f "$DATA_MODEL" ]] && docs+=("data-model.md")
@@ -90,7 +90,7 @@ if $INCLUDE_TASKS && [[ -f "$TASKS" ]]; then
     docs+=("tasks.md")
 fi
 
-# Output results
+# 输出结果
 if $JSON_MODE; then
     if [[ ${#docs[@]} -eq 0 ]]; then
         json_docs="[]"
