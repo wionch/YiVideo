@@ -30,6 +30,28 @@
 }
 ```
 
+### 复用与回调（task_id + task_name）
+- 系统会在执行前检查 Redis 是否存在相同 `task_id` 下该 `task_name` 的成功阶段且 `output` 非空：命中则跳过调度，直接使用本次请求的 `callback` 地址发送回调。
+- 命中成功复用时，同步响应将返回 `status=completed`，并附带 `reuse_info` 与缓存的结果（字段保持与执行成功一致，不修改原始输出）。
+- 若缓存阶段状态为 `pending`/`running`，响应返回 `status=pending` 且 `reuse_info.state=pending`，不会重复调度或立即回调；需等待已有执行完成后查看 `/v1/tasks/{task_id}/status` 或接收后续回调。
+- 缓存缺失或 `FAILED`/`output` 为空时按正常流程调度，`/v1/tasks/{task_id}/status` 始终返回该 task_id 累积的全部 `stages`。
+
+命中成功复用的同步响应示例：
+```json
+{
+  "task_id": "task-demo-001",
+  "status": "completed",
+  "message": "任务已命中缓存并完成回调",
+  "reuse_info": {
+    "reuse_hit": true,
+    "task_name": "ffmpeg.extract_audio",
+    "source": "redis",
+    "cached_at": "2025-12-17T12:00:03Z"
+  },
+  "result": { ...完整 WorkflowContext（含 stages[task_name]）... }
+}
+```
+
 ### 查询状态：GET /v1/tasks/{task_id}/status
 返回最新工作流状态（`WorkflowContext` 序列化）并附带运行态字段（`status`/`updated_at`/`minio_files`/`callback_status` 等）。示例基于 `ffmpeg.extract_audio` 成功：
 ```json

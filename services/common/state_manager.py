@@ -207,44 +207,64 @@ def _check_and_trigger_callback(context: WorkflowContext) -> None:
         if not stages:
             return
             
-        # 找到第一个阶段的状态
-        stage_status = None
-        stage_name = None
+        target_name = input_params.get('task_name')
+        target_stage = stages.get(target_name) if target_name else None
+        if not target_stage:
+            # 回落到第一个阶段
+            target_name, target_stage = next(iter(stages.items()))
+
+        # 统一读取阶段字段
+        stage_status = getattr(target_stage, "status", None) if target_stage else None
+        stage_output = getattr(target_stage, "output", None) if target_stage else None
+        stage_error = getattr(target_stage, "error", None) if target_stage else None
+        stage_duration = getattr(target_stage, "duration", None) if target_stage else None
+
+        if isinstance(target_stage, dict):
+            stage_status = target_stage.get("status")
+            stage_output = target_stage.get("output")
+            stage_error = target_stage.get("error")
+            stage_duration = target_stage.get("duration")
+
+        if not stage_status or stage_status.upper() not in ['SUCCESS', 'FAILED']:
+            return
+
+        task_id = context.workflow_id
+        callback_url = input_params.get('callback_url')
+
+        # 构建结果数据 - 修复JSON序列化问题
+        stages_dict = {}
         for name, stage in stages.items():
-            stage_status = stage.status
-            stage_name = name
-            break
-            
-        # 只有在任务最终完成（成功或失败）时才触发callback
-        if stage_status in ['SUCCESS', 'FAILED']:
-            task_id = context.workflow_id
-            callback_url = input_params.get('callback_url')
-            
-            # 构建结果数据 - 修复JSON序列化问题
-            # 将StageExecution对象转换为字典
-            stages_dict = {}
-            for name, stage in stages.items():
+            if hasattr(stage, "model_dump"):
                 stages_dict[name] = stage.model_dump()
-            
-            result = {
-                'workflow_id': task_id,
-                'create_at': context.create_at,
-                'input_params': input_params,
-                'shared_storage_path': context.shared_storage_path,
-                'stages': stages_dict,
-                'error': context.error
-            }
-            
-            # 检查是否有minio_files信息
-            minio_files = stage.output.get('minio_files') if stage.output else None
-            
-            # 发送callback
-            success = callback_manager.send_result(
-                task_id, result, minio_files, callback_url
-            )
-            
-            callback_status = "sent" if success else "failed"
-            logger.info(f"Callback发送完成: {task_id}, 状态: {callback_status}")
+            else:
+                stages_dict[name] = stage
+
+        result = {
+            'workflow_id': task_id,
+            'create_at': context.create_at,
+            'input_params': input_params,
+            'shared_storage_path': context.shared_storage_path,
+            'stages': stages_dict,
+            'error': context.error,
+            'reuse_info': getattr(context, "reuse_info", None) or context.__dict__.get("reuse_info")
+        }
+
+        # 补充阶段状态字段，便于回调端判断
+        result['stages'][target_name]["duration"] = stage_duration
+        result['stages'][target_name]["error"] = stage_error
+
+        # 检查是否有minio_files信息
+        minio_files = None
+        if isinstance(stage_output, dict):
+            minio_files = stage_output.get('minio_files')
+
+        # 发送callback
+        success = callback_manager.send_result(
+            task_id, result, minio_files, callback_url
+        )
+
+        callback_status = "sent" if success else "failed"
+        logger.info(f"Callback发送完成: {task_id}, 状态: {callback_status}")
             
     except Exception as e:
         logger.error(f"Callback触发失败: {e}", exc_info=True)
@@ -272,7 +292,7 @@ def create_workflow_state(context: WorkflowContext) -> None:
     redis_client.setex(key, WORKFLOW_TTL_SECONDS, state_json)
     logger.info(f"已为 workflow_id='{context.workflow_id}' 创建初始状态，TTL为 {WORKFLOW_TTL_DAYS} 天。")
 
-def update_workflow_state(context: WorkflowContext) -> None:
+def update_workflow_state(context: WorkflowContext, skip_side_effects: bool = False) -> None:
     """
     更新Redis中已存在的工作流状态记录。
 
@@ -286,11 +306,12 @@ def update_workflow_state(context: WorkflowContext) -> None:
         logger.error("Redis未连接，无法更新工作流状态。")
         return
 
-    # 自动上传文件到MinIO（尊重配置开关）
-    if _is_auto_upload_enabled():
-        _upload_files_to_minio(context)
-    else:
-        logger.info("auto_upload_to_minio 已关闭，跳过上传。")
+    # 自动上传文件到MinIO（尊重配置开关），可按需跳过副作用
+    if not skip_side_effects:
+        if _is_auto_upload_enabled():
+            _upload_files_to_minio(context)
+        else:
+            logger.info("auto_upload_to_minio 已关闭，跳过上传。")
 
     key = _get_key(context.workflow_id)
     state_json = context.model_dump_json()
@@ -299,7 +320,8 @@ def update_workflow_state(context: WorkflowContext) -> None:
     redis_client.set(key, state_json, keepttl=True)
     
     # 检查是否需要触发callback
-    _check_and_trigger_callback(context)
+    if not skip_side_effects:
+        _check_and_trigger_callback(context)
     logger.info(f"已更新 workflow_id='{context.workflow_id}' 的状态。")
 
 def get_workflow_state(workflow_id: str) -> Dict[str, Any]:

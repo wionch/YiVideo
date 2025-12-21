@@ -14,7 +14,9 @@ import uuid
 import shutil
 import tempfile
 import requests
+from copy import deepcopy
 from datetime import datetime
+from threading import Thread
 from typing import Dict, Any, List, Optional
 from celery import Celery, signature
 from celery.result import AsyncResult
@@ -45,7 +47,7 @@ class SingleTaskExecutor:
         logger.info("单任务执行器初始化完成")
     
     def execute_task(self, task_name: str, task_id: str, input_data: Dict[str, Any],
-                    callback_url: Optional[str] = None) -> str:
+                    callback_url: Optional[str] = None) -> Dict[str, Any]:
         """
         执行单个任务
         
@@ -68,8 +70,26 @@ class SingleTaskExecutor:
         # 创建任务上下文
         # 注意：移除了文件预处理步骤，文件路径将直接传递给 worker
         context = self._create_task_context(task_id, task_name, input_data, callback_url)
-        
-        # 创建任务状态记录
+
+        # 复用判定：已有成功阶段且输出非空，直接回调并返回 completed
+        reuse_result = self._check_reuse(task_id, task_name, callback_url)
+        if reuse_result["reuse_hit"]:
+            if reuse_result["state"] == "completed":
+                logger.info(f"命中复用，跳过调度: {task_name}, ID: {task_id}")
+                return {
+                    "mode": "reuse_completed",
+                    "reuse_info": reuse_result["reuse_info"],
+                    "context": reuse_result["context"]
+                }
+            if reuse_result["state"] == "pending":
+                logger.info(f"复用命中但阶段未完成: {task_name}, ID: {task_id}")
+                return {
+                    "mode": "reuse_pending",
+                    "reuse_info": reuse_result["reuse_info"],
+                    "context": reuse_result["context"]
+                }
+
+        # 创建任务状态记录（累积写入现有阶段）
         self._create_task_record(task_id, context, "pending")
         
         try:
@@ -84,7 +104,10 @@ class SingleTaskExecutor:
             self._update_task_status(task_id, "running", {"celery_task_id": celery_task_id})
             
             logger.info(f"单任务提交成功: {task_name}, ID: {task_id}, Celery Task ID: {celery_task_id}")
-            return celery_task_id
+            return {
+                "mode": "scheduled",
+                "celery_task_id": celery_task_id
+            }
             
         except Exception as e:
             # 更新任务状态为failed
@@ -224,12 +247,118 @@ class SingleTaskExecutor:
     def _create_task_record(self, task_id: str, context: Dict[str, Any], status: str):
         """创建任务记录"""
         try:
-            workflow_context = WorkflowContext(**context)
-            create_workflow_state(workflow_context)
-            logger.info(f"创建任务记录: {task_id}, 状态: {status}")
+            context["status"] = status
+            task_name = context.get("input_params", {}).get("task_name")
+            existing_state = self._get_task_state(task_id)
+
+            if existing_state and not existing_state.get("error"):
+                merged_state = deepcopy(existing_state)
+                merged_state["status"] = status
+                merged_state["workflow_id"] = task_id
+                merged_state["input_params"] = context["input_params"]
+                merged_state["shared_storage_path"] = merged_state.get("shared_storage_path") or context.get("shared_storage_path")
+                merged_state.setdefault("stages", {})
+                if task_name:
+                    merged_state["stages"][task_name] = context["stages"][task_name]
+                if not merged_state.get("create_at"):
+                    merged_state["create_at"] = context.get("create_at")
+
+                workflow_context = WorkflowContext(**merged_state)
+                update_workflow_state(workflow_context)
+                logger.info(f"合并更新任务记录: {task_id}, 状态: {status}")
+            else:
+                workflow_context = WorkflowContext(**context)
+                create_workflow_state(workflow_context)
+                logger.info(f"创建任务记录: {task_id}, 状态: {status}")
         except Exception as e:
             logger.error(f"创建任务记录失败: {task_id}, 错误: {e}")
             raise
+
+    def _check_reuse(self, task_id: str, task_name: str, callback_url: Optional[str]) -> Dict[str, Any]:
+        """检查是否存在可复用的成功阶段"""
+        try:
+            existing_state = self._get_task_state(task_id)
+            if not existing_state or existing_state.get("error"):
+                return {"reuse_hit": False, "state": "miss", "reuse_info": None, "context": None}
+
+            stages = existing_state.get("stages", {})
+            stage_data = stages.get(task_name)
+            if not stage_data:
+                return {"reuse_hit": False, "state": "miss", "reuse_info": None, "context": existing_state}
+
+            output = stage_data.get("output") or {}
+            status = (stage_data.get("status") or "").lower()
+            reuse_info = {
+                "reuse_hit": True,
+                "task_name": task_name,
+                "source": "redis",
+                "cached_at": stage_data.get("end_time") or datetime.now().isoformat()
+            }
+
+            if status == "success" and output:
+                # 使用最新的回调地址进行回调，避免依赖旧请求；避免重复上传副作用
+                state_copy = deepcopy(existing_state)
+                state_copy["workflow_id"] = task_id
+                state_copy["status"] = "completed"
+                state_copy["reuse_info"] = reuse_info
+                state_copy.setdefault("input_params", {})
+                if callback_url:
+                    state_copy["input_params"]["callback_url"] = callback_url
+                state_copy.setdefault("stages", {})
+                state_copy["stages"][task_name] = stage_data
+
+                workflow_context = WorkflowContext(**state_copy)
+                update_workflow_state(workflow_context, skip_side_effects=True)
+
+                minio_files = output.get("minio_files") if isinstance(output, dict) else None
+                if callback_url:
+                    self._send_reuse_callback_async(task_id, state_copy, minio_files, callback_url)
+
+                return {
+                    "reuse_hit": True,
+                    "state": "completed",
+                    "reuse_info": reuse_info,
+                    "context": state_copy
+                }
+
+            if status in ["pending", "running"]:
+                reuse_info["state"] = status
+                return {
+                    "reuse_hit": True,
+                    "state": status,
+                    "reuse_info": reuse_info,
+                    "context": existing_state
+                }
+
+            return {"reuse_hit": False, "state": "miss", "reuse_info": None, "context": existing_state}
+
+        except Exception as e:
+            logger.error(f"复用检查失败: {task_id}, 错误: {e}")
+            return {"reuse_hit": False, "state": "miss", "reuse_info": None, "context": None}
+    
+    def _send_reuse_callback_async(self, task_id: str, payload: Dict[str, Any], minio_files: Optional[List[Dict[str, str]]], callback_url: str) -> None:
+        """异步发送复用命中的callback，避免阻塞同步响应"""
+        def _worker():
+            cb_status = None
+            try:
+                if not self.callback_manager.validate_callback_url(callback_url):
+                    cb_status = "invalid_url"
+                else:
+                    success = self.callback_manager.send_result(task_id, payload, minio_files, callback_url)
+                    cb_status = "sent" if success else "failed"
+            except Exception as e:
+                logger.error(f"复用callback发送失败: {task_id}, 错误: {e}")
+                cb_status = "failed"
+            finally:
+                try:
+                    state = self._get_task_state(task_id) or {}
+                    state["callback_status"] = cb_status
+                    workflow_context = WorkflowContext(**state)
+                    update_workflow_state(workflow_context, skip_side_effects=True)
+                except Exception as e:
+                    logger.error(f"复用callback状态更新失败: {task_id}, 错误: {e}")
+
+        Thread(target=_worker, daemon=True).start()
     
     def _update_task_status(self, task_id: str, status: str, additional_data: Optional[Dict] = None):
         """更新任务状态"""

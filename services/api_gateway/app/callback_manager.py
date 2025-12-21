@@ -21,8 +21,8 @@ class CallbackManager:
     
     def __init__(self):
         """初始化Callback管理器"""
-        self.max_retries = 3
-        self.retry_delays = [1, 2, 4]  # 指数退避延迟（秒）
+        self.max_retries = 5
+        self.retry_delays = [5, 5, 5, 5]  # 固定 5 秒间隔
         self.timeout = 30  # 请求超时时间
         logger.info("Callback管理器初始化完成")
     

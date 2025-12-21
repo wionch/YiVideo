@@ -24,7 +24,7 @@ logger = get_logger('single_task_api')
 router = APIRouter(prefix="/v1/tasks", tags=["Single Task Operations"])
 
 
-@router.post("", response_model=SingleTaskResponse)
+@router.post("", response_model=None)
 async def create_single_task(request: SingleTaskRequest):
     """
     创建并执行单个任务
@@ -54,20 +54,43 @@ async def create_single_task(request: SingleTaskRequest):
         executor = get_single_task_executor()
         
         # 执行任务
-        celery_task_id = executor.execute_task(
+        execution_result = executor.execute_task(
             task_name=request.task_name,
             task_id=task_id,
             input_data=request.input_data,
             callback_url=request.callback
         )
-        
+
+        mode = execution_result.get("mode")
+        reuse_info = execution_result.get("reuse_info")
+        context = execution_result.get("context")
+
+        if mode == "reuse_completed":
+            logger.info(f"单任务复用命中并直接回调: {task_id}")
+            return {
+                "task_id": task_id,
+                "status": "completed",
+                "message": "任务已命中缓存并完成回调",
+                "reuse_info": reuse_info,
+                "result": context
+            }
+
+        if mode == "reuse_pending":
+            logger.info(f"单任务复用命中但未完成: {task_id}")
+            return {
+                "task_id": task_id,
+                "status": "pending",
+                "message": "任务已存在执行中，等待完成后回调",
+                "reuse_info": reuse_info
+            }
+
+        celery_task_id = execution_result.get("celery_task_id")
         logger.info(f"单任务创建成功: {task_id}, Celery Task ID: {celery_task_id}")
-        
-        return SingleTaskResponse(
-            task_id=task_id,
-            status="pending",
-            message="任务已创建并开始执行"
-        )
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": "任务已创建并开始执行"
+        }
         
     except ValidationError as e:
         logger.error(f"参数验证失败: {e}")
