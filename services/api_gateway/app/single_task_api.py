@@ -15,7 +15,13 @@ import uuid
 from services.common.logger import get_logger
 from .single_task_executor import get_single_task_executor
 from .single_task_models import (
-    SingleTaskRequest, SingleTaskResponse, TaskStatusResponse, ErrorResponse
+    SingleTaskRequest,
+    SingleTaskResponse,
+    TaskStatusResponse,
+    ErrorResponse,
+    TaskDeletionRequest,
+    TaskDeletionResult,
+    TaskDeletionStatus,
 )
 
 logger = get_logger('single_task_api')
@@ -181,6 +187,46 @@ async def get_task_result(task_id: str):
     except Exception as e:
         logger.error(f"获取任务结果失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取任务结果失败: {str(e)}")
+
+
+@router.post("/{task_id}/delete", response_model=TaskDeletionResult)
+async def delete_task(task_id: str, request: Optional[TaskDeletionRequest] = None):
+    """
+    删除任务数据（本地目录、Redis 状态、MinIO 对象）
+    """
+    logger.info(f"删除任务数据: {task_id}")
+    try:
+        if not task_id:
+            raise HTTPException(status_code=400, detail="task_id不能为空")
+
+        force = request.force if request else False
+
+        executor = get_single_task_executor()
+        state = executor.get_task_status(task_id)
+        if not state or state.get("status") == "not_found" or state.get("error"):
+            raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+
+        current_status = state.get("status")
+        if not force and current_status in ["pending", "running"]:
+            raise HTTPException(
+                status_code=400,
+                detail="任务执行中，安全模式拒绝删除。请稍后重试或使用 force=true 强制删除。",
+            )
+
+        result = executor.delete_task(task_id, force=force)
+
+        if result.status == TaskDeletionStatus.FAILED:
+            return result
+        return result
+    except HTTPException:
+        raise
+    except PermissionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"删除任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除任务失败: {str(e)}")
 
 
 @router.post("/{task_id}/retry")

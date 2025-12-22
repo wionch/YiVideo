@@ -1,0 +1,123 @@
+openapi: 3.0.0
+info:
+  title: Task Deletion API
+  version: "1.0.0"
+paths:
+  /v1/tasks/{task_id}/delete:
+    post:
+      summary: Delete task data (local directory, Redis state, MinIO objects)
+      description: |
+        Performs an idempotent deletion for a single task. Default safe mode rejects deletion when the task is running or queued; set `force=true` to allow forced deletion.
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique task identifier.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskDeletionRequest"
+            example:
+              force: false
+      responses:
+        "200":
+          description: Deletion completed (success or partial failure)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDeletionResult"
+              examples:
+                success:
+                  summary: All resources deleted
+                  value:
+                    status: success
+                    results:
+                      - resource: local_directory
+                        status: deleted
+                        message: "Removed /share/workflows/task-demo-001"
+                      - resource: redis
+                        status: deleted
+                        message: "Deleted redis keys for task-demo-001"
+                      - resource: minio
+                        status: deleted
+                        message: "Removed objects with prefix task-demo-001/"
+                    warnings: []
+                    timestamp: "2025-12-22T12:00:00Z"
+                partial_failed:
+                  summary: Partial failure with retry guidance
+                  value:
+                    status: partial_failed
+                    results:
+                      - resource: local_directory
+                        status: deleted
+                      - resource: redis
+                        status: failed
+                        message: "Redis unavailable"
+                        retriable: true
+                      - resource: minio
+                        status: skipped
+                        message: "Objects not found"
+                    warnings:
+                      - "Redis unreachable; retry recommended"
+                    timestamp: "2025-12-22T12:00:00Z"
+        "400":
+          description: Invalid request or task_id format
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden (no permission to delete)
+        "404":
+          description: Task not found or nothing to delete
+components:
+  schemas:
+    TaskDeletionRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+          default: false
+      additionalProperties: false
+    ResourceDeletionItem:
+      type: object
+      required:
+        - resource
+        - status
+      properties:
+        resource:
+          type: string
+          enum: [local_directory, redis, minio]
+        status:
+          type: string
+          enum: [deleted, skipped, failed]
+        message:
+          type: string
+        retriable:
+          type: boolean
+        details:
+          type: object
+      additionalProperties: false
+    TaskDeletionResult:
+      type: object
+      required:
+        - status
+        - results
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [success, partial_failed, failed]
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceDeletionItem"
+        warnings:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time

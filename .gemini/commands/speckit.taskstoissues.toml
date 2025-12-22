@@ -1,8 +1,8 @@
-description = "根据可用的设计工件，将现有任务转换为可操作的、按依赖顺序排列的 GitHub issues。"
+description = "根据可用的设计产物，将现有任务转换为可操作的、按依赖顺序排列的 GitHub issues。"
 
 prompt = '''
 ---
-description: 根据可用的设计工件，将现有任务转换为可操作的、按依赖顺序排列的 GitHub issues。
+description: 根据可用的设计产物，将现有任务转换为可操作的、按依赖顺序排列的 GitHub issues。
 tools: ['github/github-mcp-server/issue_write']
 ---
 

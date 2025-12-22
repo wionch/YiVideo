@@ -15,6 +15,7 @@ handoffs:
 ```text
 $ARGUMENTS
 
+
 ```
 
 在继续之前（如果不为空），你**必须**考虑用户输入。
@@ -44,6 +45,7 @@ $ARGUMENTS
 ```bash
 git fetch --all --prune 2>/dev/null || true
 
+
 ```
 
 b. 跨所有来源查找最高的功能编号（以避免冲突）：
@@ -71,92 +73,129 @@ d. 使用计算出的编号和短名称运行脚本 `.specify/scripts/bash/creat
 -   每个功能你只能运行此脚本一次。
 -   JSON 输出将包含 `BRANCH_NAME`（充当功能 ID）和 `SPEC_FILE` 路径。
 -   此脚本初始化目录结构，但**不**自动强制 git 分支。
--   对于像 "I'm Groot" 这样的参数中的单引号，请使用转义语法：例如 'I'''m Groot'（或者如果可能的话使用双引号："I'm Groot"）。
+-   对于像 "I'm Groot" 这样的参数中的单引号，请使用转义语法：例如 'I'\''m Groot'（或者如果可能的话使用双引号："I'm Groot"）。
 
 3. 加载 `.specify/templates/spec-template.md` 以了解所需部分。
-4. 遵循此执行流程：
-5. 从输入中解析用户描述
-   如果为空：错误“未提供功能描述”
-6. 从描述中提取关键概念
-   识别：参与者、动作、数据、约束
-7. 对于不清楚的方面：
+4. **遵循此执行流程（结合 MCP 工具增强质量）**：
 
--   根据上下文和行业标准进行明智的猜测
+#### MCP 使用要求
+
+在生成规范内容时，应积极利用集成工具以提高准确性和深度：
+
+-   **默认调用顺序（本命令内）**：
+-   1. `sequential-thinking`（推演业务流程/边缘情况）→ 2) `context7`（外部基准/合规约束）→ 3) `serena`（术语一致性/查重，严格受限）。
+-   如果任一 MCP 工具不可用：必须在规范的“假设/成功标准/备注”相关位置增加一条显式注释，说明缺失工具、原因、替代信息源与潜在风险（不得静默跳过）。
+
+-   **Sequential Thinking**：
+-   用于**解析用户描述**和**构建用户场景**。
+-   必须用于分解复杂的业务逻辑，识别隐藏的边缘情况（Edge Cases），并确保逻辑链条的完整性。
+
+-   **Context7**：
+-   用于**设定成功标准**和**填补默认值**。
+-   当需要设定性能指标或合规性约束时，搜索行业标准（如“2024 年电商结账平均时间”或“GDPR 数据保留要求”），确保指标客观、现实且有据可依。
+-   若引用了外部基准：必须在规范相应小节附近附上“来源记录”（URL + 版本/发布日期 + 摘要 1 句），以便后续审阅。
+
+-   **Serena (严格受限模式)**：
+-   仅用于**检查业务术语一致性**（例如：现有规范称其为 "Client" 还是 "Customer"？）或**查重**。
+-   **严禁**使用 Serena 提取任何实现细节（包括但不限于：src/ 代码、API 结构、技术栈、数据库/表结构、框架约定）。规范必须保持技术中立。
+
+#### 执行步骤
+
+5. **从输入中解析用户描述**
+
+-   如果为空：错误“未提供功能描述”
+-   使用 `sequential-thinking` 梳理隐含的业务流程。
+
+6. **从描述中提取关键概念**
+
+-   识别：参与者、动作、数据、约束
+
+7. **对于不清楚的方面**：
+
+-   根据上下文和行业标准（可使用 `context7` 验证）进行明智的猜测
 -   仅在以下情况下标记为 [NEEDS CLARIFICATION: specific question]：
--   该选择显着影响功能范围或用户体验
+-   该选择显著影响功能范围或用户体验
 -   存在多种合理的解释且含义不同
 -   不存在合理的默认值
 
 -   **限制：总共最多 3 个 [NEEDS CLARIFICATION] 标记**
 -   按影响优先排序澄清：范围 > 安全/隐私 > 用户体验 > 技术细节
 
-4. 填充用户场景和测试部分
-   如果没有清晰的用户流程：错误“无法确定用户场景”
-5. 生成功能需求
-   每个需求必须是可测试的
-   对未指定的细节使用合理的默认值（在假设部分记录假设）
-6. 定义成功标准
-   创建可衡量的、与技术无关的结果
-   包括定量指标（时间、性能、数量）和定性指标（用户满意度、任务完成情况）
-   每个标准必须可以在没有实现细节的情况下进行验证
-7. 识别关键实体（如果涉及数据）
-8. 返回：成功（规范已准备好进行规划）
+8. **填充用户场景和测试部分**
 
-9. 使用模板结构将规范写入 SPEC_FILE，用源自功能描述（参数）的具体细节替换占位符，同时保留部分顺序和标题。
-10. **规范质量验证**：编写初始规范后，根据质量标准对其进行验证：
-    a. **创建规范质量检查清单**：使用检查清单模板结构在 `FEATURE_DIR/checklists/requirements.md` 生成检查清单文件，包含以下验证项目：
+-   如果没有清晰的用户流程：错误“无法确定用户场景”
+-   确保覆盖正常路径（Happy Path）和异常路径。
+
+9. **生成功能需求**
+
+-   每个需求必须是可测试的
+-   对未指定的细节使用合理的默认值（在假设部分记录假设）
+
+10. **定义成功标准**
+
+-   创建可衡量的、与技术无关的结果
+-   包括定量指标（时间、性能、数量）和定性指标（用户满意度、任务完成情况）
+-   每个标准必须可以在没有实现细节的情况下进行验证
+-   _提示：使用 `context7` 查找同类产品的基准数据作为参考。_
+
+11. **识别关键实体（如果涉及数据）**
+12. **返回**：成功（规范已准备好进行规划）
+13. 使用模板结构将规范写入 SPEC_FILE，用源自功能描述（参数）的具体细节替换占位符，同时保留部分顺序和标题。
+14. **规范质量验证**：编写初始规范后，根据质量标准对其进行验证：
+    a. **创建规范质量核查清单**：使用核查清单模板结构在 `FEATURE_DIR/checklists/requirements.md` 生成核查清单文件，包含以下验证项目：
 
 ```markdown
-# Specification Quality Checklist: [FEATURE NAME]
+# 规范质量核查清单：[功能名称]
 
-**Purpose**: Validate specification completeness and quality before proceeding to planning
-**Created**: [DATE]
-**Feature**: [Link to spec.md]
+**目的**：在进入规划阶段之前，验证规范的完整性和质量
+**创建日期**：[日期]
+**功能**：[链接至 spec.md]
 
-## Content Quality
+## 内容质量
 
--   [ ] No implementation details (languages, frameworks, APIs)
--   [ ] Focused on user value and business needs
--   [ ] Written for non-technical stakeholders
--   [ ] All mandatory sections completed
+-   [ ] 无实现细节（不包含具体语言、框架、API）
+-   [ ] 专注于用户价值和业务需求
+-   [ ] 面向非技术利益相关者（Stakeholders）撰写
+-   [ ] 所有必填章节均已完成
+-   [ ] 业务术语与现有系统一致（经确认）
 
-## Requirement Completeness
+## 需求完整性
 
--   [ ] No [NEEDS CLARIFICATION] markers remain
--   [ ] Requirements are testable and unambiguous
--   [ ] Success criteria are measurable
--   [ ] Success criteria are technology-agnostic (no implementation details)
--   [ ] All acceptance scenarios are defined
--   [ ] Edge cases are identified
--   [ ] Scope is clearly bounded
--   [ ] Dependencies and assumptions identified
+-   [ ] 不再遗留 [NEEDS CLARIFICATION]（需要澄清）标记
+-   [ ] 需求具备可测试性且清晰无歧义
+-   [ ] 成功标准是可衡量的且基于现实基准
+-   [ ] 成功标准与技术无关（不包含实现细节）
+-   [ ] 所有验收场景均已定义（包括边缘情况）
+-   [ ] 范围界定清晰
+-   [ ] 依赖关系和假设已识别
 
-## Feature Readiness
+## 功能就绪度
 
--   [ ] All functional requirements have clear acceptance criteria
--   [ ] User scenarios cover primary flows
--   [ ] Feature meets measurable outcomes defined in Success Criteria
--   [ ] No implementation details leak into specification
+-   [ ] 所有功能需求都有明确的验收标准
+-   [ ] 用户场景覆盖了主要流程
+-   [ ] 功能符合“成功标准”中定义的可衡量结果
+-   [ ] 规范中未泄露任何实现细节
 
-## Notes
+## 备注
 
--   Items marked incomplete require spec updates before `/speckit.clarify` or `/speckit.plan`
+-   标记为未完成的项目需要在执行 `/speckit.clarify` 或 `/speckit.plan` 之前更新规范
 ```
 
-b. **运行验证检查**：对照每个检查清单项目审查规范：
+b. **运行验证检查**：对照每个核查清单项目审查规范：
 
 -   对于每个项目，确定是通过还是失败
 -   记录发现的具体问题（引用相关规范部分）
+-   _提示：使用 `sequential-thinking` 模拟用户通过规范描述的流程，以发现逻辑漏洞。_
 
 c. **处理验证结果**：
 
--   **如果所有项目通过**：标记检查清单完成并继续执行第 6 步
+-   **如果所有项目通过**：标记核查清单完成并继续执行第 6 步
 -   **如果项目失败（排除 [NEEDS CLARIFICATION]）**：
 
 1. 列出失败的项目和具体问题
 2. 更新规范以解决每个问题
 3. 重新运行验证直到所有项目通过（最多 3 次迭代）
-4. 如果 3 次迭代后仍然失败，在检查清单备注中记录剩余问题并警告用户
+4. 如果 3 次迭代后仍然失败，在核查清单备注中记录剩余问题并警告用户
 
 -   **如果 [NEEDS CLARIFICATION] 标记仍然存在**：
 
@@ -165,22 +204,22 @@ c. **处理验证结果**：
 3. 对于每个需要的澄清（最多 3 个），按此格式向用户展示选项：
 
 ```markdown
-## Question [N]: [Topic]
+## 问题 [N]：[主题]
 
-**Context**: [Quote relevant spec section]
+**上下文**：[引用相关的规范章节]
 
-**What we need to know**: [Specific question from NEEDS CLARIFICATION marker]
+**我们需要了解的内容**：[来自“需要澄清”标记的具体问题]
 
-**Suggested Answers**:
+**建议答案**：
 
-| Option | Answer                    | Implications                          |
-| ------ | ------------------------- | ------------------------------------- |
-| A      | [First suggested answer]  | [What this means for the feature]     |
-| B      | [Second suggested answer] | [What this means for the feature]     |
-| C      | [Third suggested answer]  | [What this means for the feature]     |
-| Custom | Provide your own answer   | [Explain how to provide custom input] |
+| 选项   | 答案             | 影响                     |
+| ------ | ---------------- | ------------------------ |
+| A      | [第一个建议答案] | [这对功能意味着什么]     |
+| B      | [第二个建议答案] | [这对功能意味着什么]     |
+| C      | [第三个建议答案] | [这对功能意味着什么]     |
+| 自定义 | 提供您自己的答案 | [解释如何提供自定义输入] |
 
-**Your choice**: _[Wait for user response]_
+**您的选择**：_[等待用户回复]_
 ```
 
 4. **关键 - 表格格式化**：确保 markdown 表格格式正确：
@@ -196,7 +235,7 @@ c. **处理验证结果**：
 8. 通过用用户选择的或提供的答案替换每个 [NEEDS CLARIFICATION] 标记来更新规范
 9. 所有澄清解决后重新运行验证
 
-d. **更新检查清单**：每次验证迭代后，使用当前通过/失败状态更新检查清单文件 7. 报告完成，包括功能名称、规范文件路径、检查清单结果以及下一阶段（`/speckit.clarify` 或 `/speckit.plan`）的准备情况。
+d. **更新核查清单**：每次验证迭代后，使用当前通过/失败状态更新核查清单文件 7. 报告完成，包括功能名称、规范文件路径、核查清单结果以及下一阶段（`/speckit.clarify` 或 `/speckit.plan`）的准备情况。
 
 **注意：** 该脚本初始化规范目录结构，但不强制 git 分支检出，允许灵活的工作流。
 
@@ -207,7 +246,7 @@ d. **更新检查清单**：每次验证迭代后，使用当前通过/失败状
 -   关注用户需要**什么**以及**为什么**。
 -   避免**如何**实现（没有技术栈、API、代码结构）。
 -   为业务利益相关者编写，而不是开发人员。
--   不要创建任何嵌入在规范中的检查清单。那将是一个单独的命令。
+-   不要创建任何嵌入在规范中的核查清单。那将是一个单独的命令。
 
 ### 部分要求
 
@@ -219,16 +258,16 @@ d. **更新检查清单**：每次验证迭代后，使用当前通过/失败状
 
 当根据用户提示创建此规范时：
 
-1. **做出明智的猜测**：使用上下文、行业标准和常见模式来填补空白
+1. **做出明智的猜测**：使用上下文、行业标准（通过 `context7` 检索）和常见模式来填补空白
 2. **记录假设**：在假设部分记录合理的默认值
 3. **限制澄清**：最多 3 个 [NEEDS CLARIFICATION] 标记 - 仅用于以下关键决策：
 
--   显着影响功能范围或用户体验
+-   显著影响功能范围或用户体验
 -   有多种合理的解释且含义不同
 -   缺乏任何合理的默认值
 
 4. **优先排序澄清**：范围 > 安全/隐私 > 用户体验 > 技术细节
-5. **像测试员一样思考**：每个模糊的需求都应该无法通过“可测试和无歧义”的检查清单项目
+5. **像测试员一样思考**：使用 `sequential-thinking` 验证每个模糊的需求，确保其无法通过“可测试和无歧义”的核查清单项目
 6. **需要澄清的常见领域**（仅当不存在合理的默认值时）：
 
 -   功能范围和边界（包含/排除特定用例）

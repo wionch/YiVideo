@@ -107,6 +107,49 @@ class FileListResponse(BaseModel):
     total_count: int = Field(..., description="文件总数")
 
 
+class DeletionResource(str, Enum):
+    """删除资源类型"""
+    LOCAL_DIRECTORY = "local_directory"
+    REDIS = "redis"
+    MINIO = "minio"
+
+
+class DeletionResourceStatus(str, Enum):
+    """删除资源处理结果"""
+    DELETED = "deleted"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class TaskDeletionRequest(BaseModel):
+    """任务删除请求"""
+    force: bool = Field(False, description="是否强制删除运行/排队中的任务")
+
+
+class ResourceDeletionItem(BaseModel):
+    """分资源删除结果"""
+    resource: DeletionResource = Field(..., description="资源类型")
+    status: DeletionResourceStatus = Field(..., description="处理结果")
+    message: Optional[str] = Field(None, description="补充说明")
+    retriable: Optional[bool] = Field(None, description="是否建议重试")
+    details: Optional[Dict[str, Any]] = Field(None, description="附加信息，如删除对象列表或错误代码")
+
+
+class TaskDeletionStatus(str, Enum):
+    """任务删除整体状态"""
+    SUCCESS = "success"
+    PARTIAL_FAILED = "partial_failed"
+    FAILED = "failed"
+
+
+class TaskDeletionResult(BaseModel):
+    """任务删除结果"""
+    status: TaskDeletionStatus = Field(..., description="整体删除结果状态")
+    results: List[ResourceDeletionItem] = Field(..., description="分资源删除结果列表")
+    warnings: Optional[List[str]] = Field(None, description="非阻断警告或重试提示")
+    timestamp: str = Field(..., description="处理完成时间戳，ISO 8601")
+
+
 # 错误响应模型
 class ErrorResponse(BaseModel):
     """错误响应模型"""

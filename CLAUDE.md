@@ -1,191 +1,191 @@
 <!-- OPENSPEC:START -->
-# OpenSpec Instructions
+# OpenSpec 指令
 
-These instructions are for AI assistants working in this project.
+这些指令是为在本项目中工作的 AI 助手准备的。
 
-Always open `@/openspec/AGENTS.md` when the request:
-- Mentions planning or proposals (words like proposal, spec, change, plan)
-- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
-- Sounds ambiguous and you need the authoritative spec before coding
+当请求涉及以下内容时，请始终打开 `@/openspec/AGENTS.md`：
+- 提及规划或提案（如 proposal、spec、change、plan 等词汇）
+- 引入新功能、破坏性变更、架构转变或重要的性能/安全工作
+- 听起来含糊不清，需要在编码前获得权威规范
 
-Use `@/openspec/AGENTS.md` to learn:
-- How to create and apply change proposals
-- Spec format and conventions
-- Project structure and guidelines
+使用 `@/openspec/AGENTS.md` 来学习：
+- 如何创建和应用变更提案
+- 规范格式和约定
+- 项目结构和指南
 
-Keep this managed block so 'openspec update' can refresh the instructions.
+保留此托管块，以便 'openspec update' 可以刷新指令。
 
 <!-- OPENSPEC:END -->
 
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+此文件为 Claude Code (claude.ai/code) 在此代码库中工作时提供指导。
 
-## Project Overview
+## 项目概述
 
-**YiVideo** is an AI-powered video processing platform built on a dynamic workflow engine with microservices architecture. The core philosophy is "configuration over coding" - AI processing pipelines are dynamically constructed through workflow configuration files.
+**YiVideo** 是一个基于动态工作流引擎和微服务架构构建的 AI 驱动视频处理平台。核心理念是"配置优于编码"——AI 处理流水线通过工作流配置文件动态构建。
 
-### Core Features
+### 核心功能
 
--   **Automatic Speech Recognition (ASR)**: High-precision speech-to-text powered by Faster-Whisper
--   **Speaker Diarization**: Multi-speaker identification and separation using Pyannote-audio
--   **Optical Character Recognition (OCR)**: Subtitle region detection and text recognition via PaddleOCR
--   **Audio Processing**: Voice/background separation and audio enhancement
--   **Subtitle Processing**: AI-driven subtitle generation, proofreading, optimization, and merging
--   **Text-to-Speech (TTS)**: Multi-engine high-quality voice synthesis
--   **Video Processing**: FFmpeg-based video editing and format conversion
+-   **自动语音识别 (ASR)**：由 Faster-Whisper 驱动的高精度语音转文本
+-   **说话人分离**：使用 Pyannote-audio 进行多说话人识别和分离
+-   **光学字符识别 (OCR)**：通过 PaddleOCR 进行字幕区域检测和文本识别
+-   **音频处理**：人声/背景音分离和音频增强
+-   **字幕处理**：AI 驱动的字幕生成、校对、优化和合并
+-   **文本转语音 (TTS)**：多引擎高质量语音合成
+-   **视频处理**：基于 FFmpeg 的视频编辑和格式转换
 
-## Project Structure
+## 项目结构
 
 ```
 yivideo/
-├── services/                    # Microservices directory
-│   ├── api_gateway/             # API Gateway - unified entry point
-│   ├── common/                  # Common modules (state management, utilities)
-│   └── workers/                 # Celery Worker services
-│       ├── faster_whisper_service/   # ASR speech recognition
-│       ├── pyannote_audio_service/   # Speaker diarization
-│       ├── paddleocr_service/        # OCR text recognition
-│       ├── audio_separator_service/  # Audio separation
-│       ├── ffmpeg_service/           # Video processing
-│       ├── indextts_service/         # TTS voice synthesis
+├── services/                    # 微服务目录
+│   ├── api_gateway/             # API 网关 - 统一入口点
+│   ├── common/                  # 公共模块（状态管理、工具）
+│   └── workers/                 # Celery 工作器服务
+│       ├── faster_whisper_service/   # ASR 语音识别
+│       ├── pyannote_audio_service/   # 说话人分离
+│       ├── paddleocr_service/        # OCR 文本识别
+│       ├── audio_separator_service/  # 音频分离
+│       ├── ffmpeg_service/           # 视频处理
+│       ├── indextts_service/         # TTS 语音合成
 │       ├── gptsovits_service/        # GPT-SoVITS TTS
-│       ├── inpainting_service/       # Video inpainting
-│       └── wservice/                 # Generic workflow service
-├── config/                      # Configuration files
-├── config.yml                   # Main configuration file
-├── docker-compose.yml           # Container orchestration
-├── docs/                        # Project documentation
-├── openspec/                    # OpenSpec specifications
-├── tests/                       # Test directory
-├── share/                       # Inter-service shared storage
-└── scripts/                     # Utility scripts
+│       ├── inpainting_service/       # 视频修复
+│       └── wservice/                 # 通用工作流服务
+├── config/                      # 配置文件
+├── config.yml                   # 主配置文件
+├── docker-compose.yml           # 容器编排
+├── docs/                        # 项目文档
+├── openspec/                    # OpenSpec 规范
+├── tests/                       # 测试目录
+├── share/                       # 服务间共享存储
+└── scripts/                     # 实用脚本
 ```
 
-## Tech Stack
+## 技术栈
 
-### Backend Framework & Services
+### 后端框架与服务
 
--   **Python 3.8+**: Primary programming language
--   **FastAPI**: HTTP service framework for API Gateway
--   **Celery 5.x**: Distributed task queue and workflow engine
--   **Redis**: Multi-purpose data store (DB0: Broker, DB1: Backend, DB2: Locks, DB3: State)
+-   **Python 3.8+**：主要编程语言
+-   **FastAPI**：API 网关的 HTTP 服务框架
+-   **Celery 5.x**：分布式任务队列和工作流引擎
+-   **Redis**：多用途数据存储（DB0：代理，DB1：后端，DB2：锁，DB3：状态）
 
-### AI/ML Models & Libraries
+### AI/ML 模型与库
 
--   **Faster-Whisper**: GPU-accelerated speech recognition
--   **Pyannote-audio**: Speaker diarization and voice-print recognition
--   **PaddleOCR**: Chinese-English OCR recognition
--   **Audio-Separator**: Audio source separation
--   **IndexTTS / GPT-SoVITS**: TTS engines
+-   **Faster-Whisper**：GPU 加速语音识别
+-   **Pyannote-audio**：说话人分离和声纹识别
+-   **PaddleOCR**：中英文 OCR 识别
+-   **Audio-Separator**：音频源分离
+-   **IndexTTS / GPT-SoVITS**：TTS 引擎
 
-### Infrastructure
+### 基础设施
 
--   **Docker & Docker Compose**: Containerized deployment
--   **FFmpeg**: Audio/video processing
--   **MinIO**: Object storage service
--   **CUDA 11.x+**: GPU acceleration support
+-   **Docker & Docker Compose**：容器化部署
+-   **FFmpeg**：音视频处理
+-   **MinIO**：对象存储服务
+-   **CUDA 11.x+**：GPU 加速支持
 
-## Development Commands
+## 开发命令
 
 ```
-# Container management
-docker-compose up -d              # Start all services
-docker-compose ps                 # Check service status
-docker-compose logs -f <service>  # View logs
+# 容器管理
+docker-compose up -d              # 启动所有服务
+docker-compose ps                 # 检查服务状态
+docker-compose logs -f <service>  # 查看日志
 
-# Testing
-pytest tests/unit/                # Unit tests
-pytest tests/integration/         # Integration tests
-pytest -m gpu                     # GPU tests
+# 测试
+pytest tests/unit/                # 单元测试
+pytest tests/integration/         # 集成测试
+pytest -m gpu                     # GPU 测试
 ```
 
-## Global Architectural Constraints
+## 全局架构约束
 
-**CRITICAL**: You must strictly adhere to these principles for all code generation, refactoring, and design tasks.
+**关键**：所有代码生成、重构和设计任务都必须严格遵循这些原则。
 
-### 1. KISS (Keep It Simple, Stupid)
+### 1. KISS（保持简单，愚蠢）
 
--   **Rule**: Prioritize the simplest implementation path. Avoid over-engineering.
--   **Trigger**: If the code requires complex comments to explain or uses design patterns (like Strategy/Factory) for simple logic.
--   **Directive**: "If a simple `if/else` works, do not use a complex pattern." Keep the cognitive load low.
+-   **规则**：优先选择最简单的实现路径。避免过度工程化。
+-   **触发**：如果代码需要复杂的注释来解释，或者对简单逻辑使用设计模式（如策略/工厂模式）。
+-   **指令**："如果简单的 `if/else` 就能工作，就不要使用复杂的模式。"保持认知负荷低。
 
-### 2. DRY (Don't Repeat Yourself)
+### 2. DRY（不要重复自己）
 
--   **Rule**: Every piece of logic must have a single, unambiguous representation.
--   **Trigger**: Repeated logic blocks, copy-pasted code, or duplicate magic values.
--   **Directive**: Extract repeated logic into utility functions or constants. _Note: Avoid premature abstraction that hurts readability._
+-   **规则**：每段逻辑都必须有单一、明确的表示。
+-   **触发**：重复的逻辑块、复制的代码或重复的魔法值。
+-   **指令**：将重复的逻辑提取到实用函数或常量中。_注意：避免损害可读性的过早抽象。_
 
-### 3. YAGNI (You Ain't Gonna Need It)
+### 3. YAGNI（你不会需要它）
 
--   **Rule**: Implement ONLY what is explicitly requested in the current Spec/Task.
--   **Trigger**: Adding "hooks" for future features, unused configuration options, or extra interface methods.
--   **Directive**: "Write only the code needed to pass the current tests." Do not speculate on future requirements.
+-   **规则**：仅实现当前规范/任务中明确要求的内容。
+-   **触发**：为未来功能添加"钩子"、未使用的配置选项或额外的接口方法。
+-   **指令**："只编写通过当前测试所需的代码。"不要推测未来的需求。
 
-### 4. SOLID (Object-Oriented Design)
+### 4. SOLID（面向对象设计）
 
--   **SRP**: Single Responsibility Principle (One reason to change).
--   **OCP**: Open/Closed Principle (Extend without modifying).
--   **LSP**: Liskov Substitution Principle (Subtypes must be substitutable).
--   **ISP**: Interface Segregation Principle (No forced dependencies on unused methods).
--   **DIP**: Dependency Inversion Principle (Depend on abstractions).
+-   **SRP**：单一职责原则（只有一个变更理由）。
+-   **OCP**：开闭原则（扩展而不修改）。
+-   **LSP**：里氏替换原则（子类型必须可替换）。
+-   **ISP**：接口隔离原则（不强制依赖未使用的方法）。
+-   **DIP**：依赖反转原则（依赖抽象）。
 
-### Violation Check (Self-Correction)
+### 违规检查（自我纠正）
 
-Before outputting any code, perform this internal check:
+在输出任何代码之前，执行此内部检查：
 
-1. Is this the simplest way? (KISS)
-2. Did I add unused features? (YAGNI)
-3. Is logic duplicated? (DRY)
-4. Does it violate SOLID?
+1. 这是最简单的方式吗？（KISS）
+2. 我添加了未使用的功能吗？（YAGNI）
+3. 逻辑重复了吗？（DRY）
+4. 违反 SOLID 了吗？
 
-**Fix any violations immediately before responding.**
+**在回应之前立即修复任何违规。**
 
-## Code Style Guidelines
+## 代码风格指南
 
--   **Formatting**: Black (line-length=100), Flake8
--   **Naming**: Classes `PascalCase`, Functions `snake_case`, Constants `UPPER_SNAKE_CASE`
--   **Documentation**: Google-style docstrings, Python 3.8+ type annotations
--   **Comment Language**: Maintain consistency with existing codebase
+-   **格式化**：Black（行长度=100），Flake8
+-   **命名**：类使用 `PascalCase`，函数使用 `snake_case`，常量使用 `UPPER_SNAKE_CASE`
+-   **文档**：Google 风格的文档字符串，Python 3.8+ 类型注解
+-   **注释语言**：与现有代码库保持一致
 
-## Architecture Patterns
+## 架构模式
 
--   **API Gateway Pattern**: Unified entry point for request routing and workflow orchestration
--   **Worker Pattern**: Each AI capability isolated as independent Celery Worker
--   **Shared Storage**: `/share` directory for inter-service file exchange
--   **State Management**: Centralized StateManager
+-   **API 网关模式**：请求路由和工作流编排的统一入口点
+-   **工作器模式**：每个 AI 功能隔离为独立的 Celery 工作器
+-   **共享存储**：用于服务间文件交换的 `/share` 目录
+-   **状态管理**：集中化的 StateManager
 
-## Git Workflow
+## Git 工作流
 
-Use Conventional Commits: `<type>(<scope>): <subject>`
+使用约定式提交：`<类型>(<范围>): <主题>`
 
-**Types**: `feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf`
+**类型**：`feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf`
 
-**Important**: Do not automatically execute git commit/push operations without explicit user request.
+**重要**：未经用户明确请求，不要自动执行 git 提交/推送操作。
 
-## Assistant Behavior Guidelines
+## 助手行为指南
 
-### Response Language Requirements
+### 响应语言要求
 
-**CRITICAL**: All responses to user interactions MUST be in Chinese (Simplified Chinese), regardless of the language used in this documentation or the codebase.
+**关键**：所有用户交互的响应必须使用中文（简体中文），无论本文档或代码库使用何种语言。
 
--   **Internal Processing**: You may reason and process information in English for optimal performance
--   **Output Format**: Always present the final response to the user in Chinese
--   **Code Comments**: Use Chinese (Simplified) for all code comments, docstrings, and inline documentation to maintain consistency with the project's localization standards
--   **Exception**: Only respond in English if the user explicitly requests English responses
+-   **内部处理**：您可以使用英语进行推理和处理信息以获得最佳性能
+-   **输出格式**：始终以中文向用户呈现最终响应
+-   **代码注释**：所有代码注释、文档字符串和内联文档使用中文（简体中文），以保持与项目本地化标准的一致性
+-   **例外**：只有当用户明确要求英语响应时才使用英语
 
-### MCP Services Integration
+### MCP 服务集成
 
-1. **Always Default to MCP Services**: When faced with complex reasoning, context-heavy tasks, or ambiguous requirements, your first action should be to engage the relevant MCP services.
+1. **始终默认使用 MCP 服务**：当面临复杂推理、上下文繁重的任务或模糊要求时，您的第一个动作应该是调用相关的 MCP 服务。
 
-2. **Service Selection**:
+2. **服务选择**：
 
-    - Use **serena** for general context management and conversation continuity
-    - Use **context7** for deep context processing and analysis
-    - Use **sequentialthinking** for structured problem-solving and step-by-step reasoning
+   - 使用 **serena** 进行一般上下文管理和对话连续性
+   - 使用 **context7** 进行深度上下文处理和分析
+   - 使用 **sequentialthinking** 进行结构化问题解决和逐步推理
 
-3. **Transparent Usage**: When using MCP services, briefly indicate in your response which services were engaged and how they informed your approach.
+3. **透明使用**：使用 MCP 服务时，请在响应中简要说明调用了哪些服务以及它们如何指导您的方法。
 
-4. **Fallback Protocol**: If MCP services are unavailable for technical reasons, explicitly state this limitation and proceed with native reasoning while noting the reduced capability.
+4. **回退协议**：如果 MCP 服务因技术原因不可用，请明确说明此限制，并继续使用原生推理，同时注意能力降低。
 
-**CRITICAL REMINDER**: These MCP services are core project infrastructure. Not using them when appropriate violates project conventions and reduces effectiveness.
+**关键提醒**：这些 MCP 服务是核心项目基础设施。在适当的时候不使用它们违反了项目约定并降低了效果。

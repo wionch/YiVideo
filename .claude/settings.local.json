@@ -110,7 +110,10 @@
       "Bash(.specify/scripts/bash/check-prerequisites.sh --json --paths-only)",
       "mcp__exa__get_code_context_exa",
       "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/update-agent-context.sh:*)",
-      "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/check-prerequisites.sh:*)"
+      "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/check-prerequisites.sh:*)",
+      "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/create-new-feature.sh:*)",
+      "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/setup-plan.sh:*)",
+      "Bash(ls:*)"
     ],
     "deny": [
       "Bash(docker build:*)"

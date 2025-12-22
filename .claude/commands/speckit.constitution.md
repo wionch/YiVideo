@@ -1,113 +1,110 @@
 ---
-description: Create or update the project constitution from interactive or provided principle inputs, ensuring all dependent templates stay in sync.
+description: 根据交互式或提供的原则输入创建或更新项目宪章，确保所有依赖模板保持同步。
 handoffs:
-    - label: Build Specification
+    - label: 构建规范
       agent: speckit.specify
-      prompt: Implement the feature specification based on the updated constitution. I want to build...
+      prompt: 根据更新后的宪章实施功能规范。我想构建...
 ---
 
-## User Input
+## 用户输入
 
 ```text
 $ARGUMENTS
 ```
 
-You **MUST** consider the user input before proceeding (if not empty).
+在继续之前（如果不为空），你**必须**考虑用户输入。
 
-## Outline
+## 概要
 
-You are updating the project constitution at `.specify/memory/constitution.md`. This file is a TEMPLATE containing placeholder tokens in square brackets (e.g. `[PROJECT_NAME]`, `[PRINCIPLE_1_NAME]`). Your job is to (a) collect/derive concrete values, (b) fill the template precisely, and (c) propagate any amendments across dependent artifacts.
+你正在更新 `.specify/memory/constitution.md` 处的项目宪章。此文件是一个包含方括号占位符标记（例如 `[PROJECT_NAME]`, `[PRINCIPLE_1_NAME]`）的模板。你的工作是 (a) 收集/推导具体值，(b) 精确填充模板，以及 (c) 跨依赖文档传播任何修订。
 
-The updated constitution MUST explicitly:
+更新后的宪章**必须**明确：
 
--   Include development principles KISS, DRY, SOLID, and YAGNI as named principles, with:
-    -   clear MUST/SHOULD style constraints,
-    -   concrete examples of compliant and non-compliant patterns,
-    -   and guidance on how these principles are checked during planning and implementation.
--   Define a “MCP-first” rule for task execution:
-    -   MCP services such as `serena`, `sequential-thinking`, and `context7` SHOULD be used
-        before making non-trivial code or design changes, when available.
--   Define that task planning MUST be atomic:
-    -   Tasks are scoped to concrete code blocks, documentation sections, or information sources,
-        with objective acceptance criteria.
--   Specify that user-facing artifacts (specs, plans, task lists, runtime messages) are expected
-    to be written in Chinese, while repository configuration and command semantics may remain
-    in English.
+-   包括开发原则 KISS, DRY, SOLID, 和 YAGNI 作为命名原则，并带有：
+    -   清晰的 MUST/SHOULD 风格约束，
+    -   合规和不合规模式的具体示例，
+    -   以及在规划和实施期间如何检查这些原则的指导。
+-   定义任务执行的“MCP 优先”规则：
+    -   在可用时，MCP 服务（如 `serena`, `sequential-thinking`, 和 `context7`）**必须**在进行非平凡的代码或设计更改之前使用。
+    -   默认顺序：`sequential-thinking → serena → context7`（允许个别命令为保持抽象层级而更严格，例如规范阶段限制 serena 仅做术语一致性）。
+    -   若 MCP 不可用：必须记录缺失项、原因、替代来源与对结论/实现置信度的影响（不得静默跳过）。
+-   定义任务规划**必须**是原子的：
+    -   任务范围限定为具体的代码块、文档部分或信息源，具有客观的验收标准。
+-   指定面向用户的文档（规范、计划、任务列表、运行时消息）预期使用中文编写，而仓库配置和命令语义可以保留英文。
 
-Follow this execution flow:
+遵循此执行流程：
 
-1. Load the existing constitution template at `.specify/memory/constitution.md`.
+1. 加载 `.specify/memory/constitution.md` 处的现有宪章模板。
 
-    - Identify every placeholder token of the form `[ALL_CAPS_IDENTIFIER]`.
-      **IMPORTANT**: The user might require less or more principles than the ones used in the template. If a number is specified, respect that - follow the general template. You will update the doc accordingly.
+    - 识别形式为 `[ALL_CAPS_IDENTIFIER]` 的每个占位符标记。
+      **重要**：用户可能需要的原则比模板中使用的原则更少或更多。如果指定了数量，请遵守 - 遵循通用模板。你将相应地更新文档。
 
-2. Collect/derive values for placeholders:
+2. 收集/推导占位符的值：
 
-    - If user input (conversation) supplies a value, use it.
-    - Otherwise infer from existing repo context (README, docs, prior constitution versions if embedded).
-    - For governance dates: `RATIFICATION_DATE` is the original adoption date (if unknown ask or mark TODO), `LAST_AMENDED_DATE` is today if changes are made, otherwise keep previous.
-    - `CONSTITUTION_VERSION` must increment according to semantic versioning rules:
-        - MAJOR: Backward incompatible governance/principle removals or redefinitions.
-        - MINOR: New principle/section added or materially expanded guidance.
-        - PATCH: Clarifications, wording, typo fixes, non-semantic refinements.
-    - If version bump type ambiguous, propose reasoning before finalizing.
+    - 如果用户输入（对话）提供了值，请使用它。
+    - 否则从现有仓库上下文（README, docs, 嵌入的先前宪章版本）推断。
+    - 对于治理日期：`RATIFICATION_DATE` 是最初采用日期（如果未知，询问或标记 TODO），`LAST_AMENDED_DATE` 如果进行了更改则是今天，否则保留以前的。
+    - `CONSTITUTION_VERSION` 必须根据语义版本控制规则递增：
+        - MAJOR：向后不兼容的治理/原则移除或重新定义。
+        - MINOR：添加新原则/部分或实质性扩展指导。
+        - PATCH：澄清、措辞、拼写修复、非语义细化。
+    - 如果版本升级类型模棱两可，请在定稿前提出理由。
 
-3. Draft the updated constitution content:
+3. 起草更新后的宪章内容：
 
-    - Replace every placeholder with concrete text (no bracketed tokens left except intentionally retained template slots that the project has chosen not to define yet—explicitly justify any left).
-    - Preserve heading hierarchy and comments can be removed once replaced unless they still add clarifying guidance.
-    - Ensure each Principle section: succinct name line, paragraph (or bullet list) capturing non‑negotiable rules, explicit rationale if not obvious.
-    - Ensure the KISS/DRY/SOLID/YAGNI principles, MCP-first usage, atomic task planning, and
-      language expectations are reflected as concrete, testable rules.
-    - Ensure Governance section lists amendment procedure, versioning policy, and compliance review expectations.
+    - 将每个占位符替换为具体文本（除了项目选择尚未定义并有意保留的模板槽位——明确证明任何保留的理由）。
+    - 保留标题层次结构，注释一旦替换即可删除，除非它们仍然增加澄清指导。
+    - 确保每个原则部分：简洁的名称行，捕获不可协商规则的段落（或项目符号列表），如果不明显则明确理由。
+    - 确保 KISS/DRY/SOLID/YAGNI 原则、MCP 优先使用、原子任务规划和语言期望反映为具体的、可测试的规则。
+    - 确保治理部分列出修订程序、版本控制策略和合规审查期望。
 
-4. Consistency propagation checklist (convert prior checklist into active validations):
+4. 一致性传播核查清单（将先前的核查清单转换为活动验证）：
 
-    - Read `.specify/templates/plan-template.md` and ensure any "Constitution Check" or rules align with updated principles.
-    - Read `.specify/templates/spec-template.md` for scope/requirements alignment—update if constitution adds/removes mandatory sections or constraints.
-    - Read `.specify/templates/tasks-template.md` and ensure task categorization reflects:
-        - KISS/DRY/SOLID/YAGNI-driven design expectations,
-        - atomic task structure and acceptance criteria,
-        - and MCP-first task execution where applicable.
-    - Read each command file in `.specify/templates/commands/*.md` (including this one) to verify no outdated references (agent-specific names like CLAUDE only) remain when generic guidance is required.
-    - Read any runtime guidance docs (e.g., `README.md`, `docs/quickstart.md`, or agent-specific guidance files if present). Update references to:
-        - the development principles (KISS/DRY/SOLID/YAGNI),
-        - MCP-first usage,
-        - atomic task planning,
-        - and the expectation that user-facing text is written in Chinese.
+    - 阅读 `.specify/templates/plan-template.md` 并确保任何“宪章检查”或规则与更新后的原则一致。
+    - 阅读 `.specify/templates/spec-template.md` 以进行范围/需求对齐——如果宪章添加/删除了强制部分或约束，请更新。
+    - 阅读 `.specify/templates/tasks-template.md` 并确保任务分类反映：
+        - KISS/DRY/SOLID/YAGNI 驱动的设计期望，
+        - 原子任务结构和验收标准，
+        - 以及适用的 MCP 优先任务执行。
+    - 阅读 `.specify/templates/commands/*.md` 中的每个命令文件（包括此文件），以验证当需要通用指导时没有保留过时的引用（如仅 CLAUDE 的代理特定名称）。
+    - 阅读任何运行时指导文档（例如，`README.md`, `docs/quickstart.md`, 或代理特定指导文件（如果存在））。更新对以下内容的引用：
+        - 开发原则 (KISS/DRY/SOLID/YAGNI)，
+        - MCP 优先使用，
+        - 原子任务规划，
+        - 以及面向用户的文本是用中文编写的期望。
 
-5. Produce a Sync Impact Report (prepend as an HTML comment at top of the constitution file after update):
+5. 生成同步影响报告（作为 HTML 注释前置在更新后的宪章文件顶部）：
 
-    - Version change: old → new
-    - List of modified principles (old title → new title if renamed)
-    - Added sections
-    - Removed sections
-    - Templates requiring updates (✅ updated / ⚠ pending) with file paths
-    - Follow-up TODOs if any placeholders intentionally deferred.
+    - 版本变更：旧 → 新
+    - 修改后的原则列表（如果重命名，则旧标题 → 新标题）
+    - 添加的部分
+    - 移除的部分
+    - 需要更新的模板（✅ 已更新 / ⚠ 待定）及文件路径
+    - 如果有意推迟任何占位符，请跟进 TODO。
 
-6. Validation before final output:
+6. 最终输出前的验证：
 
-    - No remaining unexplained bracket tokens.
-    - Version line matches report.
-    - Dates ISO format YYYY-MM-DD.
-    - Principles are declarative, testable, and free of vague language ("should" → replace with MUST/SHOULD rationale where appropriate).
+    - 没有剩余的未解释括号标记。
+    - 版本行匹配报告。
+    - 日期 ISO 格式 YYYY-MM-DD。
+    - 原则是声明性的、可测试的，并且没有模糊语言（"should" → 在适当的地方替换为 MUST/SHOULD 理由）。
 
-7. Write the completed constitution back to `.specify/memory/constitution.md` (overwrite).
+7. 将完成的宪章写回 `.specify/memory/constitution.md`（覆盖）。
 
-8. Output a final summary to the user with:
-    - New version and bump rationale.
-    - Any files flagged for manual follow-up.
-    - Suggested commit message (e.g., `docs: amend constitution to vX.Y.Z (principle additions + governance update)`).
+8. 向用户输出最终摘要：
+    - 新版本和升级理由。
+    - 任何标记为手动跟进的文件。
+    - 建议的提交消息（例如，`docs: amend constitution to vX.Y.Z (principle additions + governance update)`）。
 
-Formatting & Style Requirements:
+格式与风格要求：
 
--   Use Markdown headings exactly as in the template (do not demote/promote levels).
--   Wrap long rationale lines to keep readability (<100 chars ideally) but do not hard enforce with awkward breaks.
--   Keep a single blank line between sections.
--   Avoid trailing whitespace.
+-   严格按照模板使用 Markdown 标题（不要降级/升级级别）。
+-   换行长理由行以保持可读性（理想情况下 <100 字符），但不要用笨拙的断行强制执行。
+-   在部分之间保留一个空行。
+-   避免尾随空格。
 
-If the user supplies partial updates (e.g., only one principle revision), still perform validation and version decision steps.
+如果用户提供部分更新（例如，仅修订一个原则），仍执行验证和版本决策步骤。
 
-If critical info missing (e.g., ratification date truly unknown), insert `TODO(<FIELD_NAME>): explanation` and include in the Sync Impact Report under deferred items.
+如果关键信息缺失（例如，批准日期确实未知），插入 `TODO(<FIELD_NAME>): explanation` 并包含在同步影响报告的推迟项下。
 
-Do not create a new template; always operate on the existing `.specify/memory/constitution.md` file.
+不要创建新模板；始终在现有的 `.specify/memory/constitution.md` 文件上操作。

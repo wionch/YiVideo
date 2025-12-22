@@ -24,10 +24,26 @@ from celery.result import AsyncResult
 from services.common.logger import get_logger
 from services.common.celery_config import BROKER_URL, BACKEND_URL
 from services.common.context import WorkflowContext
-from services.common.state_manager import create_workflow_state, get_workflow_state, update_workflow_state
+from services.common.state_manager import (
+    create_workflow_state,
+    get_workflow_state,
+    update_workflow_state,
+)
+from services.common import state_manager
 
 from .minio_service import get_minio_service
 from .callback_manager import get_callback_manager
+from .single_task_models import (
+    SingleTaskRequest,
+    SingleTaskResponse,
+    TaskStatusResponse,
+    ErrorResponse,
+    TaskDeletionResult,
+    ResourceDeletionItem,
+    DeletionResource,
+    DeletionResourceStatus,
+    TaskDeletionStatus,
+)
 
 logger = get_logger('single_task_executor')
 
@@ -434,6 +450,190 @@ class SingleTaskExecutor:
     def _get_task_state(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取任务状态"""
         return get_workflow_state(task_id)
+
+    def _build_deletion_plan(self, task_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """构建删除计划，包括本地目录、Redis键和MinIO前缀"""
+        shared_dir = state.get("shared_storage_path") or f"/share/workflows/{task_id}"
+        redis_key = f"workflow_state:{task_id}"
+        minio_prefix = f"{task_id}/"
+        return {
+            "local_dir": shared_dir,
+            "redis_key": redis_key,
+            "minio_prefix": minio_prefix,
+        }
+
+    def _delete_local_directory(self, directory_path: str) -> ResourceDeletionItem:
+        """删除本地目录（幂等，限制在/share下）"""
+        try:
+            if not directory_path:
+                return ResourceDeletionItem(
+                    resource=DeletionResource.LOCAL_DIRECTORY,
+                    status=DeletionResourceStatus.SKIPPED,
+                    message="目录路径缺失",
+                )
+            if ".." in directory_path or not directory_path.startswith("/share/"):
+                return ResourceDeletionItem(
+                    resource=DeletionResource.LOCAL_DIRECTORY,
+                    status=DeletionResourceStatus.FAILED,
+                    message="无效目录路径，已拒绝越权访问",
+                    retriable=False,
+                )
+            if not os.path.exists(directory_path):
+                return ResourceDeletionItem(
+                    resource=DeletionResource.LOCAL_DIRECTORY,
+                    status=DeletionResourceStatus.SKIPPED,
+                    message="目录不存在，已幂等",
+                )
+            if not os.path.isdir(directory_path):
+                return ResourceDeletionItem(
+                    resource=DeletionResource.LOCAL_DIRECTORY,
+                    status=DeletionResourceStatus.FAILED,
+                    message="目标路径不是目录",
+                    retriable=False,
+                )
+            shutil.rmtree(directory_path)
+            return ResourceDeletionItem(
+                resource=DeletionResource.LOCAL_DIRECTORY,
+                status=DeletionResourceStatus.DELETED,
+                message=f"目录已删除: {directory_path}",
+            )
+        except PermissionError as e:
+            logger.error(f"删除目录权限不足: {directory_path}, 错误: {e}")
+            return ResourceDeletionItem(
+                resource=DeletionResource.LOCAL_DIRECTORY,
+                status=DeletionResourceStatus.FAILED,
+                message="删除目录权限不足",
+                retriable=False,
+            )
+        except Exception as e:
+            logger.error(f"删除目录失败: {directory_path}, 错误: {e}", exc_info=True)
+            return ResourceDeletionItem(
+                resource=DeletionResource.LOCAL_DIRECTORY,
+                status=DeletionResourceStatus.FAILED,
+                message=f"删除目录失败: {e}",
+                retriable=True,
+            )
+
+    def _delete_redis_state(self, redis_key: str) -> ResourceDeletionItem:
+        """删除Redis状态键（幂等）"""
+        client = getattr(state_manager, "redis_client", None)
+        if client is None:
+            return ResourceDeletionItem(
+                resource=DeletionResource.REDIS,
+                status=DeletionResourceStatus.FAILED,
+                message="Redis 未连接，无法删除状态",
+                retriable=True,
+            )
+        try:
+            removed = client.delete(redis_key)
+            if removed and removed > 0:
+                return ResourceDeletionItem(
+                    resource=DeletionResource.REDIS,
+                    status=DeletionResourceStatus.DELETED,
+                    message=f"Redis 键已删除: {redis_key}",
+                )
+            return ResourceDeletionItem(
+                resource=DeletionResource.REDIS,
+                status=DeletionResourceStatus.SKIPPED,
+                message="Redis 键不存在，已幂等",
+            )
+        except Exception as e:
+            logger.error(f"删除 Redis 键失败: {redis_key}, 错误: {e}", exc_info=True)
+            return ResourceDeletionItem(
+                resource=DeletionResource.REDIS,
+                status=DeletionResourceStatus.FAILED,
+                message=f"删除 Redis 键失败: {e}",
+                retriable=True,
+            )
+
+    def _delete_minio_objects(self, prefix: str) -> ResourceDeletionItem:
+        """删除 MinIO 前缀下的对象（幂等）"""
+        try:
+            objects = list(
+                self.minio_service.client.list_objects(
+                    self.minio_service.default_bucket,
+                    prefix=prefix,
+                    recursive=True,
+                )
+            )
+            if not objects:
+                return ResourceDeletionItem(
+                    resource=DeletionResource.MINIO,
+                    status=DeletionResourceStatus.SKIPPED,
+                    message="未找到匹配对象",
+                )
+            deleted = 0
+            for obj in objects:
+                try:
+                    self.minio_service.client.remove_object(
+                        self.minio_service.default_bucket, obj.object_name
+                    )
+                    deleted += 1
+                except Exception as e:
+                    logger.warning(f"删除对象失败: {obj.object_name}, 错误: {e}", exc_info=True)
+            if deleted == len(objects):
+                return ResourceDeletionItem(
+                    resource=DeletionResource.MINIO,
+                    status=DeletionResourceStatus.DELETED,
+                    message=f"已删除 {deleted} 个对象，前缀 {prefix}",
+                )
+            return ResourceDeletionItem(
+                resource=DeletionResource.MINIO,
+                status=DeletionResourceStatus.FAILED,
+                message=f"部分对象删除失败，成功 {deleted}/{len(objects)}",
+                retriable=True,
+                details={"deleted": deleted, "total": len(objects)},
+            )
+        except Exception as e:
+            logger.error(f"删除 MinIO 对象失败: 前缀 {prefix}, 错误: {e}", exc_info=True)
+            return ResourceDeletionItem(
+                resource=DeletionResource.MINIO,
+                status=DeletionResourceStatus.FAILED,
+                message=f"删除 MinIO 对象失败: {e}",
+                retriable=True,
+            )
+
+    def delete_task(self, task_id: str, force: bool = False) -> TaskDeletionResult:
+        """
+        删除任务数据：本地目录、Redis 状态、MinIO 对象
+        """
+        state = self._get_task_state(task_id)
+        if not state or state.get("status") == "not_found" or state.get("error"):
+            raise ValueError(f"任务不存在: {task_id}")
+
+        current_status = state.get("status")
+        if not force and current_status in ("pending", "running"):
+            raise PermissionError("任务执行中，未开启 force，不允许删除")
+
+        plan = self._build_deletion_plan(task_id, state)
+        results: List[ResourceDeletionItem] = []
+
+        results.append(self._delete_local_directory(plan["local_dir"]))
+        results.append(self._delete_redis_state(plan["redis_key"]))
+        results.append(self._delete_minio_objects(plan["minio_prefix"]))
+
+        has_failed = any(item.status == DeletionResourceStatus.FAILED for item in results)
+        has_deleted = any(item.status == DeletionResourceStatus.DELETED for item in results)
+
+        if has_failed and has_deleted:
+            overall_status = TaskDeletionStatus.PARTIAL_FAILED
+        elif has_failed:
+            overall_status = TaskDeletionStatus.FAILED
+        else:
+            overall_status = TaskDeletionStatus.SUCCESS
+
+        warnings = [
+            item.message
+            for item in results
+            if (item.retriable or item.status == DeletionResourceStatus.SKIPPED) and item.message
+        ]
+
+        return TaskDeletionResult(
+            status=overall_status,
+            results=results,
+            warnings=warnings or None,
+            timestamp=datetime.utcnow().isoformat() + "Z",
+        )
     
     def _build_task_signature(self, task_name: str, context: Dict[str, Any]):
         """构建Celery任务签名"""

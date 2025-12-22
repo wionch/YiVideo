@@ -5,9 +5,9 @@ handoffs:
       agent: speckit.tasks
       prompt: 将计划分解为任务
       send: true
-    - label: 创建检查清单
+    - label: 创建核查清单
       agent: speckit.checklist
-      prompt: 为以下领域创建检查清单...
+      prompt: 为以下领域创建核查清单...
 ---
 
 ## 语言期望
@@ -29,11 +29,11 @@ $ARGUMENTS
 
 ## 概要
 
-1. **设置**：从仓库根目录运行 `.specify/scripts/bash/setup-plan.sh --json` 并解析 JSON 以获取 FEATURE_SPEC, IMPL_PLAN, SPECS_DIR, 和 FEATURE_NAME。对于像 "I'm Groot" 这样的参数中的单引号，请使用转义语法：例如 'I'''m Groot'（或者如果可能的话使用双引号："I'm Groot"）。
+1. **设置**：从仓库根目录运行 `.specify/scripts/bash/setup-plan.sh --json` 并解析 JSON 以获取 FEATURE_SPEC, IMPL_PLAN, SPECS_DIR, 和 FEATURE_NAME。对于像 "I'm Groot" 这样的参数中的单引号，请使用转义语法：例如 'I'\''m Groot'（或者如果可能的话使用双引号："I'm Groot"）。
 2. **加载上下文**：读取 FEATURE_SPEC 和 `.specify/memory/constitution.md`。加载 IMPL_PLAN 模板（已复制）。
 3. **执行计划工作流**：遵循 IMPL_PLAN 模板中的结构以：
 
--   填写技术上下文（将未知数标记为 "NEEDS CLARIFICATION"）
+-   填写技术上下文（将未知项标记为 "NEEDS CLARIFICATION"）
 -   填写来自宪章的宪章检查部分
 -   评估门控（如果违规未被证明合理则报错）
 -   阶段 0：生成 research.md（解决所有 NEEDS CLARIFICATION）
@@ -56,16 +56,19 @@ $ARGUMENTS
 -   将每个 NEEDS CLARIFICATION 分解为具体的研究问题。
 -   按影响、风险和依赖关系进行优先排序。
 
-2. 使用 `context7` 来：
+2. 使用 `serena` 来：
 
--   查阅官方或权威来源。
--   在 `research.md` 中捕获 URL/版本/日期和关键结论。
+-   只用于对齐仓库结构/既有惯例（目录布局、命名风格、已有模块边界）。
+-   禁止用它“发明”不存在的架构约束；若仓库信号不足，必须标记为 NEEDS CLARIFICATION 或在 research.md 中记录假设。
 
-3. 使用 `serena` 来：
+3. 使用 `context7` 来：
 
--   协调计划的架构与当前的仓库结构和惯例。
+-   查阅官方或权威来源（标准/规范/官方文档/成熟最佳实践）。
+-   在 `research.md` 中捕获 URL + 版本/日期 + 关键结论（可被审阅复核）。
 
-1. **从上方的技术上下文中提取未知数**：
+4. 如果任一 MCP 工具不可用：必须在 `research.md` 顶部增加“工具不可用说明”（缺失项、原因、替代来源、对决策置信度影响）。
+
+1. **从上方的技术上下文中提取未知项**：
 
 -   对于每个 NEEDS CLARIFICATION → 研究任务
 -   对于每个依赖项 → 最佳实践任务
@@ -74,7 +77,7 @@ $ARGUMENTS
 2. **生成并分派研究代理**：
 
 ```text
-对于技术上下文中的每个未知数：
+对于技术上下文中的每个未知项：
   任务: "Research {unknown} for {feature context}"
 对于每个技术选择：
   任务: "Find best practices for {tech} in {domain}"
