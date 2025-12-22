@@ -90,7 +90,15 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
                 continue
             
             # 检查输出中的文件路径字段 - 优先处理转录结果文件
-            file_keys = ['segments_file', 'transcribe_data_file', 'audio_path', 'video_path', 'subtitle_path', 'output_path']
+            file_keys = [
+                'segments_file',
+                'transcribe_data_file',
+                'audio_path',
+                'video_path',
+                'subtitle_path',
+                'output_path',
+                'merged_segments_file'
+            ]
             directory_keys = ['keyframe_dir', 'cropped_images_path']  # 需要特殊处理的目录字段
             
             # 处理普通文件字段
@@ -239,19 +247,26 @@ def _check_and_trigger_callback(context: WorkflowContext) -> None:
             else:
                 stages_dict[name] = stage
 
+        filtered_stages = stages_dict
+        if target_name in stages_dict:
+            filtered_stages = {target_name: stages_dict[target_name]}
+        else:
+            filtered_stages = {}
+
         result = {
             'workflow_id': task_id,
             'create_at': context.create_at,
             'input_params': input_params,
             'shared_storage_path': context.shared_storage_path,
-            'stages': stages_dict,
+            'stages': filtered_stages,
             'error': context.error,
             'reuse_info': getattr(context, "reuse_info", None) or context.__dict__.get("reuse_info")
         }
 
         # 补充阶段状态字段，便于回调端判断
-        result['stages'][target_name]["duration"] = stage_duration
-        result['stages'][target_name]["error"] = stage_error
+        if target_name in result['stages']:
+            result['stages'][target_name]["duration"] = stage_duration
+            result['stages'][target_name]["error"] = stage_error
 
         # 检查是否有minio_files信息
         minio_files = None

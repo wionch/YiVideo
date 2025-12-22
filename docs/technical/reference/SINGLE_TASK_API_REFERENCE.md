@@ -1202,8 +1202,8 @@ WorkflowContext 示例：
 | `diarization_file` | string | 否 | 智能源选择 | 未提供则回退 `pyannote_audio.diarize_speakers` 输出 |
 
 #### wservice.merge_with_word_timestamps
-复用判定：`stages.wservice.merge_with_word_timestamps.status=SUCCESS` 且 `output.word_level_subtitle_path`（或包含 words 的片段列表）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
-功能概述（wservice.merge_with_word_timestamps）：合并转录与说话人信息并保留词级时间戳，输出包含 words 的片段列表和统计，便于精细对齐。
+复用判定：`stages.wservice.merge_with_word_timestamps.status=SUCCESS` 且 `output.merged_segments_file` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
+功能概述（wservice.merge_with_word_timestamps）：合并转录与说话人信息并保留词级时间戳，将合并结果写入 JSON 文件并返回文件路径，便于精细对齐与下游处理。
 请求体：
 ```json
 {
@@ -1238,16 +1238,8 @@ WorkflowContext 示例：
         "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
       },
       "output": {
-        "merged_segments": [
-          {"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00", "text": "示例文本", "words": []}
-        ],
-        "input_summary": {
-          "transcript_segments_count": 148,
-          "speaker_segments_count": 148,
-          "merged_segments_count": 148,
-          "data_source": "faster_whisper.transcribe_audio",
-          "word_timestamps_required": true
-        }
+        "merged_segments_file": "/share/workflows/task-demo-001/transcribe_data_word_timestamps_merged.json",
+        "merged_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_word_timestamps_merged.json"
       },
       "error": null,
       "duration": 5.5

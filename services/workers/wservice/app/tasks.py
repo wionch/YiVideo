@@ -19,6 +19,7 @@ from services.common import state_manager
 from services.common.context import StageExecution, WorkflowContext
 from services.common.config_loader import CONFIG
 from services.common.file_service import get_file_service
+from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
 
 # 导入 wservice 自己的 Celery app (将在下一步创建)
 from .celery_app import celery_app
@@ -393,6 +394,21 @@ def load_speaker_data_from_file(diarization_file: str) -> dict:
             return {}
         with open(diarization_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        if isinstance(data, dict):
+            speaker_segments = data.get('speaker_enhanced_segments')
+            diarization_segments = data.get('diarization_segments')
+            if speaker_segments is None and isinstance(data.get('segments'), list):
+                speaker_segments = data.get('segments')
+                data['speaker_enhanced_segments'] = speaker_segments
+            if diarization_segments is None and isinstance(data.get('segments'), list):
+                diarization_segments = data.get('segments')
+                data['diarization_segments'] = diarization_segments
+            logger.info(
+                f"说话人分离数据加载成功: {diarization_file}, "
+                f"keys={list(data.keys())}, "
+                f"speaker_enhanced_segments={len(speaker_segments) if isinstance(speaker_segments, list) else 'N/A'}, "
+                f"diarization_segments={len(diarization_segments) if isinstance(diarization_segments, list) else 'N/A'}"
+            )
         required_fields = ['speaker_enhanced_segments', 'diarization_segments']
         for field in required_fields:
             if field not in data:
@@ -402,6 +418,24 @@ def load_speaker_data_from_file(diarization_file: str) -> dict:
     except Exception as e:
         logger.error(f"加载说话人分离文件失败: {e}")
         return {}
+
+def normalize_local_input_path(file_path: str, shared_storage_path: str) -> str:
+    """
+    规范化本地文件路径，支持省略开头的 /share 或相对路径。
+    """
+    if not file_path:
+        return file_path
+    if file_path.startswith(("http://", "https://", "minio://")):
+        return file_path
+    if file_path.startswith(("share/", "share\\")):
+        candidate = "/" + file_path.lstrip("/\\")
+        if os.path.exists(candidate):
+            return candidate
+    if not os.path.isabs(file_path):
+        candidate = os.path.join(shared_storage_path, file_path)
+        if os.path.exists(candidate):
+            return candidate
+    return file_path
 
 def get_segments_data(stage_output: dict, field_name: str = None) -> list:
     """
@@ -508,8 +542,6 @@ def generate_subtitle_files(self, context: dict) -> dict:
 
     try:
         # --- Parameter Resolution (采用项目标准模式) ---
-        from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
-        
         resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
@@ -723,12 +755,12 @@ def merge_speaker_segments(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
     
     try:
+        file_service = get_file_service()
         # --- Parameter Resolution (采用项目标准模式) ---
         resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
-                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
             except ValueError as e:
@@ -746,15 +778,43 @@ def merge_speaker_segments(self, context: dict) -> dict:
         if not transcript_segments:
             segments_file = get_param_with_fallback("segments_file", resolved_params, workflow_context)
             if segments_file:
-                transcript_segments = load_segments_from_file(segments_file)
-                recorded_input_params['segments_file'] = segments_file
+                segments_file = normalize_local_input_path(
+                    segments_file,
+                    workflow_context.shared_storage_path
+                )
+                if segments_file and (segments_file.startswith(("http://", "https://", "minio://")) or not os.path.exists(segments_file)):
+                    try:
+                        segments_file = file_service.resolve_and_download(
+                            segments_file,
+                            workflow_context.shared_storage_path
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{stage_name}] segments_file 无法下载: {e}")
+                        segments_file = None
+                if segments_file:
+                    transcript_segments = load_segments_from_file(segments_file)
+                    recorded_input_params['segments_file'] = segments_file
         
         if not speaker_segments:
             diarization_file = get_param_with_fallback("diarization_file", resolved_params, workflow_context)
             if diarization_file:
-                speaker_data = load_speaker_data_from_file(diarization_file)
-                speaker_segments = speaker_data.get('speaker_enhanced_segments')
-                recorded_input_params['diarization_file'] = diarization_file
+                diarization_file = normalize_local_input_path(
+                    diarization_file,
+                    workflow_context.shared_storage_path
+                )
+                if diarization_file and (diarization_file.startswith(("http://", "https://", "minio://")) or not os.path.exists(diarization_file)):
+                    try:
+                        diarization_file = file_service.resolve_and_download(
+                            diarization_file,
+                            workflow_context.shared_storage_path
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{stage_name}] diarization_file 无法下载: {e}")
+                        diarization_file = None
+                if diarization_file:
+                    speaker_data = load_speaker_data_from_file(diarization_file)
+                    speaker_segments = speaker_data.get('speaker_enhanced_segments')
+                    recorded_input_params['diarization_file'] = diarization_file
         
         # 3. 最后回退到原有逻辑（向后兼容）
         if not transcript_segments:
@@ -833,12 +893,12 @@ def merge_with_word_timestamps(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
     
     try:
+        file_service = get_file_service()
         # --- Parameter Resolution (采用项目标准模式) ---
         resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
-                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
             except ValueError as e:
@@ -856,15 +916,49 @@ def merge_with_word_timestamps(self, context: dict) -> dict:
         if not transcript_segments:
             segments_file = get_param_with_fallback("segments_file", resolved_params, workflow_context)
             if segments_file:
-                transcript_segments = load_segments_from_file(segments_file)
-                recorded_input_params['segments_file'] = segments_file
+                segments_file = normalize_local_input_path(
+                    segments_file,
+                    workflow_context.shared_storage_path
+                )
+                logger.info(f"[{stage_name}] 解析 segments_file: {segments_file}")
+                if segments_file and (segments_file.startswith(("http://", "https://", "minio://")) or not os.path.exists(segments_file)):
+                    try:
+                        segments_file = file_service.resolve_and_download(
+                            segments_file,
+                            workflow_context.shared_storage_path
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{stage_name}] segments_file 无法下载: {e}")
+                        segments_file = None
+                if segments_file:
+                    transcript_segments = load_segments_from_file(segments_file)
+                    recorded_input_params['segments_file'] = segments_file
         
         if not speaker_segments:
             diarization_file = get_param_with_fallback("diarization_file", resolved_params, workflow_context)
             if diarization_file:
-                speaker_data = load_speaker_data_from_file(diarization_file)
-                speaker_segments = speaker_data.get('speaker_enhanced_segments')
-                recorded_input_params['diarization_file'] = diarization_file
+                diarization_file = normalize_local_input_path(
+                    diarization_file,
+                    workflow_context.shared_storage_path
+                )
+                logger.info(f"[{stage_name}] 解析 diarization_file: {diarization_file}")
+                if diarization_file and (diarization_file.startswith(("http://", "https://", "minio://")) or not os.path.exists(diarization_file)):
+                    try:
+                        diarization_file = file_service.resolve_and_download(
+                            diarization_file,
+                            workflow_context.shared_storage_path
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{stage_name}] diarization_file 无法下载: {e}")
+                        diarization_file = None
+                if diarization_file:
+                    speaker_data = load_speaker_data_from_file(diarization_file)
+                    speaker_segments = speaker_data.get('speaker_enhanced_segments')
+                    recorded_input_params['diarization_file'] = diarization_file
+                    if isinstance(speaker_segments, list):
+                        logger.info(f"[{stage_name}] speaker_segments 加载数量: {len(speaker_segments)}")
+                    else:
+                        logger.warning(f"[{stage_name}] speaker_segments 类型异常: {type(speaker_segments)}")
         
         # 3. 最后回退到原有逻辑（向后兼容）
         if not transcript_segments:
@@ -898,6 +992,22 @@ def merge_with_word_timestamps(self, context: dict) -> dict:
             raise ValueError("转录结果不包含词级时间戳，无法执行词级合并")
         
         if not validate_speaker_segments(speaker_segments):
+            validation_error = None
+            if not speaker_segments:
+                validation_error = "speaker_segments 为空或未获取到"
+            else:
+                for idx, seg in enumerate(speaker_segments):
+                    missing = [key for key in ['start', 'end', 'speaker'] if key not in seg]
+                    if missing:
+                        validation_error = f"speaker_segments[{idx}] 缺少字段: {missing}"
+                        break
+                    if seg['end'] <= seg['start']:
+                        validation_error = (
+                            f"speaker_segments[{idx}] 时间无效: start={seg.get('start')}, end={seg.get('end')}"
+                        )
+                        break
+            if validation_error:
+                logger.error(f"[{stage_name}] 说话人时间段校验失败: {validation_error}")
             raise ValueError("说话人时间段数据格式无效")
         
         # 执行词级合并逻辑
@@ -905,16 +1015,20 @@ def merge_with_word_timestamps(self, context: dict) -> dict:
         merge_config = service_config.get('subtitle_merge', {})
         merger = create_word_level_merger(speaker_segments, merge_config)
         merged_segments = merger.merge(transcript_segments)
+
+        for idx, segment in enumerate(merged_segments, start=1):
+            segment['id'] = idx
         
+        merged_dir = workflow_context.shared_storage_path
+        segments_source = recorded_input_params.get("segments_file")
+        base_name = os.path.splitext(os.path.basename(segments_source))[0] if segments_source else "merged_segments"
+        merged_file = os.path.join(merged_dir, f"{base_name}_word_timestamps_merged.json")
+
+        with open(merged_file, "w", encoding="utf-8") as f:
+            json.dump(merged_segments, f, ensure_ascii=False, indent=2)
+
         output_data = {
-            'merged_segments': merged_segments,
-            'input_summary': {
-                'transcript_segments_count': len(transcript_segments),
-                'speaker_segments_count': len(speaker_segments),
-                'merged_segments_count': len(merged_segments),
-                'data_source': recorded_input_params.get('fallback_source', 'input_data'),
-                'word_timestamps_required': True
-            }
+            "merged_segments_file": merged_file
         }
         
         workflow_context.stages[stage_name].status = 'SUCCESS'
@@ -947,7 +1061,6 @@ def correct_subtitles(self, context: dict) -> dict:
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
-                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
             except ValueError as e:
@@ -1054,7 +1167,6 @@ def ai_optimize_subtitles(self, context: dict) -> dict:
                                                workflow_context.input_params.get('params', {}).get('subtitle_optimization', {}))
 
         # 使用参数解析器处理动态引用
-        from services.common.parameter_resolver import resolve_parameters
         resolved_params = resolve_parameters(stage_params, workflow_context.model_dump())
         
         # 记录实际使用的输入参数到input_params
@@ -1214,7 +1326,11 @@ def _get_segments_from_source_stages(workflow_context: WorkflowContext, source_s
         return segments, source_stage.name
 
     # 策略2: 回退到从文件加载 (转录或优化任务的输出)
-    segments_file = source_stage.output.get('segments_file') or source_stage.output.get('optimized_file_path')
+    segments_file = (
+        source_stage.output.get('segments_file')
+        or source_stage.output.get('optimized_file_path')
+        or source_stage.output.get('merged_segments_file')
+    )
     if segments_file and os.path.exists(segments_file):
         segments = load_segments_from_file(segments_file)
         if segments:
@@ -1247,12 +1363,12 @@ def prepare_tts_segments(self, context: dict) -> dict:
     state_manager.update_workflow_state(workflow_context)
 
     try:
+        file_service = get_file_service()
         # --- Parameter Resolution (采用项目标准模式) ---
         resolved_params = {}
         node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
         if node_params:
             try:
-                from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
                 resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
                 logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
             except ValueError as e:
@@ -1269,8 +1385,22 @@ def prepare_tts_segments(self, context: dict) -> dict:
         if not segments:
             segments_file = get_param_with_fallback("segments_file", resolved_params, workflow_context)
             if segments_file:
-                segments = load_segments_from_file(segments_file)
-                recorded_input_params['segments_file'] = segments_file
+                segments_file = normalize_local_input_path(
+                    segments_file,
+                    workflow_context.shared_storage_path
+                )
+                if segments_file and (segments_file.startswith(("http://", "https://", "minio://")) or not os.path.exists(segments_file)):
+                    try:
+                        segments_file = file_service.resolve_and_download(
+                            segments_file,
+                            workflow_context.shared_storage_path
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{stage_name}] segments_file 无法下载: {e}")
+                        segments_file = None
+                if segments_file:
+                    segments = load_segments_from_file(segments_file)
+                    recorded_input_params['segments_file'] = segments_file
         
         # 3. 使用自定义源阶段列表（如果提供）
         source_stage_names = get_param_with_fallback("source_stage_names", resolved_params, workflow_context)
