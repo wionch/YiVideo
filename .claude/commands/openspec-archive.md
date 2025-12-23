@@ -6,7 +6,7 @@ argument-hint: 变更 ID (change-id)
 $ARGUMENTS
 <!-- OPENSPEC:START -->
 **保护栏 (Guardrails)**
-- 优先选择直接、最小化的实现方式，仅在明确要求或确实需要时才增加复杂性向。
+- 优先选择直接、最小化的实现方式，仅在明确要求或确实需要时才增加复杂性。
 - 将变更范围严格限制在所要求的结果内。
 - 如果需要额外的 OpenSpec 惯例或澄清，请参考 `openspec/AGENTS.md`（位于 `openspec/` 目录中 —— 如果没看到，请运行 `ls openspec` 或 `openspec update`）。
 
