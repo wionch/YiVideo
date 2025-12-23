@@ -113,7 +113,8 @@
       "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/check-prerequisites.sh:*)",
       "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/create-new-feature.sh:*)",
       "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/setup-plan.sh:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(rg:*)"
     ],
     "deny": [
       "Bash(docker build:*)"
