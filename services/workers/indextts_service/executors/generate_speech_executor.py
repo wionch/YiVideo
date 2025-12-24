@@ -9,6 +9,7 @@ from services.common.base_node_executor import BaseNodeExecutor
 from services.common.logger import get_logger
 from services.common.file_service import get_file_service
 from services.common.parameter_resolver import get_param_with_fallback
+from services.common.path_builder import build_node_output_path
 
 logger = get_logger(__name__)
 
@@ -91,9 +92,15 @@ class IndexTTSGenerateSpeechExecutor(BaseNodeExecutor):
         if reference_audio and not os.path.exists(reference_audio):
             logger.info(f"[{workflow_id}] 开始下载音色参考音频: {reference_audio}")
             file_service = get_file_service()
+            download_dir = build_node_output_path(
+                task_id=workflow_id,
+                node_name=self.stage_name,
+                file_type="temp",
+                filename="reference_audio"
+            )
             self.downloaded_reference_audio = file_service.resolve_and_download(
                 reference_audio,
-                self.context.shared_storage_path
+                download_dir
             )
             reference_audio = self.downloaded_reference_audio
             logger.info(f"[{workflow_id}] 音色参考音频下载完成: {reference_audio}")
@@ -109,9 +116,15 @@ class IndexTTSGenerateSpeechExecutor(BaseNodeExecutor):
         if emotion_reference and not os.path.exists(emotion_reference):
             logger.info(f"[{workflow_id}] 开始下载情感参考音频: {emotion_reference}")
             file_service = get_file_service()
+            download_dir = build_node_output_path(
+                task_id=workflow_id,
+                node_name=self.stage_name,
+                file_type="temp",
+                filename="emotion_audio"
+            )
             self.downloaded_emotion_audio = file_service.resolve_and_download(
                 emotion_reference,
-                self.context.shared_storage_path
+                download_dir
             )
             emotion_reference = self.downloaded_emotion_audio
             logger.info(f"[{workflow_id}] 情感参考音频下载完成: {emotion_reference}")

@@ -12,6 +12,7 @@ from services.common.base_node_executor import BaseNodeExecutor
 from services.common.file_service import get_file_service
 from services.common.logger import get_logger
 from services.common.config_loader import CONFIG
+from services.common.path_builder import build_node_output_path, ensure_directory
 
 logger = get_logger(__name__)
 
@@ -88,12 +89,15 @@ class FasterWhisperTranscribeExecutor(BaseNodeExecutor):
             f"[{self.stage_name}] 转录完成，获得 {len(transcribe_result.get('segments', []))} 个片段"
         )
 
-        # 创建转录数据文件
+        # 创建转录数据文件 - 使用 path_builder 生成标准化路径
         workflow_short_id = self.context.workflow_id[:8]
-        transcribe_data_file = os.path.join(
-            self.context.shared_storage_path,
-            f"transcribe_data_{workflow_short_id}.json"
+        transcribe_data_file = build_node_output_path(
+            task_id=self.context.workflow_id,
+            node_name=self.stage_name,
+            file_type="data",
+            filename=f"transcribe_data_{workflow_short_id}.json"
         )
+        ensure_directory(transcribe_data_file)
 
         # 准备转录数据文件内容
         transcribe_data_content = {

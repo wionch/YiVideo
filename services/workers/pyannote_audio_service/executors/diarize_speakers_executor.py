@@ -15,6 +15,7 @@ from services.common.config_loader import get_config
 from services.common.logger import get_logger
 from services.common.file_service import get_file_service
 from services.common.parameter_resolver import get_param_with_fallback
+from services.common.path_builder import build_node_output_path, ensure_directory
 
 logger = get_logger(__name__)
 config = get_config()
@@ -90,12 +91,15 @@ class PyannoteAudioDiarizeSpeakersExecutor(BaseNodeExecutor):
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
-        # 创建输出目录
-        workflow_output_dir = Path(self.context.shared_storage_path) / "diarization"
-        workflow_output_dir.mkdir(parents=True, exist_ok=True)
-
-        # 准备输出文件路径
-        output_file = workflow_output_dir / "diarization_result.json"
+        # 创建输出目录 - 使用 path_builder 生成标准化路径
+        output_file_path = build_node_output_path(
+            task_id=self.context.workflow_id,
+            node_name=self.stage_name,
+            file_type="data",
+            filename="diarization_result.json"
+        )
+        ensure_directory(output_file_path)
+        output_file = Path(output_file_path)
 
         # 调用 subprocess 执行推理
         result_data, execution_time = self._run_diarization_subprocess(

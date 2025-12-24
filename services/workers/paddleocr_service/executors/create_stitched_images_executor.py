@@ -16,6 +16,7 @@ from services.common.logger import get_logger
 from services.common.file_service import get_file_service
 from services.common.parameter_resolver import get_param_with_fallback
 from services.common.config_loader import CONFIG, get_cleanup_temp_files_config
+from services.common.path_builder import build_node_output_path
 
 logger = get_logger(__name__)
 
@@ -279,9 +280,11 @@ class PaddleOCRCreateStitchedImagesExecutor(BaseNodeExecutor):
         logger.info(f"[{workflow_id}] 原始URL是否为压缩包: {is_original_archive}")
 
         # 创建临时目录
-        self.local_download_dir = os.path.join(
-            self.context.shared_storage_path,
-            f"downloaded_cropped_{int(time.time())}"
+        self.local_download_dir = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="temp",
+            filename=f"downloaded_cropped_{int(time.time())}"
         )
 
         # 如果是压缩包且启用自动解压，使用原始URL
@@ -430,9 +433,11 @@ class PaddleOCRCreateStitchedImagesExecutor(BaseNodeExecutor):
         if os.path.exists(output_data["multi_frames_path"]):
             try:
                 logger.info(f"[{workflow_id}] 开始上传拼接图片目录到MinIO（压缩优化）...")
-                minio_base_path = f"{workflow_id}/stitched_images"
 
                 from services.common.minio_directory_upload import upload_directory_compressed
+                from services.common.path_builder import convert_local_to_minio_path
+
+                minio_base_path = convert_local_to_minio_path(output_data["multi_frames_path"])
 
                 result = upload_directory_compressed(
                     local_dir=output_data["multi_frames_path"],
@@ -479,7 +484,8 @@ class PaddleOCRCreateStitchedImagesExecutor(BaseNodeExecutor):
                 logger.info(f"[{workflow_id}] 开始上传manifest文件到MinIO...")
                 file_service = get_file_service()
 
-                minio_manifest_path = f"{workflow_id}/manifest/multi_frames.json"
+                from services.common.path_builder import convert_local_to_minio_path
+                minio_manifest_path = convert_local_to_minio_path(output_data["manifest_path"])
 
                 manifest_minio_url = file_service.upload_to_minio(
                     local_file_path=output_data["manifest_path"],

@@ -12,6 +12,7 @@ from services.common.parameter_resolver import get_param_with_fallback
 from services.common.config_loader import CONFIG
 from services.common.file_service import get_file_service
 from services.common.subtitle.subtitle_merger import create_word_level_merger
+from services.common.path_builder import build_node_output_path, ensure_directory
 
 logger = get_logger(__name__)
 
@@ -102,8 +103,13 @@ class WServiceGenerateSubtitleFilesExecutor(BaseNodeExecutor):
         )
 
         # 生成字幕文件
-        subtitles_dir = os.path.join(self.context.shared_storage_path, "subtitles")
-        os.makedirs(subtitles_dir, exist_ok=True)
+        subtitles_dir = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="subtitle",
+            filename=""  # 目录路径
+        )
+        ensure_directory(subtitles_dir)
 
         base_filename = os.path.splitext(os.path.basename(audio_path))[0]
 

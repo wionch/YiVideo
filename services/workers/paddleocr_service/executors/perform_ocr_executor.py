@@ -16,6 +16,7 @@ from services.common.logger import get_logger
 from services.common.file_service import get_file_service
 from services.common.parameter_resolver import get_param_with_fallback
 from services.common.config_loader import get_cleanup_temp_files_config
+from services.common.path_builder import build_node_output_path, ensure_directory
 
 logger = get_logger(__name__)
 
@@ -131,10 +132,13 @@ class PaddleOCRPerformOCRExecutor(BaseNodeExecutor):
         )
 
         # 保存OCR结果到本地文件
-        ocr_results_path = os.path.join(
-            self.context.shared_storage_path,
-            "ocr_results.json"
+        ocr_results_path = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="data",
+            filename="ocr_results.json"
         )
+        ensure_directory(ocr_results_path)
         with open(ocr_results_path, 'w', encoding='utf-8') as f:
             json.dump(ocr_results, f, ensure_ascii=False)
 
@@ -296,9 +300,11 @@ class PaddleOCRPerformOCRExecutor(BaseNodeExecutor):
         logger.info(f"[{workflow_id}] 检测到清单文件为URL，尝试从远程下载: {url}")
 
         # 创建临时目录
-        self.manifest_download_dir = os.path.join(
-            self.context.shared_storage_path,
-            f"download_manifest_{int(time.time())}"
+        self.manifest_download_dir = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="temp",
+            filename=f"download_manifest_{int(time.time())}"
         )
 
         # 规范化URL
@@ -360,9 +366,11 @@ class PaddleOCRPerformOCRExecutor(BaseNodeExecutor):
         logger.info(f"[{workflow_id}] 原始URL是否为压缩包: {is_original_archive}")
 
         # 创建临时目录
-        self.multi_frames_download_dir = os.path.join(
-            self.context.shared_storage_path,
-            f"download_multi_frames_{int(time.time())}"
+        self.multi_frames_download_dir = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="temp",
+            filename=f"download_multi_frames_{int(time.time())}"
         )
 
         # 如果是压缩包且启用自动解压，使用原始URL
@@ -535,7 +543,8 @@ class PaddleOCRPerformOCRExecutor(BaseNodeExecutor):
                 file_service = get_file_service()
 
                 # 构建OCR结果文件在MinIO中的路径
-                minio_ocr_path = f"{workflow_id}/ocr_results/ocr_results.json"
+                from services.common.path_builder import convert_local_to_minio_path
+                minio_ocr_path = convert_local_to_minio_path(ocr_results_path)
 
                 ocr_minio_url = file_service.upload_to_minio(
                     local_file_path=ocr_results_path,

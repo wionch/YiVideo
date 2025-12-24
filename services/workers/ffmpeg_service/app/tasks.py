@@ -28,6 +28,7 @@ from services.common.context import WorkflowContext
 # 使用智能GPU锁机制
 from services.common.locks import gpu_lock
 from services.common.parameter_resolver import resolve_parameters, get_param_with_fallback
+from services.common.path_builder import build_node_output_path, ensure_directory
 from services.common.file_service import get_file_service
 
 # 导入该服务内部的核心视频处理逻辑模块
@@ -184,7 +185,14 @@ def crop_subtitle_images(self: Task, context: dict) -> dict:
         if not crop_area:
             raise ValueError("缺少字幕区域坐标信息：请通过 'subtitle_area' 参数传入，或确保 paddleocr.detect_subtitle_area 节点已成功完成并输出了字幕区域数据。")
 
-        cropped_images_dir = os.path.join(workflow_context.shared_storage_path, "cropped_images")
+        # 使用 path_builder 生成标准化路径
+        cropped_images_dir = build_node_output_path(
+            task_id=workflow_context.workflow_id,
+            node_name=stage_name,
+            file_type="images",
+            filename="cropped"
+        )
+        os.makedirs(cropped_images_dir, exist_ok=True)
 
         logger.info(f"[{stage_name}] 准备通过外部脚本从 {video_path} 并发解码并裁剪字幕区域: {crop_area}...")
         
@@ -595,9 +603,13 @@ def split_audio_segments(self: Task, context: dict) -> dict:
 
         logger.info(f"[{stage_name}] 字幕源: {subtitle_source}, 路径: {subtitle_path}")
 
-        # 步骤3: 创建输出目录
-        output_base_dir = workflow_context.shared_storage_path
-        audio_segments_dir = os.path.join(output_base_dir, "audio_segments")
+        # 步骤3: 创建输出目录 - 使用 path_builder 生成标准化路径
+        audio_segments_dir = build_node_output_path(
+            task_id=workflow_context.workflow_id,
+            node_name=stage_name,
+            file_type="audio",
+            filename="segments"
+        )
         os.makedirs(audio_segments_dir, exist_ok=True)
 
         # 步骤4: 配置音频分割器参数

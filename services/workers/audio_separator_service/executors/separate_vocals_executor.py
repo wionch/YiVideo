@@ -11,6 +11,7 @@ from services.common.base_node_executor import BaseNodeExecutor
 from services.common.file_service import get_file_service
 from services.common.logger import get_logger
 from services.common.config_loader import CONFIG
+from services.common.path_builder import build_node_output_path
 
 logger = get_logger(__name__)
 
@@ -110,10 +111,16 @@ class AudioSeparatorSeparateVocalsExecutor(BaseNodeExecutor):
         )
         logger.info(f"[{self.stage_name}] 使用模型: {model_name}")
 
-        # 创建输出目录
-        task_output_dir = Path(
-            f"{self.context.shared_storage_path}/audio/audio_separated"
+        # 创建输出目录 - 使用 path_builder 生成标准化路径
+        # 注意: build_node_output_path 返回文件路径,这里我们需要目录路径
+        # 所以使用一个占位文件名,然后取其父目录
+        task_output_path = build_node_output_path(
+            task_id=self.context.workflow_id,
+            node_name=self.stage_name,
+            file_type="audio",
+            filename="placeholder"  # 占位符,实际文件由 audio-separator 生成
         )
+        task_output_dir = Path(task_output_path).parent
         task_output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"[{self.stage_name}] 输出目录: {task_output_dir}")
 

@@ -124,6 +124,31 @@ yivideo/
 
 3. **类型注解**：所有函数参数和返回值必须包含 Python 类型注解。
 
+### 测试与调试规范 (Testing & Debugging)
+
+**Docker 容器内执行原则**：
+
+由于项目所有组件均通过 Docker 部署,真实的运行环境位于容器内部,因此:
+
+1. **测试执行位置**:
+
+    - ✅ **必须在容器内执行**: 所有 `pytest` 测试、Python 脚本调试、依赖验证等操作。
+    - ❌ **禁止在宿主机执行**: 宿主机环境缺少必要的依赖、GPU 驱动、网络配置等,测试结果不可靠。
+
+2. **标准执行流程**:
+
+    ```bash
+    # 1. 进入目标服务容器
+    docker exec -it <container_name> bash
+
+    # 2. 在容器内执行测试
+    pip install pytest (如需要)
+    pytest /{容器映射路径}/test_xxx.py -v
+
+    # 或执行调试脚本
+    python /{容器映射路径}/debug_xxx.py
+    ```
+
 ## 🧠 MCP 核心认知协议 (Core Cognitive Protocol)
 
 **原则**：你是一个**拥有工具的智能代理 (Agent)**。在处理代码任务时，必须遵循行业标准的 **Retrieval-Augmented Generation (RAG)** 和 **Chain of Thought (CoT)** 工作流。

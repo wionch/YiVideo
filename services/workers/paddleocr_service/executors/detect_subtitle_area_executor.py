@@ -15,7 +15,7 @@ from services.common.base_node_executor import BaseNodeExecutor
 from services.common.logger import get_logger
 from services.common.file_service import get_file_service
 from services.common.parameter_resolver import get_param_with_fallback
-from services.common.temp_path_utils import get_temp_path
+from services.common.path_builder import build_temp_path
 from services.common.config_loader import get_cleanup_temp_files_config
 
 logger = get_logger(__name__)
@@ -260,9 +260,12 @@ class PaddleOCRDetectSubtitleAreaExecutor(BaseNodeExecutor):
         )
 
         if not self.local_download_dir:
-            self.local_download_dir = os.path.join(
-                self.context.shared_storage_path,
-                "downloaded_keyframes"
+            from services.common.path_builder import build_node_output_path
+            self.local_download_dir = build_node_output_path(
+                task_id=workflow_id,
+                node_name=self.stage_name,
+                file_type="temp",
+                filename="downloaded_keyframes"
             )
 
         logger.info(f"[{workflow_id}] 开始从URL下载关键帧目录: {minio_url}")
@@ -319,7 +322,11 @@ class PaddleOCRDetectSubtitleAreaExecutor(BaseNodeExecutor):
             )
 
             # 使用临时文件传递路径列表，避免参数过长
-            self.paths_file_path = get_temp_path(workflow_id, '.json')
+            self.paths_file_path = build_temp_path(
+                task_id=workflow_id,
+                node_name=self.stage_name,
+                filename=f"keyframe_paths_{workflow_id[:8]}.json"
+            )
             with open(self.paths_file_path, 'w', encoding='utf-8') as f:
                 json.dump(keyframe_paths, f)
 

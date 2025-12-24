@@ -9,6 +9,7 @@ from typing import Dict, Any, List
 from services.common.base_node_executor import BaseNodeExecutor
 from services.common.file_service import get_file_service
 from services.common.logger import get_logger
+from services.common.path_builder import build_node_output_path, ensure_directory
 from services.workers.ffmpeg_service.app.modules.video_decoder import extract_random_frames
 
 logger = get_logger(__name__)
@@ -71,8 +72,16 @@ class FFmpegExtractKeyframesExecutor(BaseNodeExecutor):
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
-        # 创建关键帧目录
-        keyframes_dir = os.path.join(self.context.shared_storage_path, "keyframes")
+        # 使用 path_builder 生成标准化路径
+        # 关键帧目录路径: /share/workflows/{task_id}/nodes/{node_name}/images/keyframes/
+        keyframes_dir = build_node_output_path(
+            task_id=self.context.workflow_id,
+            node_name=self.stage_name,
+            file_type="images",
+            filename="keyframes"  # 目录名
+        )
+
+        # 确保目录存在
         os.makedirs(keyframes_dir, exist_ok=True)
 
         logger.info(f"[{self.stage_name}] 开始从 {video_path} 抽取 {num_frames} 帧...")

@@ -11,6 +11,7 @@ from services.common.base_node_executor import BaseNodeExecutor
 from services.common.file_service import get_file_service
 from services.common.subprocess_utils import run_gpu_command
 from services.common.logger import get_logger
+from services.common.path_builder import build_node_output_path, ensure_directory
 
 logger = get_logger(__name__)
 
@@ -64,14 +65,19 @@ class FFmpegExtractAudioExecutor(BaseNodeExecutor):
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"视频文件不存在: {video_path}")
 
-        # 在共享存储中创建音频目录
-        audio_dir = os.path.join(self.context.shared_storage_path, "audio")
-        os.makedirs(audio_dir, exist_ok=True)
-
-        # 生成音频文件名
+        # 使用 path_builder 生成标准化路径
         video_filename = os.path.basename(video_path)
         audio_filename = os.path.splitext(video_filename)[0] + ".wav"
-        audio_path = os.path.join(audio_dir, audio_filename)
+
+        audio_path = build_node_output_path(
+            task_id=self.context.workflow_id,
+            node_name=self.stage_name,
+            file_type="audio",
+            filename=audio_filename
+        )
+
+        # 确保目录存在
+        ensure_directory(audio_path)
 
         logger.info(f"[{self.stage_name}] 开始从 {video_path} 提取音频...")
 

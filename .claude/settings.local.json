@@ -119,7 +119,8 @@
       "mcp__memory__create_entities",
       "mcp__memory__create_relations",
       "Bash(chmod +x /opt/wionch/docker/yivideo/tests/validation/validate_gpu_lock_docs.sh)",
-      "Bash(shellcheck tests/validation/validate_gpu_lock_docs.sh)"
+      "Bash(shellcheck tests/validation/validate_gpu_lock_docs.sh)",
+      "Bash(while read file)"
     ],
     "deny": [
       "Bash(docker build:*)"

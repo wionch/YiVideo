@@ -15,6 +15,7 @@ from services.common.subtitle.subtitle_merger import (
     create_word_level_merger,
     validate_speaker_segments
 )
+from services.common.path_builder import build_node_output_path, ensure_directory
 
 logger = get_logger(__name__)
 
@@ -506,7 +507,7 @@ class WServiceMergeWithWordTimestampsExecutor(BaseNodeExecutor):
         Returns:
             保存的文件路径
         """
-        merged_dir = self.context.shared_storage_path
+        workflow_id = self.context.workflow_id
 
         # 生成文件名
         segments_source = get_param_with_fallback(
@@ -519,16 +520,21 @@ class WServiceMergeWithWordTimestampsExecutor(BaseNodeExecutor):
             if segments_source
             else "merged_segments"
         )
-        merged_file = os.path.join(
-            merged_dir,
-            f"{base_name}_word_timestamps_merged.json"
+
+        # 使用标准化路径
+        merged_file = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="data",
+            filename=f"{base_name}_word_timestamps_merged.json"
         )
+        ensure_directory(merged_file)
 
         # 保存文件
         with open(merged_file, "w", encoding="utf-8") as f:
             json.dump(merged_segments, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"合并结果已保存: {merged_file}")
+        logger.info(f"[{workflow_id}] 合并结果已保存: {merged_file}")
         return merged_file
 
     def get_cache_key_fields(self) -> List[str]:

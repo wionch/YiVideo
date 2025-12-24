@@ -87,6 +87,7 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
     try:
         from services.common.file_service import get_file_service
         from services.common.minio_url_convention import MinioUrlNamingConvention
+        from services.common.path_builder import convert_local_to_minio_path
 
         file_service = get_file_service()
         convention = MinioUrlNamingConvention()
@@ -151,8 +152,8 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
                         # 检查文件是否存在
                         if isinstance(file_path, str) and os.path.exists(file_path):
                             try:
-                                file_name = os.path.basename(file_path)
-                                minio_path = f"{context.workflow_id}/{file_name}"
+                                # 使用 path_builder 生成 MinIO 路径
+                                minio_path = convert_local_to_minio_path(file_path)
 
                                 logger.info(f"准备上传文件: {file_path} -> {minio_path}")
 
@@ -190,8 +191,8 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
                     # 检查文件是否存在
                     if os.path.exists(file_value):
                         try:
-                            file_name = os.path.basename(file_value)
-                            minio_path = f"{context.workflow_id}/{file_name}"
+                            # 使用 path_builder 生成 MinIO 路径
+                            minio_path = convert_local_to_minio_path(file_value)
 
                             logger.info(f"准备上传文件: {file_value} -> {minio_path}")
 
@@ -225,9 +226,8 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
 
                         logger.info(f"准备压缩并上传目录: {dir_path} (workflow_id: {context.workflow_id})")
 
-                        # 构建 MinIO 路径
-                        dir_name = os.path.basename(dir_path)
-                        minio_base_path = f"{context.workflow_id}/{dir_name}"
+                        # 使用 path_builder 生成 MinIO 路径
+                        minio_base_path = convert_local_to_minio_path(dir_path)
 
                         # 压缩并上传目录到MinIO
                         upload_result = upload_directory_compressed(

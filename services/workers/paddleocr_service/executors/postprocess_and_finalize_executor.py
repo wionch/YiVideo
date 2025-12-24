@@ -12,6 +12,7 @@ from services.common.logger import get_logger
 from services.common.file_service import get_file_service
 from services.common.parameter_resolver import get_param_with_fallback
 from services.common.subtitle.subtitle_parser import SubtitleEntry, write_srt_file
+from services.common.path_builder import build_node_output_path, ensure_directory
 
 logger = get_logger(__name__)
 
@@ -115,14 +116,20 @@ class PaddleOCRPostprocessAndFinalizeExecutor(BaseNodeExecutor):
         video_basename = os.path.basename(video_path)
         video_name, _ = os.path.splitext(video_basename)
 
-        final_srt_path = os.path.join(
-            self.context.shared_storage_path,
-            f"{video_name}.srt"
+        final_srt_path = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="subtitle",
+            filename=f"{video_name}.srt"
         )
-        final_json_path = os.path.join(
-            self.context.shared_storage_path,
-            f"{video_name}.json"
+        final_json_path = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="data",
+            filename=f"{video_name}.json"
         )
+        ensure_directory(final_srt_path)
+        ensure_directory(final_json_path)
 
         # 转换为 SubtitleEntry 对象
         entries = []
@@ -251,9 +258,11 @@ class PaddleOCRPostprocessAndFinalizeExecutor(BaseNodeExecutor):
         )
 
         # 创建临时目录
-        self.ocr_download_dir = os.path.join(
-            self.context.shared_storage_path,
-            f"download_ocr_{int(time.time())}"
+        self.ocr_download_dir = build_node_output_path(
+            task_id=workflow_id,
+            node_name=self.stage_name,
+            file_type="temp",
+            filename=f"download_ocr_{int(time.time())}"
         )
 
         # 规范化URL
