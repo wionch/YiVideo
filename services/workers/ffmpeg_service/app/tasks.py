@@ -41,389 +41,54 @@ from .modules.audio_splitter import AudioSplitter, split_audio_segments as split
 def extract_keyframes(self: Task, context: dict) -> dict:
     """
     [工作流任务] 从视频中抽取若干关键帧图片。
+    
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
     """
-    start_time = time.time()
+    from services.workers.ffmpeg_service.executors import FFmpegExtractKeyframesExecutor
+    from services.common.context import WorkflowContext
+    from services.common import state_manager
+    
+    # 1. 获取工作流上下文
     workflow_context = WorkflowContext(**context)
-    stage_name = self.name
-    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-    state_manager.update_workflow_state(workflow_context)
-
-    try:
-        # --- Parameter Resolution ---
-        resolved_params = {}
-        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
-        if node_params:
-            try:
-                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
-                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-            except ValueError as e:
-                logger.error(f"[{stage_name}] 参数解析失败: {e}")
-                raise e
-        
-        # 记录实际使用的输入参数到input_params
-        recorded_input_params = resolved_params.copy() if resolved_params else {}
-        
-        # 如果没有显式参数，记录全局输入参数
-        if not recorded_input_params:
-            input_data = workflow_context.input_params.get("input_data", {})
-            if input_data.get("video_path"):
-                recorded_input_params['video_path'] = input_data.get("video_path")
-        
-        # MinIO上传参数
-        upload_to_minio = get_param_with_fallback(
-            "upload_keyframes_to_minio",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        delete_local_keyframes = get_param_with_fallback(
-            "delete_local_keyframes_after_upload",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        
-        # 压缩上传参数（新增）
-        compress_keyframes_before_upload = get_param_with_fallback(
-            "compress_keyframes_before_upload",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        keyframe_compression_format = get_param_with_fallback(
-            "keyframe_compression_format",
-            resolved_params,
-            workflow_context,
-            default="zip"
-        )
-        keyframe_compression_level = get_param_with_fallback(
-            "keyframe_compression_level", 
-            resolved_params,
-            workflow_context,
-            default="default"
-        )
-        
-        workflow_context.stages[stage_name].input_params = recorded_input_params
-
-        os.makedirs(workflow_context.shared_storage_path, exist_ok=True)
-
-        # 优先从 resolved_params 获取参数，回退到全局 input_data (兼容单步任务)
-        video_path = get_param_with_fallback("video_path", resolved_params, workflow_context)
-
-        # --- 文件下载 ---
-        file_service = get_file_service()
-        logger.info(f"[{stage_name}] 开始下载视频文件: {video_path}")
-        video_path = file_service.resolve_and_download(video_path, workflow_context.shared_storage_path)
-        # 更新本地 input_params 中的 video_path 为下载后的本地路径
-        workflow_context.stages[stage_name].input_params["video_path"] = video_path
-        logger.info(f"[{stage_name}] 视频文件下载完成: {video_path}")
-
-        if not os.path.exists(video_path):
-            raise FileNotFoundError(f"视频文件不存在: {video_path}")
-
-        num_frames = get_param_with_fallback(
-            "keyframe_sample_count",
-            resolved_params,
-            workflow_context,
-            default=100
-        )
-        keyframes_dir = os.path.join(workflow_context.shared_storage_path, "keyframes")
-
-        logger.info(f"[{stage_name}] 开始从 {video_path} 抽取 {num_frames} 帧...")
-
-        frame_paths = extract_random_frames(video_path, num_frames, keyframes_dir)
-
-        if not frame_paths:
-            raise RuntimeError("核心函数 extract_random_frames 未能成功抽取任何帧。")
-
-        # 基础输出数据
-        output_data = {"keyframe_dir": keyframes_dir}
-
-        # 检查是否需要上传关键帧目录到MinIO
-        upload_to_minio = get_param_with_fallback(
-            "upload_keyframes_to_minio",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        delete_local_keyframes = get_param_with_fallback(
-            "delete_local_keyframes_after_upload",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        
-        # 压缩上传参数（新增）
-        compress_keyframes_before_upload = get_param_with_fallback(
-            "compress_keyframes_before_upload",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        keyframe_compression_format = get_param_with_fallback(
-            "keyframe_compression_format",
-            resolved_params,
-            workflow_context,
-            default="zip"
-        )
-        keyframe_compression_level = get_param_with_fallback(
-            "keyframe_compression_level", 
-            resolved_params,
-            workflow_context,
-            default="default"
-        )
-        
-        if upload_to_minio and frame_paths:
-            try:
-                if compress_keyframes_before_upload:
-                    # 使用压缩上传
-                    from services.common.minio_directory_upload import upload_directory_compressed
-                    
-                    logger.info(f"[{stage_name}] 开始压缩并上传关键帧目录到MinIO...")
-                    logger.info(f"[{stage_name}] 压缩格式: {keyframe_compression_format}, 级别: {keyframe_compression_level}")
-                    
-                    # 构建关键帧在MinIO中的路径
-                    minio_base_path = f"{workflow_context.workflow_id}/keyframes"
-                    
-                    upload_result = upload_directory_compressed(
-                        local_dir=keyframes_dir,
-                        minio_base_path=minio_base_path,
-                        file_pattern="*.jpg",
-                        compression_format=keyframe_compression_format,
-                        compression_level=keyframe_compression_level,
-                        delete_local=delete_local_keyframes,
-                        workflow_id=workflow_context.workflow_id
-                    )
-                    
-                    if upload_result["success"]:
-                        compression_info = upload_result.get("compression_info", {})
-                        output_data.update({
-                            "keyframe_minio_url": upload_result["minio_base_url"],
-                            "keyframe_compressed_archive_url": upload_result["archive_url"],
-                            "keyframe_files_count": upload_result["total_files"],
-                            "keyframe_compression_info": {
-                                "original_size": compression_info.get("original_size", 0),
-                                "compressed_size": compression_info.get("compressed_size", 0),
-                                "compression_ratio": compression_info.get("compression_ratio", 0),
-                                "files_count": compression_info.get("files_count", 0),
-                                "compression_time": compression_info.get("compression_time", 0),
-                                "checksum": compression_info.get("checksum", ""),
-                                "format": compression_info.get("format", keyframe_compression_format)
-                            }
-                        })
-                        logger.info(f"[{stage_name}] 关键帧压缩上传成功: {compression_info.get('compression_ratio', 0):.1%} 压缩率, "
-                                   f"{upload_result['total_files']} 个文件")
-                    else:
-                        logger.warning(f"[{stage_name}] 关键帧压缩上传失败: {upload_result.get('error', '未知错误')}")
-                        output_data.update({
-                            "keyframe_upload_error": upload_result.get("error"),
-                            "keyframe_files_count": upload_result.get("total_files", 0)
-                        })
-                else:
-                    # 使用原有的单文件上传（向后兼容）
-                    from services.common.minio_directory_upload import upload_keyframes_directory
-                    
-                    logger.info(f"[{stage_name}] 开始上传关键帧目录到MinIO...")
-                    upload_result = upload_keyframes_directory(
-                        local_dir=keyframes_dir,
-                        workflow_id=workflow_context.workflow_id,
-                        delete_local=delete_local_keyframes
-                    )
-                    
-                    if upload_result["success"]:
-                        output_data.update({
-                            "keyframe_minio_url": upload_result["minio_base_url"],
-                            "keyframe_files_count": len(upload_result["uploaded_files"]),
-                            "keyframe_uploaded_files": upload_result["uploaded_files"]
-                        })
-                        logger.info(f"[{stage_name}] 关键帧目录上传成功: {upload_result['total_files']} 个文件")
-                    else:
-                        logger.warning(f"[{stage_name}] 关键帧目录上传失败: {upload_result.get('error', '未知错误')}")
-                        output_data.update({
-                            "keyframe_upload_error": upload_result.get("error"),
-                            "keyframe_files_count": upload_result["total_files"]
-                        })
-            except Exception as e:
-                logger.warning(f"[{stage_name}] 关键帧目录上传过程出错: {e}", exc_info=True)
-                output_data.update({
-                    "keyframe_upload_error": str(e),
-                    "keyframe_files_count": len(frame_paths)
-                })
-                # 异常处理后直接返回，避免继续执行传统上传逻辑
-                workflow_context.stages[stage_name].status = 'FAILED' if compress_keyframes_before_upload else 'SUCCESS'
-                workflow_context.stages[stage_name].output = output_data
-                workflow_context.stages[stage_name].error = str(e) if compress_keyframes_before_upload else None
-                if compress_keyframes_before_upload:
-                    workflow_context.error = f"在阶段 {stage_name} 压缩上传过程中发生错误: {e}"
-                return workflow_context.model_dump()
-        
-        workflow_context.stages[stage_name].status = 'SUCCESS'
-        workflow_context.stages[stage_name].output = output_data
-        logger.info(f"[{stage_name}] 抽帧完成，产物目录: {keyframes_dir}。")
-
-    except Exception as e:
-        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
-        workflow_context.stages[stage_name].status = 'FAILED'
-        workflow_context.stages[stage_name].error = str(e)
-        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
-    finally:
-        workflow_context.stages[stage_name].duration = time.time() - start_time
-        state_manager.update_workflow_state(workflow_context)
-
-    return workflow_context.model_dump()
+    
+    # 2. 创建执行器
+    executor = FFmpegExtractKeyframesExecutor(self.name, workflow_context)
+    
+    # 3. 执行（自动处理验证、执行、格式化、错误处理）
+    result_context = executor.execute()
+    
+    # 4. 保存结果
+    state_manager.update_workflow_state(result_context)
+    
+    # 5. 返回上下文
+    return result_context.model_dump()
 
 
 @celery_app.task(bind=True, name='ffmpeg.extract_audio')
 def extract_audio(self: Task, context: dict) -> dict:
     """
     [工作流任务] 从视频中提取音频文件。
+    
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
     """
-    start_time = time.time()
+    from services.workers.ffmpeg_service.executors import FFmpegExtractAudioExecutor
+    from services.common.context import WorkflowContext
+    from services.common import state_manager
+    
+    # 1. 获取工作流上下文
     workflow_context = WorkflowContext(**context)
-    stage_name = self.name
-    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-    state_manager.update_workflow_state(workflow_context)
-
-    try:
-        # --- Parameter Resolution ---
-        resolved_params = {}
-        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
-        if node_params:
-            try:
-                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
-                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-            except ValueError as e:
-                logger.error(f"[{stage_name}] 参数解析失败: {e}")
-                raise e
-        
-        # 记录实际使用的输入参数到input_params
-        recorded_input_params = resolved_params.copy() if resolved_params else {}
-        
-        # 如果没有显式参数，记录全局输入参数
-        if not recorded_input_params:
-            input_data = workflow_context.input_params.get("input_data", {})
-            if input_data.get("video_path"):
-                recorded_input_params['video_path'] = input_data.get("video_path")
-        
-        # MinIO上传参数
-        upload_to_minio = get_param_with_fallback(
-            "upload_keyframes_to_minio",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        delete_local_keyframes = get_param_with_fallback(
-            "delete_local_keyframes_after_upload",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        
-        # 压缩上传参数（新增）
-        compress_keyframes_before_upload = get_param_with_fallback(
-            "compress_keyframes_before_upload",
-            resolved_params,
-            workflow_context,
-            default=False
-        )
-        keyframe_compression_format = get_param_with_fallback(
-            "keyframe_compression_format",
-            resolved_params,
-            workflow_context,
-            default="zip"
-        )
-        keyframe_compression_level = get_param_with_fallback(
-            "keyframe_compression_level", 
-            resolved_params,
-            workflow_context,
-            default="default"
-        )
-        
-        workflow_context.stages[stage_name].input_params = recorded_input_params
-        
-        # --- 文件下载 ---
-        file_service = get_file_service()
-        # 优先从 resolved_params 获取参数
-        video_path = resolved_params.get("video_path")
-        if not video_path:
-             video_path = workflow_context.input_params.get("input_data", {}).get("video_path")
-             
-        if not video_path:
-            raise ValueError("缺少必需参数: video_path")
-        
-        logger.info(f"[{stage_name}] 开始下载视频文件: {video_path}")
-        video_path = file_service.resolve_and_download(video_path, workflow_context.shared_storage_path)
-        # 更新本地 input_params 中的 video_path 为下载后的本地路径
-        workflow_context.stages[stage_name].input_params["video_path"] = video_path
-        logger.info(f"[{stage_name}] 视频文件下载完成: {video_path}")
-        
-        if not os.path.exists(video_path):
-            raise FileNotFoundError(f"视频文件不存在: {video_path}")
-
-        # 在共享存储中创建音频目录
-        audio_dir = os.path.join(workflow_context.shared_storage_path, "audio")
-        os.makedirs(audio_dir, exist_ok=True)
-
-        # 生成音频文件名
-        video_filename = os.path.basename(video_path)
-        audio_filename = os.path.splitext(video_filename)[0] + ".wav"
-        audio_path = os.path.join(audio_dir, audio_filename)
-
-        logger.info(f"[{stage_name}] 开始从 {video_path} 提取音频...")
-
-        # 使用 ffmpeg 提取音频
-        command = [
-            "ffmpeg",
-            "-i", video_path,
-            "-vn",
-            "-acodec", "pcm_s16le",
-            "-ar", "16000",
-            "-ac", "1",
-            "-y",
-            audio_path
-        ]
-
-        try:
-            # 使用新的实时日志输出函数
-            from services.common.subprocess_utils import run_gpu_command
-            result = run_gpu_command(command, stage_name=stage_name, check=True, timeout=1800)
-
-            if result.stderr:
-                logger.warning(f"[{stage_name}] ffmpeg 有 stderr 输出:\n{result.stderr.strip()}")
-
-            if not os.path.exists(audio_path):
-                raise RuntimeError(f"音频提取失败：输出文件不存在 {audio_path}")
-
-            file_size = os.path.getsize(audio_path)
-            if file_size == 0:
-                raise RuntimeError(f"音频提取失败：输出文件为空 {audio_path}")
-
-            logger.info(f"[{stage_name}] 音频提取完成：{audio_path} (大小: {file_size} 字节)")
-
-            output_data = {"audio_path": audio_path}
-            workflow_context.stages[stage_name].status = 'SUCCESS'
-            workflow_context.stages[stage_name].output = output_data
-
-        except subprocess.TimeoutExpired as e:
-            stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logger.error(f"[{stage_name}] ffmpeg 音频提取超时({e.timeout}秒)。Stderr:\n---\n{stderr_output}\n---")
-            raise RuntimeError(f"音频提取超时: {e.timeout} 秒") from e
-        except subprocess.CalledProcessError as e:
-            stdout_output = e.stdout.strip() if e.stdout else "(empty)"
-            stderr_output = e.stderr.strip() if e.stderr else "(empty)"
-            logger.error(f"[{stage_name}] ffmpeg 音频提取失败，返回码: {e.returncode}。\nStdout:\n---\n{stdout_output}\n---\nStderr:\n---\n{stderr_output}\n---")
-            raise RuntimeError(f"音频提取失败: ffmpeg 返回码 {e.returncode}") from e
-
-    except Exception as e:
-        logger.error(f"[{stage_name}] 发生错误: {e}", exc_info=True)
-        workflow_context.stages[stage_name].status = 'FAILED'
-        workflow_context.stages[stage_name].error = str(e)
-        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
-    finally:
-        workflow_context.stages[stage_name].duration = time.time() - start_time
-        state_manager.update_workflow_state(workflow_context)
-
-    return workflow_context.model_dump()
+    
+    # 2. 创建执行器
+    executor = FFmpegExtractAudioExecutor(self.name, workflow_context)
+    
+    # 3. 执行（自动处理验证、执行、格式化、错误处理）
+    result_context = executor.execute()
+    
+    # 4. 保存结果
+    state_manager.update_workflow_state(result_context)
+    
+    # 5. 返回上下文
+    return result_context.model_dump()
 
 
 @celery_app.task(bind=True, name='ffmpeg.crop_subtitle_images')

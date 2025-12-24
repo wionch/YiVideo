@@ -75,116 +75,170 @@ def _is_auto_upload_enabled() -> bool:
 def _upload_files_to_minio(context: WorkflowContext) -> None:
     """
     自动检测并上传工作流中的文件到MinIO
-    
+
     Args:
         context: 工作流上下文对象
     """
     try:
         from services.common.file_service import get_file_service
-        
+        from services.common.minio_url_convention import MinioUrlNamingConvention
+
         file_service = get_file_service()
-        
+        convention = MinioUrlNamingConvention()
+
         # 遍历所有阶段的输出
         for stage_name, stage in context.stages.items():
             if stage.status != 'SUCCESS' or not stage.output:
                 continue
-            
-            # 检查输出中的文件路径字段 - 优先处理转录结果文件
-            file_keys = [
-                'segments_file',
-                'transcribe_data_file',
-                'audio_path',
-                'video_path',
-                'subtitle_path',
-                'output_path',
-                'merged_segments_file'
-            ]
-            directory_keys = ['keyframe_dir', 'cropped_images_path']  # 需要特殊处理的目录字段
+
+            # 自动检测所有路径字段（而非硬编码列表）
+            file_keys = []
+            directory_keys = []
+
+            for key in stage.output.keys():
+                # 跳过已经是 MinIO URL 的字段
+                if '_minio_url' in key:
+                    continue
+
+                # 检查是否为路径字段
+                if convention.is_path_field(key):
+                    value = stage.output[key]
+                    # 判断是文件还是目录
+                    if isinstance(value, str) and os.path.exists(value):
+                        if os.path.isdir(value):
+                            directory_keys.append(key)
+                        else:
+                            file_keys.append(key)
+                    elif isinstance(value, list):
+                        # 数组字段（如 all_audio_files）
+                        file_keys.append(key)
             
             # 处理普通文件字段
             for key in file_keys:
                 if key not in stage.output:
                     continue
-                
-                file_path = stage.output[key]
-                
-                # 跳过已经是URL的路径
-                if isinstance(file_path, str) and (file_path.startswith('http://') or file_path.startswith('https://')):
-                    logger.info(f"跳过已是URL的路径: {key} = {file_path}")
-                    continue
-                
-                # 检查文件是否存在
-                if isinstance(file_path, str) and os.path.exists(file_path):
-                    try:
-                        file_name = os.path.basename(file_path)
-                        minio_path = f"{context.workflow_id}/{file_name}"
-                        
-                        logger.info(f"准备上传文件: {file_path} -> {minio_path}")
-                        
-                        # 上传到MinIO
-                        minio_url = file_service.upload_to_minio(file_path, minio_path)
-                        
-                        # 追加 MinIO URL，保留原始本地路径
-                        stage.output[f"{key}_minio_url"] = minio_url
-                        logger.info(f"文件已上传: {key}_minio_url = {minio_url}")
-                        
-                    except Exception as e:
-                        logger.warning(f"上传文件失败: {file_path}, 错误: {e}", exc_info=True)
+
+                file_value = stage.output[key]
+                minio_field_name = convention.get_minio_url_field_name(key)
+
+                # 处理数组字段（如 all_audio_files）
+                if isinstance(file_value, list):
+                    minio_urls = []
+                    for file_path in file_value:
+                        # 跳过已经是URL的路径
+                        if isinstance(file_path, str) and (file_path.startswith('http://') or file_path.startswith('https://')):
+                            logger.info(f"跳过已是URL的路径: {file_path}")
+                            continue
+
+                        # 检查文件是否存在
+                        if isinstance(file_path, str) and os.path.exists(file_path):
+                            try:
+                                file_name = os.path.basename(file_path)
+                                minio_path = f"{context.workflow_id}/{file_name}"
+
+                                logger.info(f"准备上传文件: {file_path} -> {minio_path}")
+
+                                # 上传到MinIO
+                                minio_url = file_service.upload_to_minio(file_path, minio_path)
+                                minio_urls.append(minio_url)
+
+                                logger.info(f"文件已上传: {minio_url}")
+
+                            except Exception as e:
+                                logger.warning(f"上传文件失败: {file_path}, 错误: {e}", exc_info=True)
+
+                    # 保存所有 MinIO URLs
+                    if minio_urls:
+                        stage.output[minio_field_name] = minio_urls
+                        logger.info(f"数组字段已上传: {minio_field_name} = {len(minio_urls)} 个文件")
+
+                # 处理单个文件字段
+                elif isinstance(file_value, str):
+                    # 跳过已经是URL的路径
+                    if file_value.startswith('http://') or file_value.startswith('https://'):
+                        logger.info(f"跳过已是URL的路径: {key} = {file_value}")
+                        continue
+
+                    # 检查文件是否存在
+                    if os.path.exists(file_value):
+                        try:
+                            file_name = os.path.basename(file_value)
+                            minio_path = f"{context.workflow_id}/{file_name}"
+
+                            logger.info(f"准备上传文件: {file_value} -> {minio_path}")
+
+                            # 上传到MinIO
+                            minio_url = file_service.upload_to_minio(file_value, minio_path)
+
+                            # 追加 MinIO URL，保留原始本地路径
+                            stage.output[minio_field_name] = minio_url
+                            logger.info(f"文件已上传: {minio_field_name} = {minio_url}")
+
+                        except Exception as e:
+                            logger.warning(f"上传文件失败: {file_value}, 错误: {e}", exc_info=True)
             
-            # 处理目录字段（特殊处理）
+            # 处理目录字段（压缩上传）
             for key in directory_keys:
                 if key not in stage.output:
                     continue
-                
+
                 dir_path = stage.output[key]
-                
+
                 # 跳过已经是URL的路径
                 if isinstance(dir_path, str) and (dir_path.startswith('http://') or dir_path.startswith('https://')):
                     logger.info(f"跳过已是URL的路径: {key} = {dir_path}")
                     continue
-                
-                # 检查是否已经被压缩上传
-                if key == 'keyframe_dir':
-                    # 检查是否有压缩上传的相关字段
-                    compressed_archive_url = stage.output.get('keyframe_compressed_archive_url')
-                    if compressed_archive_url:
-                        logger.info(f"检测到{key}已经通过压缩上传，跳过传统目录上传")
-                        continue
-                elif key == 'cropped_images_path':
-                    # 检查裁剪图片是否已经通过压缩上传
-                    compressed_archive_url = stage.output.get('compressed_archive_url')
-                    if compressed_archive_url:
-                        logger.info(f"检测到{key}已经通过压缩上传，跳过传统目录上传")
-                        continue
-                
+
                 # 检查目录是否存在
                 if isinstance(dir_path, str) and os.path.exists(dir_path) and os.path.isdir(dir_path):
                     try:
-                        # 特殊处理：使用目录上传模块
-                        from services.common.minio_directory_upload import upload_keyframes_directory
-                        
-                        logger.info(f"准备上传目录: {dir_path} (workflow_id: {context.workflow_id})")
-                        
-                        # 上传目录到MinIO
-                        upload_result = upload_keyframes_directory(
+                        # 使用压缩上传模块
+                        from services.common.minio_directory_upload import upload_directory_compressed
+
+                        logger.info(f"准备压缩并上传目录: {dir_path} (workflow_id: {context.workflow_id})")
+
+                        # 构建 MinIO 路径
+                        dir_name = os.path.basename(dir_path)
+                        minio_base_path = f"{context.workflow_id}/{dir_name}"
+
+                        # 压缩并上传目录到MinIO
+                        upload_result = upload_directory_compressed(
                             local_dir=dir_path,
-                            workflow_id=context.workflow_id,
-                            delete_local=False  # 不删除本地目录
+                            minio_base_path=minio_base_path,
+                            file_pattern="*",  # 上传所有文件
+                            compression_format="zip",  # 使用 ZIP 格式
+                            compression_level="default",  # 默认压缩级别
+                            delete_local=False,  # 不删除本地目录
+                            workflow_id=context.workflow_id  # 传递 workflow_id 用于临时文件
                         )
-                        
+
                         if upload_result["success"]:
-                            # 追加 MinIO URL，保留原始本地目录
-                            stage.output[f"{key}_minio_url"] = upload_result["minio_base_url"]
-                            stage.output[f"{key}_files_count"] = len(upload_result["uploaded_files"])
-                            stage.output[f"{key}_uploaded_files"] = upload_result["uploaded_files"]
-                            logger.info(f"目录上传成功: {key}_minio_url = {upload_result['minio_base_url']}, 文件数: {len(upload_result['uploaded_files'])}")
+                            # 追加压缩包 URL，保留原始本地目录
+                            minio_field_name = convention.get_minio_url_field_name(key)
+                            stage.output[minio_field_name] = upload_result["archive_url"]
+
+                            # 添加压缩信息
+                            compression_info = upload_result.get("compression_info", {})
+                            stage.output[f"{key}_compression_info"] = {
+                                "files_count": compression_info.get("files_count", 0),
+                                "original_size": compression_info.get("original_size", 0),
+                                "compressed_size": compression_info.get("compressed_size", 0),
+                                "compression_ratio": compression_info.get("compression_ratio", 0),
+                                "format": compression_info.get("format", "zip")
+                            }
+
+                            logger.info(
+                                f"目录压缩上传成功: {minio_field_name} = {upload_result['archive_url']}, "
+                                f"文件数: {compression_info.get('files_count', 0)}, "
+                                f"压缩率: {compression_info.get('compression_ratio', 0):.1%}"
+                            )
                         else:
-                            logger.warning(f"目录上传失败: {dir_path}, 错误: {upload_result.get('error', '未知错误')}")
+                            logger.warning(f"目录压缩上传失败: {dir_path}, 错误: {upload_result.get('error', '未知错误')}")
                             # 即使上传失败也保留原始目录路径
                             stage.output[f"{key}_upload_error"] = upload_result.get("error")
-                            
+
                     except Exception as e:
-                        logger.warning(f"上传目录失败: {dir_path}, 错误: {e}", exc_info=True)
+                        logger.warning(f"压缩上传目录失败: {dir_path}, 错误: {e}", exc_info=True)
                         stage.output[f"{key}_upload_error"] = str(e)
                         
     except Exception as e:

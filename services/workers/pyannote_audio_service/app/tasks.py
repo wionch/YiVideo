@@ -78,297 +78,32 @@ class PyannoteAudioTask:
 @gpu_lock(timeout=1800, poll_interval=0.5)
 def diarize_speakers(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    说话人分离工作流节点 - 使用subprocess调用独立推理脚本
+    [工作流任务] 说话人分离 - 使用 subprocess 调用独立推理脚本。
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
 
     Args:
-        context: 工作流上下文，包含以下字段：
-            - workflow_id: 工作流ID
-            - input_params: 输入参数
-            - stages: 阶段信息
-            - error: 错误信息（如果有）
+        context: 工作流上下文
 
     Returns:
         dict: 包含说话人分离结果的字典
     """
-    start_time = time.time()
+    from services.workers.pyannote_audio_service.executors import PyannoteAudioDiarizeSpeakersExecutor
+    from services.common.context import WorkflowContext
+    from services.common import state_manager
+
     workflow_context = WorkflowContext(**context)
-    stage_name = self.name
-    workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-    state_manager.update_workflow_state(workflow_context)
-
-    try:
-        # 验证输入上下文
-        if not isinstance(context, dict):
-            raise ValueError("工作流上下文必须为字典格式")
-
-        # --- Parameter Resolution ---
-        resolved_params = {}
-        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
-        if node_params:
-            try:
-                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
-                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-            except ValueError as e:
-                logger.error(f"[{stage_name}] 参数解析失败: {e}")
-                raise e
-        
-        # 先初始化为空，稍后在音频源选择完成后记录
-        workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
-
-        workflow_id = workflow_context.workflow_id
-        logger.info(f"[{workflow_id}] 开始说话人分离任务 (subprocess模式)")
-        
-        # --- 文件下载准备 ---
-        file_service = get_file_service()
-
-        # 步骤1: 获取音频文件路径（与其他服务保持一致）
-        # 优先从 parameters/input_data 获取
-        audio_path = get_param_with_fallback("audio_path", resolved_params, workflow_context)
-        audio_source = ""
-        
-        if audio_path:
-            audio_source = "parameter/input_data"
-            logger.info(f"[{workflow_id}] 从参数/input_data获取音频: {audio_path}")
-        else:
-            # 其次检查工作流中是否有其他任务产生的音频文件
-            ffmpeg_stage = workflow_context.stages.get('ffmpeg.extract_audio')
-            if ffmpeg_stage and ffmpeg_stage.output and ffmpeg_stage.output.get('audio_path'):
-                audio_path = ffmpeg_stage.output.get('audio_path')
-                if audio_path and os.path.exists(audio_path):
-                    audio_source = "ffmpeg.extract_audio"
-                    logger.info(f"[{workflow_id}] 成功获取ffmpeg提取的音频: {audio_path}")
-
-            # 如果没有ffmpeg提取的音频，检查音频分离服务
-            if not audio_path:
-                separator_stage = workflow_context.stages.get('audio_separator.separate_vocals')
-                if separator_stage and separator_stage.output:
-                    potential_path = separator_stage.output.get('vocal_audio')
-                    if potential_path:
-                        audio_path = potential_path
-                        audio_source = "audio_separator.separate_vocals"
-                        logger.info(f"[{workflow_id}] 成功获取分离后的人声音频: {audio_path}")
-                    if not audio_path:
-                        all_tracks = separator_stage.output.get('all_audio_files') or []
-                        if isinstance(all_tracks, list) and all_tracks:
-                            audio_path = all_tracks[0]
-                            audio_source = "audio_separator.separate_vocals"
-                            logger.info(f"[{workflow_id}] 使用分离结果列表中的音频: {audio_path}")
-        
-        if not audio_path:
-            raise ValueError("无法获取音频文件路径：请确保 ffmpeg.extract_audio 或 audio_separator.separate_vocals 任务已成功完成，或在 input_params 中提供 audio_path/video_path")
-
-        logger.info(f"[{workflow_id}] ========== 音频源选择结果 ==========")
-        logger.info(f"[{workflow_id}] 选择的音频源: {audio_source}")
-        logger.info(f"[{workflow_id}] 音频文件路径: {audio_path}")
-        
-        # 记录实际使用的输入参数到input_params
-        recorded_input_params = workflow_context.stages[stage_name].input_params.copy()
-        
-        # 如果没有显式参数，记录智能选择的输入源
-        if not recorded_input_params:
-            if audio_source == "ffmpeg.extract_audio":
-                recorded_input_params['audio_source'] = 'ffmpeg.extract_audio'
-            elif audio_source == "audio_separator.separate_vocals":
-                recorded_input_params['audio_source'] = 'audio_separator.separate_vocals'
-            else:
-                recorded_input_params['audio_source'] = 'unknown'
-        
-        workflow_context.stages[stage_name].input_params = recorded_input_params
-        
-        # --- 文件下载 ---
-        if audio_path and not os.path.exists(audio_path):
-            logger.info(f"[{workflow_id}] 开始下载音频文件: {audio_path}")
-            audio_path = file_service.resolve_and_download(audio_path, workflow_context.shared_storage_path)
-            logger.info(f"[{workflow_id}] 音频文件下载完成: {audio_path}")
-        
-        # 检查音频文件是否存在
-        if not os.path.exists(audio_path):
-            raise FileNotFoundError(f"音频文件不存在: {audio_path}")
-
-        logger.info(f"[{workflow_id}] ========== 音频文件验证完成 ==========")
-
-        # 创建工作流输出目录
-        workflow_output_dir = Path(workflow_context.shared_storage_path) / "diarization"
-        workflow_output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"[{workflow_id}] 工作流输出目录创建成功: {workflow_output_dir}")
-
-        # 准备输出文件路径 - 保存到工作流目录
-        output_file = workflow_output_dir / "diarization_result.json"
-
-        # 获取推理脚本路径
-        current_dir = Path(__file__).parent
-        infer_script = current_dir / "pyannote_infer.py"
-
-        if not infer_script.exists():
-            raise FileNotFoundError(f"推理脚本不存在: {infer_script}")
-
-        # 获取配置 - 功能开关从配置文件读取，密钥从环境变量读取
-        service_config = config.get('pyannote_audio_service', {})
-        use_paid_api = service_config.get('use_paid_api', False)
-        hf_token = os.environ.get('HF_TOKEN', service_config.get('hf_token', ''))
-        pyannoteai_api_key = os.environ.get('PYANNOTEAI_API_KEY', service_config.get('pyannoteai_api_key', ''))
-
-        # 准备subprocess命令
-        logger.info(f"[{workflow_id}] 准备通过subprocess调用推理脚本")
-        logger.info(f"[{workflow_id}] 推理脚本: {infer_script}")
-        logger.info(f"[{workflow_id}] 音频文件: {audio_path}")
-        logger.info(f"[{workflow_id}] 输出文件: {output_file}")
-        logger.info(f"[{workflow_id}] 使用付费接口: {use_paid_api}")
-
-        if use_paid_api:
-            logger.info(f"[{workflow_id}] PyannoteAI API Key: {'已提供' if pyannoteai_api_key else '未提供'}")
-        else:
-            logger.info(f"[{workflow_id}] HF Token: {'已提供' if hf_token else '未提供'}")
-
-        cmd = [
-            sys.executable,  # 使用当前Python解释器
-            str(infer_script),
-            "--audio_path", str(audio_path),
-            "--output_file", str(output_file)
-        ]
-
-        if use_paid_api:
-            # 使用付费接口
-            cmd.extend(["--use_paid_api"])
-            if pyannoteai_api_key:
-                cmd.extend(["--pyannoteai_api_key", pyannoteai_api_key])
-        else:
-            # 使用免费接口
-            if hf_token:
-                cmd.extend(["--hf_token", hf_token])
-
-        logger.info(f"[{workflow_id}] 执行命令: {' '.join(cmd)}")
-
-        # 执行subprocess
-        logger.info(f"[{workflow_id}] 开始执行subprocess推理...")
-        start_time = time.time()
-
-        try:
-            from services.common.subprocess_utils import run_with_popen
-            
-            result = run_with_popen(
-                cmd,
-                stage_name="pyannote_audio_subprocess",
-                timeout=1800,  # 30分钟超时
-                cwd=str(current_dir),
-                env=os.environ.copy()
-            )
-
-            execution_time = time.time() - start_time
-            logger.info(f"[{workflow_id}] subprocess执行完成，耗时: {execution_time:.3f}s")
-
-            # 检查执行结果
-            if result.returncode != 0:
-                error_msg = f"subprocess执行失败，返回码: {result.returncode}"
-                logger.error(f"[{workflow_id}] {error_msg}")
-                logger.error(f"[{workflow_id}] stdout: {result.stdout}")
-                logger.error(f"[{workflow_id}] stderr: {result.stderr}")
-                raise RuntimeError(f"{error_msg}\nstderr: {result.stderr}")
-
-            logger.info(f"[{workflow_id}] subprocess执行成功")
-            logger.info(f"[{workflow_id}] stdout: {result.stdout}")
-
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("subprocess执行超时（30分钟）")
-        except Exception as e:
-            raise RuntimeError(f"subprocess执行异常: {str(e)}")
-
-        # 读取结果文件
-        if not output_file.exists():
-            raise RuntimeError(f"推理结果文件不存在: {output_file}")
-
-        logger.info(f"[{workflow_id}] 读取推理结果文件: {output_file}")
-
-        import json
-        with open(output_file, 'r', encoding='utf-8') as f:
-            result_data = json.load(f)
-
-        if not result_data.get('success', False):
-            error_info = result_data.get('error', {})
-            raise RuntimeError(f"推理失败: {error_info.get('message', '未知错误')} (类型: {error_info.get('type', '未知')})")
-
-        # 提取说话人片段
-        speaker_segments = result_data.get('segments', [])
-        total_speakers = result_data.get('total_speakers', 0)
-        metadata = result_data.get('metadata', {})
-        api_type = metadata.get('api_type', 'free')
-        model_name = metadata.get('model', 'unknown')
-
-        # 生成说话人相关数据，以便 faster_whisper.generate_subtitle_files 使用
-        detected_speakers = [f"SPEAKER_{i:02d}" for i in range(total_speakers)]
-
-        # 说话人统计信息
-        speaker_statistics = {}
-        for speaker in detected_speakers:
-            speaker_segments_for_speaker = [seg for seg in speaker_segments if seg.get('speaker') == speaker]
-            total_duration = sum(seg.get('duration', 0) for seg in speaker_segments_for_speaker)
-            speaker_statistics[speaker] = {
-                'segments': len(speaker_segments_for_speaker),
-                'duration': total_duration,
-                'words': 0  # 将在后续处理中填充
-            }
-
-        # 创建精简版的输出数据
-        stage_name = "pyannote_audio.diarize_speakers"
-
-        # 精简的API响应数据，移除冗长的 speaker_segments 数组和 speaker_enhanced_segments
-        output_data = {
-            "diarization_file": str(output_file),
-            "detected_speakers": detected_speakers,  # 保留供 faster_whisper 使用
-            "speaker_statistics": speaker_statistics,  # 保留供 faster_whisper 使用
-            "total_speakers": total_speakers,
-            "total_segments": len(speaker_segments),  # 只保留数量，不保留详细数据
-            "summary": f"检测到 {total_speakers} 个说话人，共 {len(speaker_segments)} 个说话片段 (使用{'付费' if api_type == 'paid' else '免费'}接口: {model_name})",
-            "execution_method": "subprocess",
-            "execution_time": execution_time,
-            "audio_source": audio_source,
-            "api_type": api_type,
-            "model_name": model_name,
-            "use_paid_api": use_paid_api
-        }
-
-        # 上传结果到 MinIO，失败不阻断主流程
-        try:
-            minio_object = f"{workflow_id}/diarization/{Path(output_file).name}"
-            diarization_minio_url = file_service.upload_to_minio(
-                local_file_path=str(output_file),
-                object_name=minio_object
-            )
-            output_data["diarization_file_minio_url"] = diarization_minio_url
-            logger.info(f"[{workflow_id}] 说话人分离结果已上传 MinIO: {diarization_minio_url}")
-        except Exception as e:
-            logger.warning(f"[{workflow_id}] 说话人分离结果上传 MinIO 失败: {e}", exc_info=True)
-
-        # 更新阶段状态 - 成功
-        workflow_context.stages[stage_name].status = 'SUCCESS'
-        workflow_context.stages[stage_name].output = output_data
-
-        api_type_text = "付费" if use_paid_api else "免费"
-        logger.info(f"[{workflow_id}] 说话人分离完成 (subprocess模式, {api_type_text}接口): {total_speakers} 个说话人，{len(speaker_segments)} 个片段，耗时: {execution_time:.3f}s")
-
-    except Exception as e:
-        # 获取workflow_id用于错误日志
-        workflow_id = context.get('workflow_id', 'unknown')
-        error_msg = f"[{workflow_id}] 说话人分离失败: {str(e)}"
-        logger.error(error_msg)
-
-        # 更新工作流上下文 - 错误格式
-        workflow_context.stages[stage_name].status = 'FAILED'
-        workflow_context.stages[stage_name].error = str(e)
-        workflow_context.error = f"在阶段 {stage_name} 发生错误: {e}"
-    finally:
-        # 无论如何都要更新状态
-        workflow_context.stages[stage_name].duration = time.time() - start_time
-        state_manager.update_workflow_state(workflow_context)
-
-    return workflow_context.model_dump()
+    executor = PyannoteAudioDiarizeSpeakersExecutor(self.name, workflow_context)
+    result_context = executor.execute()
+    state_manager.update_workflow_state(result_context)
+    return result_context.model_dump()
 
 @celery_app.task(bind=True, name='pyannote_audio.get_speaker_segments')
 def get_speaker_segments(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    获取指定说话人的片段
+    [工作流任务] 获取指定说话人的片段。
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
 
-    支持单任务模式调用，通过input_data传入参数：
+    支持单任务模式调用，通过 input_data 传入参数：
     - diarization_file: 说话人分离结果文件路径
     - speaker: 目标说话人标签（可选，不指定则返回所有说话人统计）
 
@@ -378,113 +113,23 @@ def get_speaker_segments(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         dict: 包含指定说话人片段的字典
     """
-    try:
-        workflow_id = context.get('workflow_id', 'unknown')
-        
-        # --- Parameter Resolution ---
-        workflow_context = WorkflowContext(**context)
-        stage_name = self.name
-        resolved_params = {}
-        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
-        if node_params:
-            try:
-                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
-                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-            except ValueError as e:
-                logger.error(f"[{stage_name}] 参数解析失败: {e}")
-                raise e
-        
-        # 保存到当前 stage 的 input_params
-        workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-        workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
-        
-        # --- 文件下载准备 ---
-        file_service = get_file_service()
-        
-        # 使用统一的参数获取逻辑，支持单任务模式
-        # 优先级：node_params > input_data > 上游节点 (pyannote_audio.diarize_speakers)
-        diarization_file = get_param_with_fallback(
-            "diarization_file",
-            resolved_params,
-            workflow_context,
-            fallback_from_input_data=True,
-            fallback_from_stage="pyannote_audio.diarize_speakers"
-        )
-        
-        target_speaker = get_param_with_fallback(
-            "speaker",
-            resolved_params,
-            workflow_context,
-            fallback_from_input_data=True
-        )
-        
-        # 记录实际使用的输入参数
-        if diarization_file:
-            workflow_context.stages[stage_name].input_params['diarization_file'] = diarization_file
-        if target_speaker:
-            workflow_context.stages[stage_name].input_params['speaker'] = target_speaker
-        
-        if not diarization_file:
-            raise ValueError("无法获取说话人分离结果文件：请提供 diarization_file 参数，或确保 pyannote_audio.diarize_speakers 任务已成功完成")
-        
-        # --- 文件下载 ---
-        if not os.path.exists(diarization_file):
-            logger.info(f"[{workflow_id}] 开始下载说话人分离文件: {diarization_file}")
-            diarization_file = file_service.resolve_and_download(diarization_file, workflow_context.shared_storage_path)
-            logger.info(f"[{workflow_id}] 说话人分离文件下载完成: {diarization_file}")
+    from services.workers.pyannote_audio_service.executors import PyannoteAudioGetSpeakerSegmentsExecutor
+    from services.common.context import WorkflowContext
+    from services.common import state_manager
 
-        if not os.path.exists(diarization_file):
-            raise FileNotFoundError(f"说话人分离结果文件不存在: {diarization_file}")
-
-        # 加载结果文件
-        import json
-        with open(diarization_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        segments = data.get('segments', [])
-
-        if target_speaker:
-            # 过滤指定说话人的片段
-            filtered_segments = [seg for seg in segments if seg['speaker'] == target_speaker]
-            summary = f"说话人 {target_speaker} 的片段: {len(filtered_segments)} 个"
-        else:
-            # 返回所有说话人的片段统计
-            speaker_stats = {}
-            for seg in segments:
-                speaker = seg['speaker']
-                if speaker not in speaker_stats:
-                    speaker_stats[speaker] = []
-                speaker_stats[speaker].append(seg)
-
-            filtered_segments = segments
-            summary = f"所有说话人片段统计: {len(speaker_stats)} 个说话人"
-
-        return {
-            "success": True,
-            "data": {
-                "segments": filtered_segments,
-                "summary": summary
-            }
-        }
-
-    except Exception as e:
-        workflow_id = context.get('workflow_id', 'unknown') if 'context' in locals() else 'unknown'
-        logger.error(f"[{workflow_id}] 获取说话人片段失败: {e}")
-        return {
-            "success": False,
-            "error": {
-                "task": "pyannote_audio.get_speaker_segments",
-                "message": str(e),
-                "type": type(e).__name__
-            }
-        }
+    workflow_context = WorkflowContext(**context)
+    executor = PyannoteAudioGetSpeakerSegmentsExecutor(self.name, workflow_context)
+    result_context = executor.execute()
+    state_manager.update_workflow_state(result_context)
+    return result_context.model_dump()
 
 @celery_app.task(bind=True, name='pyannote_audio.validate_diarization')
 def validate_diarization(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    验证说话人分离结果的质量
+    [工作流任务] 验证说话人分离结果的质量。
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
 
-    支持单任务模式调用，通过input_data传入参数：
+    支持单任务模式调用，通过 input_data 传入参数：
     - diarization_file: 说话人分离结果文件路径
 
     Args:
@@ -493,133 +138,12 @@ def validate_diarization(self: Any, context: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         dict: 包含质量验证结果的字典
     """
-    try:
-        workflow_id = context.get('workflow_id', 'unknown')
+    from services.workers.pyannote_audio_service.executors import PyannoteAudioValidateDiarizationExecutor
+    from services.common.context import WorkflowContext
+    from services.common import state_manager
 
-        # --- Parameter Resolution ---
-        workflow_context = WorkflowContext(**context)
-        stage_name = self.name
-        resolved_params = {}
-        node_params = workflow_context.input_params.get('node_params', {}).get(stage_name, {})
-        if node_params:
-            try:
-                resolved_params = resolve_parameters(node_params, workflow_context.model_dump())
-                logger.info(f"[{stage_name}] 参数解析完成: {resolved_params}")
-            except ValueError as e:
-                logger.error(f"[{stage_name}] 参数解析失败: {e}")
-                raise e
-        
-        # 保存到当前 stage 的 input_params
-        workflow_context.stages[stage_name] = StageExecution(status="IN_PROGRESS")
-        workflow_context.stages[stage_name].input_params = resolved_params.copy() if resolved_params else {}
-        
-        # --- 文件下载准备 ---
-        file_service = get_file_service()
-        
-        # 使用统一的参数获取逻辑，支持单任务模式
-        # 优先级：node_params > input_data > 上游节点 (pyannote_audio.diarize_speakers)
-        diarization_file = get_param_with_fallback(
-            "diarization_file",
-            resolved_params,
-            workflow_context,
-            fallback_from_input_data=True,
-            fallback_from_stage="pyannote_audio.diarize_speakers"
-        )
-        
-        # 记录实际使用的输入参数
-        if diarization_file:
-            workflow_context.stages[stage_name].input_params['diarization_file'] = diarization_file
-        
-        if not diarization_file:
-            raise ValueError("无法获取说话人分离结果文件：请提供 diarization_file 参数，或确保 pyannote_audio.diarize_speakers 任务已成功完成")
-        
-        # --- 文件下载 ---
-        if not os.path.exists(diarization_file):
-            logger.info(f"[{workflow_id}] 开始下载说话人分离文件: {diarization_file}")
-            diarization_file = file_service.resolve_and_download(diarization_file, workflow_context.shared_storage_path)
-            logger.info(f"[{workflow_id}] 说话人分离文件下载完成: {diarization_file}")
-
-        if not os.path.exists(diarization_file):
-            raise FileNotFoundError(f"说话人分离结果文件不存在: {diarization_file}")
-
-        # 加载结果文件
-        import json
-        with open(diarization_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        segments = data.get('segments', [])
-
-        if not segments:
-            return {
-                "success": True,
-                "data": {
-                    "valid": False,
-                    "issues": ["没有检测到任何说话人片段"],
-                    "summary": "说话人分离结果无效"
-                }
-            }
-
-        # 质量检查
-        issues = []
-        validation_results = {
-            "valid": True,
-            "total_segments": len(segments),
-            "total_speakers": data.get('total_speakers', 0),
-            "total_duration": 0,
-            "avg_segment_duration": 0,
-            "issues": []
-        }
-
-        # 计算总时长
-        total_duration = 0
-        segment_durations = []
-
-        for segment in segments:
-            duration = segment.get('duration', 0)
-            segment_durations.append(duration)
-            total_duration += duration
-
-            # 检查片段时长
-            if duration < 0.5:  # 片段过短
-                issues.append(f"片段过短 ({duration:.2f}s)")
-            elif duration > 30:  # 片段过长
-                issues.append(f"片段过长 ({duration:.2f}s)")
-
-        validation_results["total_duration"] = total_duration
-        validation_results["avg_segment_duration"] = total_duration / len(segments) if segments else 0
-
-        # 检查说话人数量
-        if validation_results["total_speakers"] < 1:
-            issues.append("没有检测到说话人")
-            validation_results["valid"] = False
-        elif validation_results["total_speakers"] > 10:  # 说话人过多可能是问题
-            issues.append(f"检测到过多说话人 ({validation_results['total_speakers']})")
-
-        # 检查片段分布
-        if len(set(seg['speaker'] for seg in segments)) < validation_results["total_speakers"]:
-            issues.append("部分说话人片段不完整")
-
-        validation_results["issues"] = issues
-        validation_results["valid"] = len(issues) == 0
-
-        summary = "说话人分离结果有效" if validation_results["valid"] else "说话人分离结果存在问题"
-
-        return {
-            "success": True,
-            "data": {
-                "validation": validation_results,
-                "summary": summary
-            }
-        }
-
-    except Exception as e:
-        workflow_id = context.get('workflow_id', 'unknown') if 'context' in locals() else 'unknown'
-        logger.error(f"[{workflow_id}] 验证说话人分离失败: {e}")
-        return {
-            "success": False,
-            "error": {
-                "task": "pyannote_audio.validate_diarization",
-                "message": str(e),
-                "type": type(e).__name__
-            }
-        }
+    workflow_context = WorkflowContext(**context)
+    executor = PyannoteAudioValidateDiarizationExecutor(self.name, workflow_context)
+    result_context = executor.execute()
+    state_manager.update_workflow_state(result_context)
+    return result_context.model_dump()

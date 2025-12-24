@@ -114,7 +114,8 @@
       "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/create-new-feature.sh:*)",
       "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/setup-plan.sh:*)",
       "Bash(ls:*)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(wc -l /opt/wionch/docker/yivideo/tests/unit/common/*.py /opt/wionch/docker/yivideo/tests/integration/test_node_response_format.py)"
     ],
     "deny": [
       "Bash(docker build:*)"
