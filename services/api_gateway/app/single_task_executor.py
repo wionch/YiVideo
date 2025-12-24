@@ -308,7 +308,7 @@ class SingleTaskExecutor:
                     merged_state["create_at"] = context.get("create_at")
 
                 workflow_context = WorkflowContext(**merged_state)
-                update_workflow_state(workflow_context)
+                update_workflow_state(workflow_context, skip_side_effects=True)
                 logger.info(f"合并更新任务记录: {task_id}, 状态: {status}")
             else:
                 workflow_context = WorkflowContext(**context)
@@ -439,8 +439,8 @@ class SingleTaskExecutor:
             
             # 保存到Redis
             workflow_context = WorkflowContext(**state)
-            update_workflow_state(workflow_context)
-            
+            update_workflow_state(workflow_context, skip_side_effects=True)
+
             logger.info(f"更新任务状态: {task_id} -> {status}")
             
         except Exception as e:

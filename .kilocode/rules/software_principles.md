@@ -1,70 +1,70 @@
-# Software Engineering Principles
+# 软件工程原则
 
-Follow these core principles for all code implementations:
+在所有代码实现中遵循以下核心原则：
 
-## KISS Principle (Keep It Simple, Stupid)
+## KISS 原则 (Keep It Simple, Stupid - 保持简单)
 
--   Write simple, straightforward code that is easy to understand
--   Avoid unnecessary complexity and over-engineering
--   Prefer clear, explicit implementations over clever tricks
--   If a solution seems too complex, look for a simpler approach
--   Maximum function length: 50 lines (unless absolutely necessary)
+-   编写简单、直接且易于理解的代码
+-   避免不必要的复杂性和过度工程
+-   优先选择清晰、显式的实现，而不是巧妙的技巧
+-   如果一个解决方案看起来太复杂，寻找更简单的方法
+-   函数最大长度：50 行（除非绝对必要）
 
-## DRY Principle (Don't Repeat Yourself)
+## DRY 原则 (Don't Repeat Yourself - 不要重复自己)
 
--   Never duplicate code - extract repeated logic into reusable functions
--   Create helper functions or utility modules for common operations
--   If you see the same pattern 3+ times, refactor it
--   Each piece of knowledge should have a single, authoritative representation
--   When fixing bugs, ensure the fix applies to all instances
+-   切勿重复代码 - 将重复逻辑提取到可重用的函数中
+-   为常见操作创建辅助函数或实用程序模块
+-   如果你看到相同的模式出现 3 次以上，请进行重构
+-   每一条知识都应该有一个单一、权威的表示
+-   修复错误时，确保修复适用于所有实例
 
-## YAGNI Principle (You Aren't Gonna Need It)
+## YAGNI 原则 (You Aren't Gonna Need It - 你不会需要它)
 
--   Only implement features that are currently required
--   Do not add functionality based on speculation about future needs
--   Avoid creating abstractions until they are actually needed
--   Remove unused code, functions, and imports
--   Focus on solving the current problem, not hypothetical future problems
+-   仅实现当前需要的功能
+-   不要基于对未来需求的推测来添加功能
+-   在实际需要之前避免创建抽象
+-   删除未使用的代码、函数和导入
+-   专注于解决当前问题，而不是假设的未来问题
 
-## SOLID Principles
+## SOLID 原则
 
-### Single Responsibility Principle (SRP)
+### 单一职责原则 (SRP)
 
--   Each class/module/function should have one clear responsibility
--   If describing the purpose requires "and", it likely needs splitting
--   Changes to requirements should only affect one module
+-   每个类/模块/函数都应该有一个明确的职责
+-   如果描述目的需要使用 "和"，它可能需要拆分
+-   需求变更应该只影响一个模块
 
-### Open/Closed Principle (OCP)
+### 开闭原则 (OCP)
 
--   Design for extension without modification
--   Use interfaces, abstract classes, and composition
--   New features should be added through extension, not by changing existing code
+-   设计应支持扩展而无需修改
+-   使用接口、抽象类和组合
+-   新功能应通过扩展添加，而不是通过更改现有代码
 
-### Liskov Substitution Principle (LSP)
+### 里氏替换原则 (LSP)
 
--   Subtypes must be substitutable for their base types
--   Derived classes should extend, not replace, base class behavior
--   Maintain the contract established by parent classes
+-   子类型必须能够替换其基类型
+-   派生类应该扩展而不是替换基类的行为
+-   维护由父类建立的契约
 
-### Interface Segregation Principle (ISP)
+### 接口隔离原则 (ISP)
 
--   Prefer multiple specific interfaces over one general-purpose interface
--   Clients should not depend on methods they don't use
--   Keep interfaces focused and minimal
+-   优先选择多个特定接口，而不是一个通用接口
+-   客户端不应依赖于它们不使用的方法
+-   保持接口专注且最小化
 
-### Dependency Inversion Principle (DIP)
+### 依赖反转原则 (DIP)
 
--   Depend on abstractions, not concrete implementations
--   High-level modules should not depend on low-level modules
--   Both should depend on abstractions
+-   依赖于抽象，而不是具体实现
+-   高层模块不应依赖于低层模块
+-   两者都应依赖于抽象
 
-## Code Review Checklist
+## 代码审查清单
 
-Before submitting code, verify:
+在提交代码之前，请验证：
 
--   [ ] Is the solution as simple as possible? (KISS)
--   [ ] Is there any duplicated code? (DRY)
--   [ ] Did I add features not in the requirements? (YAGNI)
--   [ ] Does each class/function have a single, clear purpose? (SRP)
--   [ ] Can I extend functionality without modifying existing code? (OCP)
--   [ ] Are all dependencies on abstractions rather than concrete types? (DIP)
+-   [ ] 解决方案是否尽可能简单？(KISS)
+-   [ ] 是否有任何重复代码？(DRY)
+-   [ ] 我是否添加了需求中没有的功能？(YAGNI)
+-   [ ] 每个类/函数是否都有单一且明确的目的？(SRP)
+-   [ ] 我是否可以在不修改现有代码的情况下扩展功能？(OCP)
+-   [ ] 所有依赖项是否都基于抽象而不是具体类型？(DIP)

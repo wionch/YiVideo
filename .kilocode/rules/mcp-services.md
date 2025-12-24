@@ -1,7 +1,7 @@
-# MCP Services Configuration
+# MCP 服务配置
 
-Always use:
+始终使用：
 
--   serena for semantic code retrieval and editing tools
--   context7 for up to date documentation on third party code
--   sequential thinking for any decision making
+-   `serena`：用于语义代码检索和编辑工具
+-   `context7`：用于获取第三方代码的最新文档
+-   `sequential thinking`：用于进行任何决策

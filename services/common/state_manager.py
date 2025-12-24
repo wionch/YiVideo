@@ -76,6 +76,11 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
     """
     自动检测并上传工作流中的文件到MinIO
 
+    去重逻辑:
+    - 检查 {key}_minio_url 字段是否已存在且值有效（非空字符串）
+    - 如果存在有效URL,跳过上传并记录日志
+    - 如果不存在或为空,执行上传并生成 MinIO URL
+
     Args:
         context: 工作流上下文对象
     """
@@ -123,6 +128,19 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
 
                 # 处理数组字段（如 all_audio_files）
                 if isinstance(file_value, list):
+                    # 检查是否已有有效的 MinIO URL 数组（非空且包含有效URL）
+                    existing_urls = stage.output.get(minio_field_name)
+                    if existing_urls and isinstance(existing_urls, list) and len(existing_urls) > 0:
+                        # 验证至少有一个有效URL
+                        has_valid_url = any(
+                            isinstance(url, str) and url.strip() and 
+                            (url.startswith('http://') or url.startswith('https://'))
+                            for url in existing_urls
+                        )
+                        if has_valid_url:
+                            logger.info(f"跳过已上传的文件数组: {key} (已有 {minio_field_name})")
+                            continue
+
                     minio_urls = []
                     for file_path in file_value:
                         # 跳过已经是URL的路径
@@ -154,6 +172,16 @@ def _upload_files_to_minio(context: WorkflowContext) -> None:
 
                 # 处理单个文件字段
                 elif isinstance(file_value, str):
+                    # 检查是否已有有效的 MinIO URL（非空字符串且是有效URL）
+                    existing_url = stage.output.get(minio_field_name)
+                    if existing_url and isinstance(existing_url, str) and existing_url.strip():
+                        # 验证是有效的URL而非空字符串
+                        if existing_url.startswith('http://') or existing_url.startswith('https://'):
+                            logger.info(f"跳过已上传的文件: {key} (已有 {minio_field_name} = {existing_url})")
+                            continue
+                        else:
+                            logger.warning(f"检测到无效的MinIO URL: {minio_field_name} = '{existing_url}', 将重新上传")
+
                     # 跳过已经是URL的路径
                     if file_value.startswith('http://') or file_value.startswith('https://'):
                         logger.info(f"跳过已是URL的路径: {key} = {file_value}")
