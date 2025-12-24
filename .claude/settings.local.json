@@ -117,7 +117,9 @@
       "Bash(rg:*)",
       "Bash(wc -l /opt/wionch/docker/yivideo/tests/unit/common/*.py /opt/wionch/docker/yivideo/tests/integration/test_node_response_format.py)",
       "mcp__memory__create_entities",
-      "mcp__memory__create_relations"
+      "mcp__memory__create_relations",
+      "Bash(chmod +x /opt/wionch/docker/yivideo/tests/validation/validate_gpu_lock_docs.sh)",
+      "Bash(shellcheck tests/validation/validate_gpu_lock_docs.sh)"
     ],
     "deny": [
       "Bash(docker build:*)"

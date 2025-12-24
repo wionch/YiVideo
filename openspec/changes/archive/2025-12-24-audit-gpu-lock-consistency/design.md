@@ -4,6 +4,24 @@
 
 确保 GPU 锁系统的文档与实际代码配置完全一致,消除误导性信息,为后续性能优化奠定可信基础。
 
+## 🔗 关联变更影响
+
+### 死锁风险修复 (已完成)
+
+在本提案执行过程中,发现了严重的死锁风险问题,已通过 `fix-gpu-lock-deadlock-risks` 提案完成修复:
+
+**已修复的关键问题**:
+1. ✅ 锁释放原子性 - 使用 Lua 脚本消除竞态条件
+2. ✅ IndexTTS 服务错误 - 修复 `AttributeError` 导致的锁泄漏
+3. ✅ 异常处理增强 - 三层保护机制确保锁永不泄漏
+
+**对本设计的影响**:
+- **Phase 1 (文档修复)**: 需要同步反映已完成的死锁修复
+- **Phase 2 (配置优化)**: 必要性降低,应更加谨慎,优先保证稳定性
+- **超时配置**: 应参考 `fix-gpu-lock-deadlock-risks` Phase 2 的配置建议
+
+**参考**: `openspec/changes/archive/2025-12-24-fix-gpu-lock-deadlock-risks/PHASE1_SUMMARY.md`
+
 ## 架构决策
 
 ### ADR-001: 采用双阶段策略而非一次性修复
@@ -54,6 +72,11 @@ gpu_lock:
 ### ADR-003: 配置优化评估方法论
 
 **决策**: 如果执行 Phase 2,必须遵循以下评估流程:
+
+**⚠️ 重要更新**: 鉴于 `fix-gpu-lock-deadlock-risks` 已完成死锁风险修复,Phase 2 的配置优化应:
+1. 等待 `fix-gpu-lock-deadlock-risks` Phase 2 完成后再评估
+2. 参考其性能基准测试结果
+3. 避免重复测试和配置冲突
 
 #### 1. 性能基准测试
 ```python

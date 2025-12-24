@@ -9,6 +9,50 @@
 - [ ] 新功能 (Feature)
 - [ ] 破坏性变更 (Breaking Change)
 
+## Why
+
+### 核心问题
+GPU 锁系统文档与实际代码配置存在严重不一致,导致以下关键问题:
+
+1. **误导性信息传播**: 文档声称已完成性能优化并标记为"✅ 已完成并验证",但实际配置未变更,导致开发者、运维人员和项目管理者基于错误信息做决策。
+
+2. **技术债务累积**: 文档与代码的长期不一致降低了代码库的可信度,违反了"文档即代码"的工程原则,增加了维护成本。
+
+3. **性能优化机会丢失**: 文档中提出的优化配置(如 `poll_interval: 0.5秒`)可能确实有价值,但因缺乏验证和实施,导致潜在的 83% 响应速度提升未能实现。
+
+4. **运维风险**: 运维人员在故障排查时可能基于错误的文档信息进行分析,浪费时间并可能做出错误的调优决策。
+
+### 业务影响
+- **开发效率**: 新开发者被误导,浪费时间理解不存在的"优化"
+- **系统性能**: 错过了文档中声称的性能提升机会
+- **团队信任**: 文档不准确损害团队对技术文档的信任
+
+### 为什么现在修复
+1. **及时止损**: 防止更多开发者被误导
+2. **奠定基础**: 为后续真正的性能优化建立可信的文档基础
+3. **工程文化**: 强化"文档准确性"的工程文化,防止类似问题再次发生
+
+### 🔗 关联变更
+在本提案前期执行过程中,发现了 GPU 锁系统存在严重的**死锁风险和资源泄漏问题**,已通过独立提案 `fix-gpu-lock-deadlock-risks` 进行修复:
+
+**关键发现**:
+- 🔴 **Critical**: 锁释放存在竞态条件 (GET + DEL 非原子操作)
+- 🔴 **Critical**: IndexTTS 服务调用不存在的方法导致锁泄漏
+- 🔴 **Critical**: 异常处理不完整可能导致永久死锁
+
+**已完成修复** (Phase 1 - 2025-12-24):
+- ✅ 使用 Redis Lua 脚本实现原子锁释放
+- ✅ 修复 IndexTTS 服务 `AttributeError`
+- ✅ 实现三层异常保护机制
+- ✅ 28 个测试用例全部通过
+
+**参考**: `openspec/changes/archive/2025-12-24-fix-gpu-lock-deadlock-risks/`
+
+**对本提案的影响**:
+- Phase 2 (配置优化) 的**必要性和紧迫性降低**,因为死锁风险已通过代码修复解决
+- 配置优化应**更加谨慎**,优先保证系统稳定性
+- 建议将 Phase 2 的超时配置调整与 `fix-gpu-lock-deadlock-risks` 的 Phase 2 协同进行
+
 ## 问题陈述
 
 ### 背景
@@ -81,6 +125,40 @@
 - 收集性能基准数据
 - 制定分阶段部署计划
 
+## What Changes
+
+### Phase 1: 文档修复 (已完成)
+
+**文档变更**:
+- `docs/technical/reference/GPU_LOCK_COMPLETE_GUIDE.md`:
+  - 修复配置参数值,与 `config.yml` 完全一致
+  - 重构"优化历史"表格为"优化建议(待验证)"
+  - 修复实施状态标记,使用分级状态 (✅/⚠️/🔄)
+  - 同步死锁修复信息 (关联提案 `fix-gpu-lock-deadlock-risks`)
+  - 更新文档版本 v2.1 → v2.2
+
+**配置注释优化**:
+- `config.yml`:
+  - 为所有 GPU 锁参数添加清晰注释
+  - 标记优化建议为"建议"而非"已应用"
+  - 添加风险评估和验证要求说明
+
+**自动化验证**:
+- `tests/validation/validate_gpu_lock_docs.sh` (新增):
+  - 自动提取并对比文档与配置中的参数值
+  - 验证 4 个关键参数一致性
+  - 彩色输出验证结果
+
+**提案文档**:
+- `openspec/changes/audit-gpu-lock-consistency/audit_report.md` (新增)
+- `openspec/changes/audit-gpu-lock-consistency/SYNC_SUMMARY.md` (新增)
+- `openspec/changes/audit-gpu-lock-consistency/PHASE1_SUMMARY.md` (新增)
+- `openspec/changes/audit-gpu-lock-consistency/CODE_REVIEW.md` (新增)
+
+### Phase 2: 配置优化 (可选,待评估)
+
+**注**: Phase 2 已降低优先级,建议等待关联提案 `fix-gpu-lock-deadlock-risks` Phase 2 完成后再评估。
+
 ## 变更范围
 
 ### 受影响的能力 (Capabilities)
@@ -144,8 +222,19 @@
 
 ## 依赖关系
 
-- **无阻塞依赖**: 可立即开始
-- **后续依赖**: Phase 2 需要 Phase 1 完成后才能进行
+### 上游依赖
+- ✅ **已完成**: `fix-gpu-lock-deadlock-risks` Phase 1 (死锁风险修复)
+  - 已归档至: `openspec/changes/archive/2025-12-24-fix-gpu-lock-deadlock-risks/`
+  - 完成日期: 2025-12-24
+  - 状态: 已合并到主分支
+
+### 下游依赖
+- Phase 2 需要 Phase 1 完成后才能进行
+- Phase 2 建议与 `fix-gpu-lock-deadlock-risks` Phase 2 协同规划
+
+### 并行关系
+- 本提案 Phase 1 (文档修复) 可与其他提案并行执行
+- 本提案 Phase 2 (配置优化) 应等待 `fix-gpu-lock-deadlock-risks` Phase 2 完成后再评估
 
 ## 相关规范
 
