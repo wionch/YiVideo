@@ -115,7 +115,9 @@
       "Bash(/opt/wionch/docker/yivideo/.specify/scripts/bash/setup-plan.sh:*)",
       "Bash(ls:*)",
       "Bash(rg:*)",
-      "Bash(wc -l /opt/wionch/docker/yivideo/tests/unit/common/*.py /opt/wionch/docker/yivideo/tests/integration/test_node_response_format.py)"
+      "Bash(wc -l /opt/wionch/docker/yivideo/tests/unit/common/*.py /opt/wionch/docker/yivideo/tests/integration/test_node_response_format.py)",
+      "mcp__memory__create_entities",
+      "mcp__memory__create_relations"
     ],
     "deny": [
       "Bash(docker build:*)"

@@ -46,6 +46,17 @@ class LockMechanism(Enum):
     EVENT_DRIVEN = "event_driven"  # 事件驱动
     HYBRID = "hybrid"  # 混合机制
 
+# --- Lua 脚本定义 ---
+# 原子释放锁脚本 - 确保只有锁的持有者才能释放锁
+RELEASE_LOCK_SCRIPT = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    redis.call("del", KEYS[1])
+    return 1
+else
+    return 0
+end
+"""
+
 # --- 全局Pub/Sub管理器 ---
 class PubSubManager:
     """Redis Pub/Sub管理器 - 提供事件驱动的锁释放通知"""
@@ -216,6 +227,14 @@ class SmartGpuLockManager:
         self.lock_history = []  # 锁历史记录
         self.max_history_size = 100  # 最大历史记录数
         self.event_waiters = {}  # 等待锁释放的事件: lock_key -> threading.Event
+        
+        # 异常统计
+        self.exception_stats = {
+            "normal_release_failures": 0,
+            "emergency_releases": 0,
+            "release_script_errors": 0,
+            "ownership_violations": 0,
+        }
 
     def _acquire_lock_internal(self, task_name: str, lock_key: str, config: Dict[str, Any], start_time: float) -> bool:
         """
@@ -462,28 +481,30 @@ class SmartGpuLockManager:
             return False
 
         try:
-            lock_value = redis_client.get(lock_key)
-            # 兼容多种锁值格式：
-            # 1. 新格式：locked_by_{task_name}
-            # 2. 旧格式：locked
-            # 3. 其他格式：只要包含任务名称或就是locked
-            if lock_value and (
-                f"locked_by_{task_name}" in lock_value or
-                lock_value == "locked" or
-                task_name in lock_value
-            ):
-                redis_client.delete(lock_key)
-                logger.info(f"任务 {task_name} 释放锁 '{lock_key}' (原值: {lock_value}, 原因: {release_reason})")
+            # 使用 Lua 脚本保证原子性
+            lock_value = f"locked_by_{task_name}"
+            result = redis_client.eval(RELEASE_LOCK_SCRIPT, 1, lock_key, lock_value)
 
+            if result == 1:
+                logger.info(f"任务 {task_name} 释放锁 '{lock_key}' (原因: {release_reason})")
+                
                 # 发布锁释放事件
                 pub_sub_manager.publish_lock_release(lock_key, task_name, release_reason)
-
+                
                 return True
             else:
-                logger.warning(f"任务 {task_name} 尝试释放不持有的锁 '{lock_key}' (当前值: {lock_value})")
+                current_value = redis_client.get(lock_key)
+                logger.warning(f"任务 {task_name} 尝试释放不持有的锁 '{lock_key}' (当前值: {current_value})")
+                self.exception_stats["ownership_violations"] += 1
                 return False
+
         except Exception as e:
-            logger.error(f"任务 {task_name} 释放锁时发生异常: {e}")
+            # 检查是否是 Redis 响应错误（Lua 脚本执行失败）
+            if type(e).__name__ == "ResponseError":
+                logger.error(f"Lua 脚本执行失败: {e}", exc_info=True)
+                self.exception_stats["release_script_errors"] += 1
+            else:
+                logger.error(f"任务 {task_name} 释放锁时发生异常: {e}", exc_info=True)
             return False
 
     def get_statistics(self) -> Dict[str, Any]:
@@ -727,8 +748,7 @@ def gpu_lock(lock_key: str = "gpu_lock:0",
                     logger.error(f"任务 {task_name} 执行失败: {e}")
                     raise
                 finally:
-                    # 任务执行完毕，释放锁
-                    # GPU显存清理 - 确保任务完成后显存被释放
+                    # 第一层: GPU 显存清理
                     try:
                         from services.common.gpu_memory_manager import log_gpu_memory_state, force_cleanup_gpu_memory
                         log_gpu_memory_state(f"GPU任务完成 - {task_name}")
@@ -737,7 +757,30 @@ def gpu_lock(lock_key: str = "gpu_lock:0",
                     except Exception as cleanup_e:
                         logger.warning(f"任务 {task_name} GPU显存清理失败: {cleanup_e}")
 
-                    lock_manager.release_lock(task_name, lock_key, "normal")
+                    # 第二层: 正常锁释放
+                    lock_released = False
+                    try:
+                        lock_released = lock_manager.release_lock(task_name, lock_key, "normal")
+                    except Exception as release_error:
+                        logger.critical(f"正常释放锁失败: {release_error}", exc_info=True)
+                        lock_manager.exception_stats["normal_release_failures"] += 1
+
+                    # 第三层: 应急强制释放
+                    if not lock_released:
+                        try:
+                            logger.warning(f"使用应急方式释放锁 {lock_key}")
+                            redis_client.delete(lock_key)
+                            lock_manager.exception_stats["emergency_releases"] += 1
+
+                            # 发送告警
+                            send_alert("gpu_lock_emergency_release", {
+                                "lock_key": lock_key,
+                                "task_name": task_name,
+                                "timestamp": time.time()
+                            })
+                        except Exception as emergency_error:
+                            logger.critical(f"应急释放锁也失败: {emergency_error}", exc_info=True)
+                            record_critical_failure(lock_key, task_name, emergency_error)
             else:
                 # 获取锁失败，抛出异常
                 error_msg = f"任务 {task_name} 无法获取锁 '{lock_key}'，任务放弃执行"
@@ -841,6 +884,56 @@ def get_gpu_lock_health_summary() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"获取锁健康摘要失败: {e}")
         return {"error": str(e)}
+
+
+def send_alert(alert_type: str, data: dict[str, Any]):
+    """
+    发送告警 (当前仅记录日志,后续可扩展)
+    
+    Args:
+        alert_type: 告警类型
+        data: 告警数据
+    """
+    logger.error(f"[告警] {alert_type}: {data}")
+    # TODO: 集成邮件、Slack、钉钉等通知渠道
+
+
+def record_critical_failure(lock_key: str, task_name: str, error: Exception):
+    """
+    记录关键失败到持久化存储
+    
+    Args:
+        lock_key: 锁键
+        task_name: 任务名称
+        error: 异常对象
+    """
+    import socket
+    import traceback
+    
+    failure_record = {
+        "lock_key": lock_key,
+        "task_name": task_name,
+        "error": str(error),
+        "traceback": traceback.format_exc(),
+        "timestamp": time.time(),
+        "hostname": socket.gethostname()
+    }
+
+    # 写入日志文件
+    log_file = "/var/log/yivideo/gpu_lock_critical_failures.log"
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        with open(log_file, "a") as f:
+            f.write(json.dumps(failure_record) + "\n")
+    except Exception as e:
+        logger.critical(f"无法写入关键失败日志: {e}")
+
+    # 触发 P0 告警
+    send_alert("gpu_lock_critical_failure", {
+        "level": "P0",
+        "message": f"GPU 锁关键失败: {lock_key}",
+        "details": failure_record
+    })
 
 
 def release_gpu_lock(lock_key: str = "gpu_lock:0", task_name: str = "manual") -> bool:

@@ -51,9 +51,20 @@ class IndexTTSTask(Task):
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """任务失败时的回调"""
         logger.error(f"任务 {task_id} 失败: {exc}")
+
         # 清理GPU锁
         if self.gpu_lock_manager:
-            self.gpu_lock_manager.force_release_lock()
+            try:
+                # 获取 GPU ID 和构造锁键
+                gpu_id = kwargs.get('gpu_id', 0)
+                lock_key = f"gpu_lock:{gpu_id}"
+                # 使用任务 ID 作为任务名
+                task_name = task_id
+                # 调用正确的方法
+                self.gpu_lock_manager.release_lock(task_name, lock_key, "task_failure")
+                logger.info(f"任务 {task_id} 失败后成功释放锁 {lock_key}")
+            except Exception as e:
+                logger.error(f"释放锁失败: {e}", exc_info=True)
 
     def on_success(self, retval, task_id, args, kwargs):
         """任务成功时的回调"""
