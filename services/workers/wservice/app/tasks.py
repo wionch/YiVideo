@@ -568,6 +568,22 @@ def merge_with_word_timestamps(self, context: dict) -> dict:
     return result_context.model_dump()
 
 
+@celery_app.task(name='wservice.merge_speaker_based_subtitles', bind=True)
+def merge_speaker_based_subtitles(self, context: dict) -> dict:
+    """
+    基于说话人时间区间的字幕合并任务节点。
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
+    """
+    from services.workers.wservice.executors import WServiceMergeSpeakerBasedSubtitlesExecutor
+
+    workflow_context = WorkflowContext(**context)
+    executor = WServiceMergeSpeakerBasedSubtitlesExecutor(self.name, workflow_context)
+    result_context = executor.execute()
+    state_manager.update_workflow_state(result_context)
+    return result_context.model_dump()
+
+
+
 @celery_app.task(bind=True, name='wservice.correct_subtitles')
 def correct_subtitles(self, context: dict) -> dict:
     """
