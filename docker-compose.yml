@@ -1,396 +1,309 @@
-services:
-    # --- Message Broker ---
-    # redis:
-    #   image: "redis"
-    #   container_name: redis
-    #   restart: always
-    #   ports:
-    #     - "6379:6379"
-    #   networks:
-    #     - wionch
+# ============================================================
+# 模块化配置 - 标量锚点版本 (可选方案)
+# ============================================================
+#
+# 此文件展示如何使用标量锚点实现 volumes 的集中管理
+# 优势: 路径修改只需改一处,避免拼写错误
+# 劣势: 配置行数不减少,可读性略降
+#
+# 使用方法:
+#   cp docker-compose.volumes-anchors.yml docker-compose.yml
+#   docker compose config --quiet  # 验证
+# ============================================================
 
-    # --- API Gateway (The Brain) ---
+# --- 环境变量分组 ---
+x-base-env: &base-env
+    PYTHONPATH: /app
+    REDIS_HOST: ${REDIS_HOST}
+    REDIS_PORT: ${REDIS_PORT}
+    MINIO_HOST: ${MINIO_HOST}
+    MINIO_PORT: ${MINIO_PORT}
+    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET:-yivideo}
+
+x-gpu-env: &gpu-env
+    NVIDIA_VISIBLE_DEVICES: all
+    CUDA_VISIBLE_DEVICES: '0'
+
+x-cache-env: &cache-env
+    HF_HOME: /app/.cache/huggingface
+    HF_HUB_ENABLE_HF_TRANSFER: '0'
+    TRANSFORMERS_CACHE: /root/.cache/transformers
+
+x-ai-env: &ai-env
+    GEMINI_API_KEY: ${GEMINI_API_KEY}
+    DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+    ZHIPU_API_KEY: ${ZHIPU_API_KEY}
+    VOLCENGINE_API_KEY: ${VOLCENGINE_API_KEY}
+    OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY}
+
+# --- 通用配置块 ---
+x-common-config: &common-config
+    user: '0:0'
+    restart: always
+    networks:
+        - wionch
+
+# --- Volumes 标量锚点 (集中管理路径) ---
+x-volume-paths:
+    services: &vol-services '${YIVIDEO_ROOT}/services:/app/services'
+    videos: &vol-videos '${YIVIDEO_ROOT}/videos:/app/videos'
+    locks: &vol-locks '${YIVIDEO_ROOT}/locks:/app/locks'
+    tmp: &vol-tmp '${YIVIDEO_ROOT}/tmp:/app/tmp'
+    tests: &vol-tests '${YIVIDEO_ROOT}/tests:/app/tests'
+    share: &vol-share '${YIVIDEO_ROOT}/share:/share'
+    config-yml: &vol-config-yml '${YIVIDEO_ROOT}/config.yml:/app/config.yml'
+    config-dir: &vol-config-dir '${YIVIDEO_ROOT}/config:/app/config'
+    ssh: &vol-ssh '~/.ssh:/root/.ssh'
+    gemini: &vol-gemini '~/.gemini:/root/.gemini'
+
+# --- 缓存卷锚点 ---
+x-cache-volumes:
+    huggingface: &vol-hf-cache 'huggingface_cache_volume:/app/.cache'
+    transformers: &vol-tf-cache 'transformers_cache_volume:/root/.cache'
+
+# --- GPU 部署配置锚点 ---
+x-gpu-deploy: &gpu-deploy
+    resources:
+        reservations:
+            devices:
+                - driver: nvidia
+                  count: 1
+                  capabilities: [gpu]
+
+# --- Celery Worker 基础配置锚点 ---
+x-celery-worker-base: &celery-worker-base
+    <<: *common-config
+    entrypoint: ''
+
+# --- Build 基础配置锚点 ---
+x-build-base: &build-base
+    context: .
+
+# ============================================================
+# 服务定义
+# ============================================================
+
+services:
     api_gateway:
+        <<: *common-config
         container_name: api_gateway
         build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/api_gateway/Dockerfile
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/api_gateway/Dockerfile
         ports:
-            - '8788:80' # Map host port 8788 to container port 80
+            - '8788:80'
         volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/share:/share
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
-        restart: always
-        user: '0:0'
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-share
+            - *vol-tests
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
         environment:
-            - PYTHONPATH=/app
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-        networks:
-            - wionch
-
-    # --- AI Worker Services ---
+            <<: *base-env
 
     ffmpeg_service:
+        <<: *celery-worker-base
         container_name: ffmpeg_service
         build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/workers/ffmpeg_service/Dockerfile
-        volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/share:/share
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
-        restart: always
-        user: '0:0'
-        entrypoint: ''
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/ffmpeg_service/Dockerfile
         command: ['celery', '-A', 'app.tasks.celery_app', 'worker', '-l', 'info', '-Q', 'ffmpeg_queue']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
         environment:
-            - PYTHONPATH=/app
-            - NVIDIA_VISIBLE_DEVICES=all
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-            - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
+            <<: *base-env
+            NVIDIA_VISIBLE_DEVICES: all
         deploy:
-            resources:
-                reservations:
-                    devices:
-                        - driver: nvidia
-                          count: 1
-                          capabilities: [gpu]
-        networks:
-            - wionch
+            <<: *gpu-deploy
 
     paddleocr_service:
+        <<: *celery-worker-base
         container_name: paddleocr_service
         build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/workers/paddleocr_service/Dockerfile
-        volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/share:/share
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
-            - paddle_models_volume:/root/.paddlex/official_models
-        restart: always
-        user: '0:0'
-        entrypoint: ''
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/paddleocr_service/Dockerfile
         command: ['/opt/venv/bin/celery', '-A', 'app.tasks.celery_app', 'worker', '-l', 'info', '-Q', 'paddleocr_queue']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
+            - paddle_models_volume:/root/.paddlex/official_models
         environment:
-            - PYTHONPATH=/app
-            - NVIDIA_VISIBLE_DEVICES=all
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-            - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
+            <<: *base-env
+            NVIDIA_VISIBLE_DEVICES: all
         deploy:
-            resources:
-                reservations:
-                    devices:
-                        - driver: nvidia
-                          count: 1
-                          capabilities: [gpu]
-        networks:
-            - wionch
+            <<: *gpu-deploy
 
-    # --- Faster Whisper Service (WhisperX拆分) ---
     faster_whisper_service:
+        <<: *celery-worker-base
         container_name: faster_whisper_service
         runtime: nvidia
-        build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/workers/faster_whisper_service/Dockerfile
-        volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/share:/share
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
-            - huggingface_cache_volume:/app/.cache
-            - transformers_cache_volume:/root/.cache
         restart: on-failure
-        user: '0:0'
-        entrypoint: ''
+        build:
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/faster_whisper_service/Dockerfile
         command: ['celery', '-A', 'services.workers.faster_whisper_service.app.celery_app', 'worker', '-l', 'info', '-Q', 'faster_whisper_queue']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
+            - *vol-hf-cache
+            - *vol-tf-cache
         environment:
-            - PYTHONPATH=/app
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-            - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
-            - HF_TOKEN=${HF_TOKEN}
-            - HF_HOME=/app/.cache/huggingface
-            - HF_HUB_ENABLE_HF_TRANSFER=0
-            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-            - GEMINI_API_KEY=${GEMINI_API_KEY}
-            - ZHIPU_API_KEY=${ZHIPU_API_KEY}
-            - VOLCENGINE_API_KEY=${VOLCENGINE_API_KEY}
-            - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY}
-            - TRANSFORMERS_CACHE=/root/.cache/transformers
-            - NVIDIA_VISIBLE_DEVICES=all
-            - CUDA_VISIBLE_DEVICES=0
+            <<: [*base-env, *gpu-env, *cache-env, *ai-env]
+            HF_TOKEN: ${HF_TOKEN}
         deploy:
-            resources:
-                reservations:
-                    devices:
-                        - driver: nvidia
-                          count: 1
-                          capabilities: [gpu]
-        networks:
-            - wionch
+            <<: *gpu-deploy
 
-    # --- Pyannote Audio Service (WhisperX拆分) ---
     pyannote_audio_service:
+        <<: *celery-worker-base
         container_name: pyannote_audio_service
         runtime: nvidia
-        build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/workers/pyannote_audio_service/Dockerfile
-        volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/share:/share
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
-            - huggingface_cache_volume:/app/.cache
-            - transformers_cache_volume:/root/.cache
         restart: unless-stopped
-        user: '0:0'
-        entrypoint: ''
+        build:
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/pyannote_audio_service/Dockerfile
         command: ['celery', '-A', 'services.workers.pyannote_audio_service.app.celery_app', 'worker', '-l', 'info', '-Q', 'pyannote_audio_queue']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
+            - *vol-hf-cache
+            - *vol-tf-cache
         environment:
-            - PYTHONPATH=/app
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-            - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
-            - HF_TOKEN=${HF_TOKEN}
-            - HF_HOME=/app/.cache/huggingface
-            - HF_HUB_ENABLE_HF_TRANSFER=0
-            - TRANSFORMERS_CACHE=/root/.cache/transformers
-            - PYANNOTEAI_API_KEY=${PYANNOTEAI_API_KEY}
-            - NVIDIA_VISIBLE_DEVICES=all
-            - CUDA_VISIBLE_DEVICES=0
-            - PYANNOTE_SKIP_DEPENDENCY_CHECK=0
-            - TORCH_CUDA_ARCH_LIST="8.6"
-            - CUDA_LAUNCH_BLOCKING=1
+            <<: [*base-env, *gpu-env, *cache-env]
+            HF_TOKEN: ${HF_TOKEN}
+            PYANNOTEAI_API_KEY: ${PYANNOTEAI_API_KEY}
+            PYANNOTE_SKIP_DEPENDENCY_CHECK: '0'
+            TORCH_CUDA_ARCH_LIST: '8.6'
+            CUDA_LAUNCH_BLOCKING: '1'
         deploy:
-            resources:
-                reservations:
-                    devices:
-                        - driver: nvidia
-                          count: 1
-                          capabilities: [gpu]
-        networks:
-            - wionch
+            <<: *gpu-deploy
 
-    # --- Audio Separator Service ---
     audio_separator_service:
+        <<: *celery-worker-base
         container_name: audio_separator_service
         runtime: nvidia
-        build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/workers/audio_separator_service/Dockerfile
-        volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/share:/share
-            - audio_separator_models_volume:/models
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
-            - huggingface_cache_volume:/app/.cache
-            - transformers_cache_volume:/root/.cache
         restart: on-failure
-        user: '0:0'
-        entrypoint: ''
+        build:
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/audio_separator_service/Dockerfile
         command: ['celery', '-A', 'services.workers.audio_separator_service.app.celery_app', 'worker', '-l', 'info', '-Q', 'audio_separator_queue']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-tests
+            - *vol-share
+            - audio_separator_models_volume:/models
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
+            - *vol-hf-cache
+            - *vol-tf-cache
         environment:
-            - PYTHONPATH=/app
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-            - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
-            - NVIDIA_VISIBLE_DEVICES=all
-            - CUDA_VISIBLE_DEVICES=0
+            <<: [*base-env, *gpu-env]
         deploy:
-            resources:
-                reservations:
-                    devices:
-                        - driver: nvidia
-                          count: 1
-                          capabilities: [gpu]
-        networks:
-            - wionch
+            <<: *gpu-deploy
 
-    # --- WService (字幕AI优化服务) ---
     wservice:
+        <<: *celery-worker-base
         container_name: wservice
         build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/workers/wservice/Dockerfile
-        volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/share:/share
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
-        restart: always
-        user: '0:0'
-        entrypoint: ''
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/wservice/Dockerfile
         command: ['celery', '-A', 'services.workers.wservice.app.celery_app', 'worker', '-l', 'info', '-Q', 'wservice_queue']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
         environment:
-            - PYTHONPATH=/app
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-            - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
-            # AI服务相关环境变量
-            - GEMINI_API_KEY=${GEMINI_API_KEY}
-            - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-            - ZHIPU_API_KEY=${ZHIPU_API_KEY}
-            - VOLCENGINE_API_KEY=${VOLCENGINE_API_KEY}
-            - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY}
-        networks:
-            - wionch
+            <<: [*base-env, *ai-env]
 
-    # --- IndexTTS Service (IndexTTS2 文本转语音服务) ---
     indextts_service:
+        <<: *celery-worker-base
         container_name: indextts_service
         runtime: nvidia
         build:
-            context: .
-            dockerfile: /opt/wionch/docker/yivideo/services/workers/indextts_service/Dockerfile
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/indextts_service/Dockerfile
         ports:
-            - '7860:7860' # IndexTTS2 WebUI端口映射
+            - '7860:7860'
+        command: ['celery', '-A', 'services.workers.indextts_service.app.celery_app', 'worker', '-l', 'info', '-Q', 'indextts_queue', '--concurrency=1']
         volumes:
-            - /opt/wionch/docker/yivideo/services:/app/services
-            - /opt/wionch/docker/yivideo/videos:/app/videos
-            - /opt/wionch/docker/yivideo/locks:/app/locks
-            - /opt/wionch/docker/yivideo/tmp:/app/tmp
-            - /opt/wionch/docker/yivideo/tests:/app/tests
-            - /opt/wionch/docker/yivideo/share:/share
-            - /opt/wionch/docker/yivideo/config.yml:/app/config.yml
-            - /opt/wionch/docker/yivideo/config:/app/config
-
-            - ~/.ssh:/root/.ssh
-            - ~/.gemini:/root/.gemini
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
             - indextts_models_volume:/models/indextts
             - huggingface_cache_volume:/app/.cache/huggingface
             - transformers_cache_volume:/app/.cache/transformers
             - indextts_cache_volume:/app/.cache/indextts
             - torch_cache_volume:/app/.cache/torch
-        restart: always
-        user: '0:0'
-        entrypoint: ''
-        command: ['celery', '-A', 'services.workers.indextts_service.app.celery_app', 'worker', '-l', 'info', '-Q', 'indextts_queue', '--concurrency=1']
         environment:
-            # 基础环境变量
-            - PYTHONPATH=/app
-            - REDIS_HOST=${REDIS_HOST}
-            - REDIS_PORT=${REDIS_PORT}
-            - MINIO_HOST=${MINIO_HOST}
-            - MINIO_PORT=${MINIO_PORT}
-            - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-            - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-            - MINIO_DEFAULT_BUCKET=${MINIO_DEFAULT_BUCKET:-yivideo}
-
-            # GPU 配置
-            - NVIDIA_VISIBLE_DEVICES=all
-            - CUDA_VISIBLE_DEVICES=0
-
-            # IndexTTS2 专用环境变量
-            - INDEX_TTS_MODEL_DIR=/models/indextts
-            - INDEX_TTS_CHECKPOINTS_DIR=/models/indextts/checkpoints
-
-            # 缓存配置
-            - HF_HOME=/app/.cache/huggingface
-            - TRANSFORMERS_CACHE=/app/.cache/transformers
-            - TORCH_HOME=/app/.cache/torch
-
-            # Hugging Face 配置
-            - HF_HUB_ENABLE_HF_TRANSFER=0
-
-            # IndexTTS2 性能优化配置
-            - INDEX_TTS_USE_FP16=true
-            - INDEX_TTS_USE_DEEPSPEED=false
-            - INDEX_TTS_USE_CUDA_KERNEL=false
+            <<: [*base-env, *gpu-env, *cache-env]
+            INDEX_TTS_MODEL_DIR: /models/indextts
+            INDEX_TTS_CHECKPOINTS_DIR: /models/indextts/checkpoints
+            TORCH_HOME: /app/.cache/torch
+            INDEX_TTS_USE_FP16: 'true'
+            INDEX_TTS_USE_DEEPSPEED: 'false'
+            INDEX_TTS_USE_CUDA_KERNEL: 'false'
         deploy:
+            <<: *gpu-deploy
             resources:
                 reservations:
-                    devices:
-                        - driver: nvidia
-                          count: 1
-                          capabilities: [gpu]
                     memory: 4G
                 limits:
                     memory: 8G
@@ -400,10 +313,7 @@ services:
             timeout: 30s
             retries: 3
             start_period: 180s
-        networks:
-            - wionch
 
-# 定义所有卷
 volumes:
     npm_cache: {}
     paddle_models_volume: {}
