@@ -1,8 +1,9 @@
 # S2ST (Speech-to-Speech Translation) 工作流设计文档
 
-**文档版本**: 1.0
+**文档版本**: 2.0
 **创建日期**: 2026-01-16
-**设计状态**: ✅ 已验证通过
+**最后更新**: 2026-01-17
+**设计状态**: ✅ 已验证通过，与实施计划同步
 
 ---
 
@@ -531,36 +532,102 @@ ffmpeg -i output_with_audio.mp4 \
 
 ### 9.1 实施优先级
 
-#### Phase 1 - 基础能力 (预计 2 周)
+#### Phase 0 - 环境准备 (预计 30 分钟)
 
-**任务 1.1**: `wservice.llm_optimize_subtitles` - 字幕优化节点
+**任务 0.1**: 安装 Python 依赖
+- [ ] pyphen (英文音节分割)
+- [ ] edge-tts (Microsoft Edge-TTS)
+- [ ] rubberband (音频时间伸缩)
+
+**任务 0.2**: 配置环境变量
+- [ ] DEEPSEEK_API_KEY
+- [ ] GEMINI_API_KEY
+
+**任务 0.3**: 验证环境
+- [ ] 测试 LLM API 连接
+- [ ] 测试 Rubberband 可用性
+
+#### Phase 1 - LLM 字幕优化 (预计 1 周)
+
+**任务 1.1**: LLM 工具类 (`services/common/llm_client.py`)
+- [ ] 统一的 LLM 调用接口
+- [ ] 支持 DeepSeek/Gemini/Claude
+- [ ] 错误重试机制
+
+**任务 1.2**: 指令集解析器 (`services/workers/wservice/utils/instruction_parser.py`)
 - [ ] 实现极简指令集解析器
+- [ ] 覆盖 5 种操作类型 (merge/split/fix/move/delete)
+- [ ] 单元测试覆盖所有边界情况
+
+**任务 1.3**: LLM 字幕优化执行器 (`services/workers/wservice/executors/llm_optimize_subtitles.py`)
+- [ ] 继承 BaseNodeExecutor
 - [ ] 滑动窗口并发处理框架
-- [ ] 单元测试覆盖 5 种操作类型
+- [ ] 批处理去重逻辑
 
-**任务 1.2**: `wservice.llm_translate_subtitles` - 翻译装词节点
-- [ ] 音节数估算器(英文/中文)
-- [ ] 时长验证与重试机制
-- [ ] 集成测试验证 ±10% 精度
+**任务 1.4**: Celery 任务注册 (`services/workers/wservice/app/tasks.py`)
+- [ ] 注册 `wservice.llm_optimize_subtitles`
+- [ ] 集成 state_manager 持久化
+- [ ] 编写集成测试
 
-#### Phase 2 - TTS 集成 (预计 2 周)
+#### Phase 2 - LLM 翻译装词 (预计 1 周)
 
-**任务 2.1**: `wservice.edgetts_generate_batch_speech` - Edge-TTS 节点 (优先,无 GPU 依赖)
+**任务 2.1**: 翻译工具类 (`services/workers/wservice/utils/syllable_counter.py`)
+- [ ] 音节数估算器 (英文/中文)
+- [ ] 时长验证算法
+- [ ] 准确率 > 90%
+
+**任务 2.2**: LLM 翻译执行器 (`services/workers/wservice/executors/llm_translate_subtitles.py`)
+- [ ] 继承 BaseNodeExecutor
+- [ ] 时长对齐算法 (±10% 容差)
+- [ ] 重试机制
+
+**任务 2.3**: Celery 任务注册
+- [ ] 注册 `wservice.llm_translate_subtitles`
+- [ ] 集成测试验证精度
+
+#### Phase 3 - TTS 语音生成 (预计 2 周)
+
+**任务 3.1**: Edge-TTS 执行器 (`services/workers/wservice/executors/edgetts_generate_batch_speech.py`)
 - [ ] Rate 预估算法实现
 - [ ] Rubberband 封装与测试
 - [ ] 音频拼接流程
+- [ ] Celery 任务注册 (无需 GPU 锁)
 
-**任务 2.2**: `indextts.generate_batch_speech` - IndexTTS2 节点
-- [ ] 参考音频预处理
-- [ ] 双模式支持(single/dynamic)
-- [ ] GPU 锁集成
+**任务 3.2**: IndexTTS2 执行器 (`services/workers/indextts_service/executors/generate_batch_speech.py`)
+- [ ] 参考音频预处理 (6 秒最小时长)
+- [ ] 双模式支持 (single/dynamic)
+- [ ] Celery 任务注册 + GPU 锁集成
 
-#### Phase 3 - 视频合并 (预计 1 周)
+**任务 3.3**: 批量生成与合并
+- [ ] 批量调用优化
+- [ ] 音频片段合并
+- [ ] 性能测试 (< 3s/句)
 
-**任务 3.1**: `ffmpeg.merge_video_audio_subtitle` - 视频合并节点
-- [ ] 多音轨混合
-- [ ] 字幕烧录
-- [ ] 容错处理
+#### Phase 4 - 视频合并 (预计 1 周)
+
+**任务 4.1**: 视频合并执行器 (`services/workers/ffmpeg_service/executors/merge_video_audio_subtitle.py`)
+- [ ] 多音轨混合 (背景音 + 配音)
+- [ ] 字幕烧录 (可选)
+- [ ] 容错处理 (背景音循环/截断)
+- [ ] Celery 任务注册 (无需 GPU 锁)
+
+#### Phase 5 - 文档与集成 (预计 1 周)
+
+**任务 5.1**: 更新 API 文档
+- [ ] `SINGLE_TASK_API_REFERENCE.md` 添加 5 个新节点
+- [ ] 每个节点的输入输出示例
+
+**任务 5.2**: 创建工作流示例
+- [ ] `S2ST_WORKFLOW_GUIDE.md` 用户使用指南
+- [ ] 完整 S2ST 工作流配置 JSON
+- [ ] 常见问题排查
+
+**任务 5.3**: 编写集成测试
+- [ ] 端到端 S2ST 流程测试 (30 秒短视频)
+- [ ] 缓存复用验证
+- [ ] 性能基准测试
+
+**预计总工期**: 5 周
 
 ### 9.2 测试策略
 
@@ -587,10 +654,11 @@ ffmpeg -i output_with_audio.mp4 \
 
 ### 9.3 文档更新清单
 
-- [ ] 更新 `SINGLE_TASK_API_REFERENCE.md` 添加 5 个新节点
-- [ ] 创建 `S2ST_WORKFLOW_GUIDE.md` 用户使用指南
-- [ ] 更新 `docker-compose.yml` 添加必要环境变量
-- [ ] 创建示例 workflow_config JSON
+这些任务已整合到 Phase 5 中：
+
+- [x] 任务 5.1: 更新 `SINGLE_TASK_API_REFERENCE.md` 添加 5 个新节点
+- [x] 任务 5.2: 创建 `S2ST_WORKFLOW_GUIDE.md` 用户使用指南和示例 workflow_config JSON
+- [x] 任务 5.3: 编写集成测试验证完整流程
 
 ---
 
@@ -626,4 +694,6 @@ INDEXTTS_API_ENDPOINT=http://indextts_service:5000
 ---
 
 **设计完成日期**: 2026-01-16
+**最后同步日期**: 2026-01-17
 **设计验证状态**: ✅ 所有部分已通过用户确认
+**与实施计划同步状态**: ✅ Phase 0-5 已同步
