@@ -366,6 +366,11 @@ WorkflowContext 示例：
 | `enable_concurrent` | bool | 否 | true | 是否并发切分 |
 | `max_workers` | integer | 否 | 8 | 并发线程数 |
 | `concurrent_timeout` | integer | 否 | 600 | 并发超时秒数 |
+| `upload_audio_segments_to_minio` | bool | 否 | false | 是否上传音频片段到 MinIO（预留功能） |
+| `delete_local_segments_after_upload` | bool | 否 | false | 上传后删除本地片段（预留功能） |
+| `compress_segments_before_upload` | bool | 否 | false | 上传前压缩片段目录（预留功能） |
+| `segment_compression_format` | string | 否 | "zip" | 压缩格式：zip/tar.gz（预留功能） |
+| `segment_compression_level` | string | 否 | "default" | 压缩级别：fast/default/best（预留功能） |
 
 ### Faster-Whisper
 

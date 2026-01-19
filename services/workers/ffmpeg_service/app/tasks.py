@@ -481,33 +481,33 @@ def split_audio_segments(self: Task, context: dict) -> dict:
         
         # MinIO上传参数
         upload_to_minio = get_param_with_fallback(
-            "upload_keyframes_to_minio",
+            "upload_audio_segments_to_minio",
             resolved_params,
             workflow_context,
             default=False
         )
-        delete_local_keyframes = get_param_with_fallback(
-            "delete_local_keyframes_after_upload",
+        delete_local_segments = get_param_with_fallback(
+            "delete_local_segments_after_upload",
             resolved_params,
             workflow_context,
             default=False
         )
-        
+
         # 压缩上传参数（新增）
-        compress_keyframes_before_upload = get_param_with_fallback(
-            "compress_keyframes_before_upload",
+        compress_segments_before_upload = get_param_with_fallback(
+            "compress_segments_before_upload",
             resolved_params,
             workflow_context,
             default=False
         )
-        keyframe_compression_format = get_param_with_fallback(
-            "keyframe_compression_format",
+        segment_compression_format = get_param_with_fallback(
+            "segment_compression_format",
             resolved_params,
             workflow_context,
             default="zip"
         )
-        keyframe_compression_level = get_param_with_fallback(
-            "keyframe_compression_level", 
+        segment_compression_level = get_param_with_fallback(
+            "segment_compression_level",
             resolved_params,
             workflow_context,
             default="default"
