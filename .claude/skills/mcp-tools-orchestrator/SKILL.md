@@ -1,16 +1,11 @@
 ---
 name: yivideo-mcp-orchestrator
-description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：serena（代码符号/LSP/引用/调用链/重构影响面）、context7（版本特定的最新库文档/示例）、sequential-thinking（分步规划/结构化推理）、brave-search & exa（Web 检索/证据来源）、tavily-remote（URL 抽取/结构化提取/站点 map/crawl）。当任务涉及：代码定位/重构、查最新 API、逐步推理、Web 研究与抽取/爬取时启用。
+description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：serena（代码符号/LSP/引用/调用链/重构影响面）、context7（版本特定的最新库文档/示例）、sequential-thinking（分步规划/结构化推理）、brave-search & exa（Web 检索/证据来源）、tavily-remote（URL 抽取/结构化提取/站点 map/crawl）、filesystem（文件读写/目录管理/批量改动）。当任务涉及：代码定位/重构、查最新 API、逐步推理、Web 研究与抽取/爬取、文件批处理时启用。
 ---
 
 # YiVideo MCP 编排器（MCP Orchestrator）
 
 > 渐进式披露：本文件只放“路由规则 + 强制约束 + 输出契约”；工具调用模板与剧本细节在 `references/` 下，需要时再加载。
-
-## 变更说明（已移除 mcp-deepwiki）
-
--   你计划卸载 deepwiki 相关 MCP；且社区常见的非官方 deepwiki-mcp 也有“当前不可用/被 upstream 阻断”的提示；官方 DeepWiki MCP 由 Devin 文档维护。:contentReference[oaicite:1]{index=1}
--   因此本 Skill 不再包含 deepwiki 的任何路由与剧本。
 
 ## 使命
 
@@ -31,6 +26,7 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 -   brave-search
 -   exa
 -   tavily-remote
+-   filesystem
 
 > 环境备注：n8n-mcp 若连接失败，编排时直接忽略，不作为依赖。
 
@@ -127,6 +123,34 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 -   需要原文证据 → 直接 tavily-remote 抽取
 -   结果冲突 → 抓一手来源（官方文档/规范/主仓库）并解释差异
 
+### F) 文件读写与目录管理：filesystem
+
+适用：
+
+-   需要对**工作区文件做内容级读写/批量读取/目录遍历/搜索**（如改配置、改脚本、批量查看日志、生成/整理输出目录）
+-   需要处理 serena 不擅长的内容（长日志、数据文件、模板/配置等）
+-   需要读取图片/音频等媒体文件以便进一步分析
+
+与 serena 的边界：
+
+-   serena：符号/LSP 语义（定义/引用/调用链/影响面）
+-   filesystem：字节/文本/目录级 I/O（读写、搜索、目录树、元数据）
+
+策略（先读后写，写前必预览）：
+
+1. **先确认允许的根目录**：优先调用 `list_allowed_directories`，所有操作必须限定在允许目录内（server 通过 CLI 参数或 Roots 控制访问范围）。
+2. **读操作优先**：
+    - 文本：`read_text_file`（支持 `head/tail`）或 `read_multiple_files`
+    - 目录：`list_directory` / `list_directory_with_sizes` / `directory_tree`
+    - 搜索：`search_files`
+    - 元数据：`get_file_info`
+3. **写操作只用最小变更**：
+    - 编辑现有文件：优先 `edit_file`，并**先 `dryRun=true`** 预览 diff，再正式应用（避免误改/重复应用）。
+    - 新建/覆盖：`write_file`（注意会覆盖）
+    - 目录：`create_directory`
+    - 移动/重命名：`move_file`（目标存在会失败）
+4. **需要“可审计的改动”时**：将 `edit_file` 的 dry run diff 作为证据输出，并给出回滚方式（如 `git checkout -- <file>`）。
+
 ---
 
 ## 容错与降级（必须执行）
@@ -154,6 +178,7 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 
 -   复杂 → sequential-thinking
 -   serena：定位符号/调用链/影响面
+-   filesystem：对定位到的文件做**最小可审计**的内容改动（`edit_file` 先 dryRun，再应用）
 -   context7：核对库/框架正确用法（如涉及）
 -   必要时 brave/exa/tavily：补齐外部证据或抽取官方段落
 -   输出：最小改动建议 + 回归验证点
@@ -171,3 +196,9 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 -   exa：精筛补齐
 -   tavily-remote：抽取关键页面形成结构化摘要（日期/版本/条款）
 -   输出：结论 + 证据链 + 时间信息
+
+### 模式 4：文件批处理 / 配置变更（文件系统为主）
+
+-   filesystem：`list_allowed_directories` → `search_files` / `list_directory` → `read_multiple_files`
+-   filesystem：`edit_file(dryRun=true)` 预览 diff → `edit_file(dryRun=false)` 应用
+-   如涉及代码语义：补充 serena（定位入口/调用链）

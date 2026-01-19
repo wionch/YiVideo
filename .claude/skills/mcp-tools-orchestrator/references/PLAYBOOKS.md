@@ -27,3 +27,13 @@
 3. tavily-remote：对关键 URL 做 extract；站点规模大则 map/crawl
 4. 交叉验证：时间敏感/高风险结论至少两来源互证
 5. 输出：结构化摘要（要点 + 日期 + 版本号 + 原文证据位置）
+
+## P3：文件批处理 / 配置变更（filesystem 为主）
+
+1. filesystem：`list_allowed_directories` 确认当前允许操作的根目录（避免路径越界）
+2. filesystem：用 `search_files` / `list_directory` / `directory_tree` 快速定位目标文件集合
+3. filesystem：`read_multiple_files`（或大文件用 `read_text_file` 的 `head/tail`）快速取样与核对
+4. filesystem：`edit_file(dryRun=true)` 生成 diff（必要时拆分成多次小编辑）
+5. filesystem：`edit_file(dryRun=false)` 应用；如需新文件则 `write_file`，如需新目录则 `create_directory`
+6. （如涉及代码语义影响）serena：补做入口/调用链/引用面验证
+7. 输出：变更 diff + 验证步骤 + 回滚指令（git）

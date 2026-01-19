@@ -79,3 +79,24 @@
 
 -   抽取时记录日期/版本/原文位置，便于复核
 -   抽取失败：回退 brave/exa 重新找可访问的官方镜像/等价页面
+
+## filesystem（文件读写/目录管理）
+
+适用：
+
+-   对工作区做**内容级文件操作**：读写/批量读取/目录遍历/搜索/目录树/元数据
+-   处理长日志、配置/模板、数据文件等（serena 侧重符号语义，filesystem 侧重 I/O）
+
+硬约束与最佳实践：
+
+-   先 `list_allowed_directories`，确保所有路径都在允许根目录内
+-   **先读后写**：先 `read_text_file` / `read_multiple_files` / `list_directory` / `search_files` 再决定改动
+-   `edit_file` 必须先 `dryRun=true` 预览 diff，再应用
+-   `write_file` 会覆盖，慎用；需要覆盖时，先读出原内容并在输出里给出回滚路径
+
+常用工具（以官方 server-filesystem 为准）：
+
+-   读：`read_text_file`, `read_multiple_files`, `read_media_file`
+-   写：`edit_file`, `write_file`, `create_directory`, `move_file`
+-   查：`list_directory`, `list_directory_with_sizes`, `directory_tree`, `search_files`, `get_file_info`
+-   安全：`list_allowed_directories`
