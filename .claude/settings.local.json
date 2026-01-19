@@ -120,12 +120,42 @@
       "mcp__memory__create_relations",
       "Bash(chmod +x /opt/wionch/docker/yivideo/tests/validation/validate_gpu_lock_docs.sh)",
       "Bash(shellcheck tests/validation/validate_gpu_lock_docs.sh)",
-      "Bash(while read file)"
+      "Bash(while read file)",
+      "mcp__context7__query-docs",
+      "mcp__tavily-remote__tavily_search",
+      "mcp__tavily-remote__tavily_extract",
+      "Bash(wc:*)",
+      "Bash(pymarkdown version:*)",
+      "Bash(pymarkdown scan:*)",
+      "Bash(pip install:*)",
+      "Bash(else echo \"not_exists\")",
+      "Skill(riper:research)",
+      "Skill(superpowers:brainstorming)",
+      "Skill(superpowers:writing-plans)",
+      "mcp__plugin_serena_serena__replace_content",
+      "mcp__plugin_serena_serena__activate_project",
+      "mcp__brave-search__brave_web_search",
+      "mcp__plugin_serena_serena__check_onboarding_performed",
+      "mcp__plugin_serena_serena__list_dir",
+      "mcp__plugin_serena_serena__read_file",
+      "Skill(superpowers:using-superpowers)",
+      "mcp__filesystem__directory_tree",
+      "Skill(planning-with-files)",
+      "mcp__filesystem__list_directory",
+      "Skill(planning-with-files:planning-with-files)",
+      "mcp__filesystem__write_file",
+      "Bash(markdown-lint:*)",
+      "Bash(awk:*)"
     ],
     "deny": [
       "Bash(docker build:*)"
     ],
     "ask": []
+  },
+  "enabledPlugins": {
+    "document-skills@anthropic-agent-skills": true,
+    "superpowers@superpowers-marketplace": true,
+    "planning-with-files@planning-with-files": true
   },
   "outputStyle": "engineer-professional"
 }
