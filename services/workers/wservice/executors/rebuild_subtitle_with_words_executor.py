@@ -9,7 +9,10 @@ from typing import Any, Dict, List
 
 from services.common.base_node_executor import BaseNodeExecutor
 from services.common.path_builder import build_node_output_path, ensure_directory
-from services.common.subtitle.word_level_aligner import align_words_to_text
+from services.common.subtitle.word_level_aligner import (
+    align_words_to_text,
+    rebuild_segments_by_words,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,15 @@ class WServiceRebuildSubtitleWithWordsExecutor(BaseNodeExecutor):
             raise ValueError(error)
         self._apply_aligned_words(segments, aligned_words, word_index_map)
 
-        optimized_segments_file = self._save_optimized_segments(segments, input_data)
+        rebuilt_segments = rebuild_segments_by_words(
+            segments,
+            max_cpl=42,
+            max_cps=18.0,
+            min_duration=1.0,
+            max_duration=7.0
+        )
+        optimized_segments = rebuilt_segments or segments
+        optimized_segments_file = self._save_optimized_segments(optimized_segments, input_data)
         return {"optimized_segments_file": optimized_segments_file}
 
     def get_cache_key_fields(self) -> List[str]:
