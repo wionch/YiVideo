@@ -2546,83 +2546,112 @@ faster_whisper_service:
 
 ---
 
-### 3. wservice.ai_optimize_subtitles
+### 3. wservice.ai_optimize_text
 
-对转录后的字幕进行 AI 智能优化和校正。
+对转录后的字幕全文进行纯文本纠错。
 
-**功能描述**：使用 AI 大模型对 faster_whisper 转录的字幕进行智能优化，包括错别字修正、标点补充、口头禅删除、语法优化等。支持大体积字幕的并发处理，采用滑窗重叠分段策略保证上下文完整性。
+**功能描述**：将 `segments` 按顺序拼接为全文文本，调用 AI 进行纠错与规范化，输出优化后的全文文本与文件路径。
 
 **输入参数**：
 
--   `segments_file` (string, 节点可选): 输入字幕文件路径。**支持** **`${{...}}`** **动态引用**，优先级高于自动检测。
+-   `segments_file` (string, 必需): 输入字幕文件路径，支持 **`${{...}}`** 动态引用
 
 **配置来源说明**：
 
--   `segments_file`: **节点参数** (在请求体中的 `wservice.ai_optimize_subtitles` 对象内提供)。
-
--   `subtitle_optimization` (object): **全局参数** (在 API 请求的顶层 `workflow_config` 内提供)，包含 `enabled`, `provider`, `batch_size` 等所有优化相关的微调选项。
+-   仅使用节点 `input_data` 参数，不读取 `subtitle_optimization` 全局参数
 
 **前置依赖**：
 
 -   `faster_whisper.transcribe_audio` (必需)
 
-**智能输入源选择**（按优先级）：
-
-1. **`segments_file`** **参数**: 如果在节点参数中明确提供了 `segments_file`（支持动态引用），将直接使用该文件
-2. **`faster_whisper.transcribe_audio`** **输出**: 自动获取 `faster_whisper.transcribe_audio` 阶段的 `segments_file`
-
 **输出格式**：
 
 ```json
 {
-    "optimized_file_path": "/share/workflows/{workflow_id}/optimized.json",
-    "original_file_path": "/share/workflows/{workflow_id}/original.json",
-    "provider_used": "deepseek",
-    "processing_time": 12.5,
-    "commands_applied": 15,
-    "batch_mode": true,
-    "batches_count": 3,
-    "segments_count": 100
+    "optimized_text": "优化后的全文文本",
+    "optimized_text_file": "/share/workflows/{workflow_id}/optimized_text.txt",
+    "segments_file": "/share/workflows/{workflow_id}/transcribe.json",
+    "stats": {
+        "provider": "deepseek"
+    }
 }
 ```
 
 **依赖关系**：
 
 -   必需：`faster_whisper.transcribe_audio`
--   后置：`wservice.generate_subtitle_files` (可选)
-
-**注意事项**：
-
--   `subtitle_optimization` 的详细参数（如 `provider`, `batch_size`）应在 API 请求顶层的 `workflow_config` 中配置。
--   需要配置相应 AI 提供商的 API 密钥。
--   大体积字幕自动启用分段处理。
--   滑窗重叠机制确保上下文完整性。
+-   后置：`wservice.rebuild_subtitle_with_words` (推荐)
 
 **单任务模式支持**：
 
 **输入参数**:
 
--   `segments_file` (string, 可选): 输入字幕文件路径，支持 `${{...}}` 动态引用
+-   `segments_file` (string, 必需): 输入字幕文件路径
 
 **单任务调用示例**:
 
 ```json
 {
-    "task_name": "wservice.ai_optimize_subtitles",
+    "task_name": "wservice.ai_optimize_text",
     "input_data": {
         "segments_file": "/share/transcription/segments.json"
     }
 }
 ```
 
-**参数来源说明**:
+---
 
--   `segments_file`: **节点参数** (在请求体中的 `wservice.ai_optimize_subtitles` 对象内提供)
--   `subtitle_optimization` (全局参数): 在 API 请求的顶层 `workflow_config` 内提供，包含 `enabled`, `provider`, `batch_size` 等所有优化相关的微调选项
+### 4. wservice.rebuild_subtitle_with_words
+
+将优化后的全文文本映射回原始词级时间戳。
+
+**功能描述**：基于原始 `segments[].words` 的顺序与数量进行对齐，仅替换 `word` 文本，保持 `start/end` 不变。
+
+**输入参数**：
+
+-   `segments_file` (string, 可选): 原始字幕文件路径
+-   `segments_data` (array, 可选): 原始字幕片段数据
+-   `optimized_text` (string, 可选): 优化后的全文文本
+-   `optimized_text_file` (string, 可选): 优化后的全文文本文件路径
+
+**配置来源说明**：
+
+-   仅使用节点 `input_data` 参数，不读取全局配置
+
+**前置依赖**：
+
+-   `wservice.ai_optimize_text` (推荐)
+
+**输出格式**：
+
+```json
+{
+    "optimized_segments_file": "/share/workflows/{workflow_id}/optimized_segments.json"
+}
+```
+
+**单任务模式支持**：
+
+**输入参数**:
+
+-   `segments_file` (string, 可选)
+-   `optimized_text` / `optimized_text_file` (二选一)
+
+**单任务调用示例**:
+
+```json
+{
+    "task_name": "wservice.rebuild_subtitle_with_words",
+    "input_data": {
+        "segments_file": "/share/transcription/segments.json",
+        "optimized_text": "优化后的全文文本"
+    }
+}
+```
 
 ---
 
-### 4. wservice.merge_speaker_segments
+### 5. wservice.merge_speaker_segments
 
 合并转录字幕与说话人时间段（片段级）。
 
@@ -2732,7 +2761,7 @@ faster_whisper_service:
 
 ---
 
-### 5. wservice.merge_with_word_timestamps
+### 6. wservice.merge_with_word_timestamps
 
 使用词级时间戳进行精确的字幕与说话人合并。
 
@@ -2863,7 +2892,7 @@ faster_whisper_service:
 
 ---
 
-### 6. wservice.prepare_tts_segments
+### 7. wservice.prepare_tts_segments
 
 为 TTS 参考音准备和优化字幕片段。
 
@@ -3031,7 +3060,8 @@ YiVideo 工作流系统中的各节点存在明确的依赖关系，理解这些
 | `pyannote_audio.diarize_speakers`    | `ffmpeg.extract_audio` 或 `audio_separator.separate_vocals` | 无                                                          | 需要音频文件作为输入                                                                       |
 | `wservice.generate_subtitle_files`   | `faster_whisper.transcribe_audio`                           | `pyannote_audio.diarize_speakers`                           | 需要转录数据，可选说话人信息                                                               |
 | `wservice.correct_subtitles`         | `wservice.generate_subtitle_files`                          | 无                                                          | 需要已生成的字幕文件                                                                       |
-| `wservice.ai_optimize_subtitles`     | `faster_whisper.transcribe_audio`                           | 无                                                          | 需要转录数据                                                                               |
+| `wservice.ai_optimize_text`          | `faster_whisper.transcribe_audio`                           | 无                                                          | 需要转录数据                                                                               |
+| `wservice.rebuild_subtitle_with_words` | `wservice.ai_optimize_text`                               | 无                                                          | 需要优化后的全文文本与原始词级时间戳                                                       |
 | `paddleocr.detect_subtitle_area`     | `ffmpeg.extract_keyframes`                                  | 无                                                          | 需要关键帧作为输入                                                                         |
 | `ffmpeg.crop_subtitle_images`        | 无                                                          | `paddleocr.detect_subtitle_area`                            | 可选依赖：通过 `subtitle_area` 参数传入或从上游节点获取                                    |
 | `paddleocr.create_stitched_images`   | `ffmpeg.crop_subtitle_images`                               | 无                                                          | 需要裁剪的图像，可通过 `input_data.cropped_images_path` 和 `input_data.subtitle_area` 传入 |
@@ -3048,9 +3078,10 @@ YiVideo 工作流系统中的各节点存在明确的依赖关系，理解这些
 视频文件 → ffmpeg.extract_audio → audio_separator.separate_vocals (可选)
     → faster_whisper.transcribe_audio
     → pyannote_audio.diarize_speakers (可选)
+    → wservice.ai_optimize_text (可选)
+    → wservice.rebuild_subtitle_with_words (可选)
     → wservice.generate_subtitle_files
     → wservice.correct_subtitles (可选)
-    → wservice.ai_optimize_subtitles (可选)
 ```
 
 **OCR 字幕提取流程**：

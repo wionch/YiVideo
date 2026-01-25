@@ -241,8 +241,8 @@ services/workers/pyannote_audio_service/src/
 run_pipeline.py
 .tmp.driveupload/
 .tmp.drivedownload/
-
-
+.worktrees/
+tmp/
 
 
 # Model checkpoints

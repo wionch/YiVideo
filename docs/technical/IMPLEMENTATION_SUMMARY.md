@@ -55,7 +55,7 @@
     -   Pyannote Audio 服务：`pyannote_audio.diarize_speakers`
     -   PaddleOCR 服务：`paddleocr.detect_subtitle_area`, `paddleocr.perform_ocr`
     -   IndexTTS 服务：`indextts.generate_speech`
-    -   WService 服务：`wservice.generate_subtitle_files`, `wservice.correct_subtitles`, `wservice.ai_optimize_subtitles`
+    -   WService 服务：`wservice.generate_subtitle_files`, `wservice.correct_subtitles`, `wservice.ai_optimize_text`, `wservice.rebuild_subtitle_with_words`
 -   ✅ 任务状态管理：pending, running, completed, failed, cancelled
 -   ✅ **HTTP 文件路径自动处理**：检测 input_data 中的 HTTP/HTTPS 链接并自动下载到临时目录
 -   ✅ **智能文件扫描**：从任务结果中自动提取文件路径并上传到 MinIO
@@ -351,9 +351,9 @@ GET /v1/tasks/supported-tasks
         "pyannote_audio": ["pyannote_audio.diarize_speakers"],
         "paddleocr": ["paddleocr.detect_subtitle_area", "paddleocr.perform_ocr"],
         "indextts": ["indextts.generate_speech"],
-        "wservice": ["wservice.generate_subtitle_files", "wservice.correct_subtitles", "wservice.ai_optimize_subtitles"]
+        "wservice": ["wservice.generate_subtitle_files", "wservice.correct_subtitles", "wservice.ai_optimize_text", "wservice.rebuild_subtitle_with_words"]
     },
-    "total_count": 15,
+    "total_count": 16,
     "description": "所有支持的单个工作流节点任务"
 }
 ```

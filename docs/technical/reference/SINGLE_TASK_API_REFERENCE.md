@@ -1066,22 +1066,20 @@ WorkflowContext 示例：
 | :--- | :--- | :--- | :--- | :--- |
 | `subtitle_path` | string | 是 | - | 输入字幕文件 |
 
-#### wservice.ai_optimize_subtitles
-复用判定：`stages.wservice.ai_optimize_subtitles.status=SUCCESS` 且优化后字幕文件非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
-功能概述（wservice.ai_optimize_subtitles）：通过 AI 优化字幕的措辞与分段，输出优化后的字幕文件，便于继续合并或配音。
+#### wservice.ai_optimize_text
+复用判定：`stages.wservice.ai_optimize_text.status=SUCCESS` 且 `output.optimized_text_file` 或 `output.optimized_text` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
+功能概述（wservice.ai_optimize_text）：将字幕全文以纯文本形式提交给大模型进行纠错，输出优化后的全文文本与文件路径。
 请求体：
 ```json
 {
-  "task_name": "wservice.ai_optimize_subtitles",
+  "task_name": "wservice.ai_optimize_text",
   "task_id": "task-demo-001",
   "callback": "http://localhost:5678/webhook/demo-t1",
   "input_data": {
     "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-    "subtitle_optimization": {
-      "enabled": true,
-      "provider": "deepseek",
-      "batch_size": 50
-    }
+    "provider": "deepseek",
+    "timeout": 300,
+    "max_retries": 3
   }
 }
 ```
@@ -1091,40 +1089,33 @@ WorkflowContext 示例：
   "workflow_id": "task-demo-001",
   "create_at": "2025-12-17T12:00:00Z",
   "input_params": {
-    "task_name": "wservice.ai_optimize_subtitles",
+    "task_name": "wservice.ai_optimize_text",
     "input_data": {
       "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-      "subtitle_optimization": {
-        "enabled": true,
-        "provider": "deepseek",
-        "batch_size": 50
-      }
+      "provider": "deepseek",
+      "timeout": 300,
+      "max_retries": 3
     },
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
   "shared_storage_path": "/share/workflows/task-demo-001",
   "stages": {
-    "wservice.ai_optimize_subtitles": {
+    "wservice.ai_optimize_text": {
       "status": "SUCCESS",
       "input_params": {
         "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
-        "subtitle_optimization": {
-          "enabled": true,
-          "provider": "deepseek",
-          "batch_size": 50
-        }
+        "provider": "deepseek",
+        "timeout": 300,
+        "max_retries": 3
       },
       "output": {
-        "optimized_file_path": "/share/workflows/task-demo-001/subtitle_optimized.srt",
-        "original_file_path": "/share/workflows/task-demo-001/transcribe_data.json",
-        "provider_used": "deepseek",
-        "processing_time": 12.3,
-        "subtitles_count": 120,
-        "commands_applied": 200,
-        "batch_mode": true,
-        "statistics": {
-          "total_commands": 200,
-          "optimization_rate": 1.67
+        "optimized_text": "optimized full text",
+        "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt",
+        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
+        "stats": {
+          "provider": "deepseek",
+          "processing_time": 12.3,
+          "total_tokens": 2380
         }
       },
       "error": null,
@@ -1134,14 +1125,70 @@ WorkflowContext 示例：
   "error": null
 }
 ```
-说明：该节点输出为合并后的片段数据，不新增文件路径；若 `segments_file`/`diarization_file` 来自本地，state_manager 在上传开启时可能追加对应 `*_minio_url`，原本地字段不覆盖。
+说明：输出为纯文本优化结果；若开启 `core.auto_upload_to_minio`，可能追加 `optimized_text_file_minio_url`，本地路径不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `segments_file` | string | 否 | 智能源选择 | 转录 JSON（含 segments）；未提供则尝试 `faster_whisper.transcribe_audio` 输出 |
-| `subtitle_optimization.enabled` | bool | 是 | false | 开启后才执行优化；未开启则任务标记为 SKIPPED |
-| `subtitle_optimization.provider` | string | 否 | deepseek | AI 提供商 |
-| `subtitle_optimization.batch_size` | integer | 否 | 50 | 批次大小 |
+| `segments_file` | string | 是 | - | 转录 JSON（含 segments/words） |
+| `provider` | string | 否 | deepseek | AI 提供商 |
+| `timeout` | integer | 否 | 300 | 超时时间（秒） |
+| `max_retries` | integer | 否 | 3 | 最大重试次数 |
+| `system_prompt_override` | string | 否 | - | 覆盖系统提示词路径 |
+
+#### wservice.rebuild_subtitle_with_words
+复用判定：`stages.wservice.rebuild_subtitle_with_words.status=SUCCESS` 且 `output.optimized_segments_file` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
+功能概述（wservice.rebuild_subtitle_with_words）：将 AI 优化后的全文映射回原始词级时间戳，输出重建后的 segments 文件。
+请求体：
+```json
+{
+  "task_name": "wservice.rebuild_subtitle_with_words",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+    "optimized_text_file": "http://localhost:9000/yivideo/task-demo-001/optimized_text.txt"
+  }
+}
+```
+WorkflowContext 示例：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "wservice.rebuild_subtitle_with_words",
+    "input_data": {
+      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+      "optimized_text_file": "http://localhost:9000/yivideo/task-demo-001/optimized_text.txt"
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "stages": {
+    "wservice.rebuild_subtitle_with_words": {
+      "status": "SUCCESS",
+      "input_params": {
+        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
+        "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt"
+      },
+      "output": {
+        "optimized_segments_file": "/share/workflows/task-demo-001/optimized_segments.json",
+        "optimized_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json"
+      },
+      "error": null,
+      "duration": 5.0
+    }
+  },
+  "error": null
+}
+```
+说明：该节点只重建文本，不修改时间戳；若开启 `core.auto_upload_to_minio`，可能追加 `*_minio_url`，本地路径不被覆盖。
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `segments_file` | string | 是 | - | 转录 JSON（含 words） |
+| `optimized_text` | string | 否 | - | AI 优化后的纯文本 |
+| `optimized_text_file` | string | 否 | - | 优化文本文件路径（与 optimized_text 二选一） |
 
 #### wservice.merge_speaker_segments
 复用判定：`stages.wservice.merge_speaker_segments.status=SUCCESS` 且 `output.merged_subtitle_path`（或合并结果列表）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。

@@ -10,12 +10,14 @@ AI服务提供商适配器
 
 import os
 import json
+import time
 import asyncio
 import aiohttp
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import logging
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from services.common.logger import get_logger
 
@@ -47,6 +49,8 @@ class AIProviderBase(ABC):
         self.model = config.get('model', '')
         self.max_tokens = config.get('max_tokens', 128000)
         self.temperature = config.get('temperature', 0.1)
+        self.enable_request_dump = False
+        self.request_dump_tag = None
 
     def _get_api_key(self) -> str:
         """从环境变量或配置中获取API密钥"""
@@ -56,6 +60,61 @@ class AIProviderBase(ABC):
             raise ValueError(f"API密钥未配置，请设置环境变量 {self.config.get('api_key_env', '')}")
 
         return api_key
+
+    def _is_sensitive_key(self, key: str) -> bool:
+        lowered = key.lower()
+        return lowered in {"api_key", "apikey", "token", "authorization", "secret", "password", "key"}
+
+    def _mask_sensitive_data(self, data: Any) -> Any:
+        if isinstance(data, dict):
+            masked = {}
+            for k, v in data.items():
+                if self._is_sensitive_key(str(k)):
+                    masked[k] = "***"
+                else:
+                    masked[k] = self._mask_sensitive_data(v)
+            return masked
+        if isinstance(data, list):
+            return [self._mask_sensitive_data(item) for item in data]
+        return data
+
+    def _sanitize_url(self, url: str) -> str:
+        try:
+            parts = urlsplit(url)
+            if not parts.query:
+                return url
+            query_items = []
+            for k, v in parse_qsl(parts.query, keep_blank_values=True):
+                if self._is_sensitive_key(k):
+                    v = "***"
+                query_items.append((k, v))
+            sanitized_query = urlencode(query_items)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, sanitized_query, parts.fragment))
+        except Exception:
+            return url
+
+    def _dump_llm_request(self, url: str, headers: Dict[str, str], data: Dict[str, Any]) -> None:
+        dump_dir = "/app/tmp/1"
+        os.makedirs(dump_dir, exist_ok=True)
+        timestamp_ms = int(time.time() * 1000)
+        tag = ""
+        if self.request_dump_tag:
+            safe_tag = str(self.request_dump_tag).replace(os.sep, "_")
+            tag = f"_{safe_tag}"
+        filename = f"llm_request_{self.__class__.__name__}{tag}_{timestamp_ms}.json"
+        request_path = os.path.join(dump_dir, filename)
+        payload = {
+            "provider": self.__class__.__name__,
+            "model": self.model,
+            "url": self._sanitize_url(url),
+            "headers": self._mask_sensitive_data(headers),
+            "data": self._mask_sensitive_data(data)
+        }
+        try:
+            with open(request_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception:
+            logger.exception("保存LLM请求数据失败: %s", request_path)
 
     @abstractmethod
     async def chat_completion(self, messages: List[Dict[str, str]], **kwargs) -> str:
@@ -91,6 +150,8 @@ class AIProviderBase(ABC):
             Dict: 响应数据
         """
         try:
+            if self.enable_request_dump:
+                self._dump_llm_request(url, headers, data)
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
                 async with session.post(url, headers=headers, json=data) as response:
                     response.raise_for_status()

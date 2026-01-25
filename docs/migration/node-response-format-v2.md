@@ -411,23 +411,25 @@ test_node_response_format("pyannote_audio.get_speaker_segments", {...})
 **IndexTTS** (1个):
 12. `indextts.generate_speech` ⚠️ 格式变更
 
-**WService 系列** (6个):
+**WService 系列** (7个):
 13. `wservice.generate_subtitle_files`
 14. `wservice.correct_subtitles`
-15. `wservice.ai_optimize_subtitles`
-16. `wservice.merge_speaker_segments`
-17. `wservice.merge_with_word_timestamps`
-18. `wservice.prepare_tts_segments`
+15. `wservice.ai_optimize_text`
+16. `wservice.rebuild_subtitle_with_words`
+17. `wservice.merge_speaker_segments`
+18. `wservice.merge_with_word_timestamps`
+19. `wservice.prepare_tts_segments`
 
 ### 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v2.1 | 2026-01-25 | 新增纯文本纠错与词级重构节点，更新至 19 个节点 |
 | v2.0 | 2025-12-23 | 所有 18 个节点迁移完成 |
 | v1.0 | 2024-01-01 | 初始版本（已废弃） |
 
 ---
 
-**最后更新**: 2025-12-23
-**文档版本**: 2.0
+**最后更新**: 2026-01-25
+**文档版本**: 2.1
 **维护者**: YiVideo 开发团队

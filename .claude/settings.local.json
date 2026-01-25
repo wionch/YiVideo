@@ -145,7 +145,14 @@
       "Skill(planning-with-files:planning-with-files)",
       "mcp__filesystem__write_file",
       "Bash(markdown-lint:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(xargs:*)",
+      "Bash(git status:*)",
+      "Skill(superpowers:using-git-worktrees)",
+      "Bash(git check-ignore:*)",
+      "Bash(git worktree add:*)",
+      "Skill(yivideo-docker-testing)",
+      "Skill(document-skills:doc-coauthoring)"
     ],
     "deny": [
       "Bash(docker build:*)"

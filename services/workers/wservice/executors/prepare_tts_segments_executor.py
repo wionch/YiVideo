@@ -58,8 +58,8 @@ class WServicePrepareTtsSegmentsExecutor(BaseNodeExecutor):
             default_source_stage_names = [
                 'wservice.merge_with_word_timestamps',
                 'wservice.merge_speaker_segments',
+                'wservice.rebuild_subtitle_with_words',
                 'wservice.generate_subtitle_files',
-                'wservice.ai_optimize_subtitles',
                 'faster_whisper.transcribe_audio'
             ]
 
@@ -209,8 +209,8 @@ class WServicePrepareTtsSegmentsExecutor(BaseNodeExecutor):
             source_stage_names = [
                 'wservice.merge_with_word_timestamps',
                 'wservice.merge_speaker_segments',
+                'wservice.rebuild_subtitle_with_words',
                 'wservice.generate_subtitle_files',
-                'wservice.ai_optimize_subtitles',
                 'faster_whisper.transcribe_audio'
             ]
 
@@ -264,7 +264,7 @@ class WServicePrepareTtsSegmentsExecutor(BaseNodeExecutor):
             # 策略3: 回退到从文件加载
             segments_file = (
                 stage.output.get('segments_file')
-                or stage.output.get('optimized_file_path')
+                or stage.output.get('optimized_segments_file')
                 or stage.output.get('merged_segments_file')
             )
             if segments_file and os.path.exists(segments_file):

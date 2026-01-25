@@ -32,10 +32,6 @@ from services.common.subtitle.subtitle_merger import (
 )
 # 导入公共字幕校正模块
 from services.common.subtitle.subtitle_correction import SubtitleCorrector
-# 导入AI字幕优化模块
-from services.common.subtitle.subtitle_optimizer import SubtitleOptimizer
-from services.common.subtitle.metrics import metrics_collector
-
 logger = get_logger('wservice_tasks')
 
 
@@ -599,16 +595,51 @@ def correct_subtitles(self, context: dict) -> dict:
     return result_context.model_dump()
 
 
-@celery_app.task(bind=True, name='wservice.ai_optimize_subtitles')
-def ai_optimize_subtitles(self, context: dict) -> dict:
+@celery_app.task(bind=True, name='wservice.ai_optimize_text')
+def ai_optimize_text(self, context: dict) -> dict:
     """
-    AI字幕优化任务节点。
+    纯文本 AI 优化任务节点。
     该任务已迁移到统一的 BaseNodeExecutor 框架。
     """
-    from services.workers.wservice.executors import WServiceAIOptimizeSubtitlesExecutor
+    from services.workers.wservice.executors import WServiceAIOptimizeTextExecutor
+
+    dump_dir = "/app/tmp/1"
+    workflow_id = context.get("workflow_id", "unknown")
+    dump_tag = f"{workflow_id}_{int(time.time() * 1000)}"
+    os.makedirs(dump_dir, exist_ok=True)
+    request_path = os.path.join(dump_dir, f"wservice.ai_optimize_text_request_{dump_tag}.json")
+    try:
+        with open(request_path, "w", encoding="utf-8") as f:
+            json.dump(context, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.exception("保存 wservice.ai_optimize_text 请求数据失败: %s", request_path)
 
     workflow_context = WorkflowContext(**context)
-    executor = WServiceAIOptimizeSubtitlesExecutor(self.name, workflow_context)
+    executor = WServiceAIOptimizeTextExecutor(self.name, workflow_context)
+    result_context = executor.execute()
+    state_manager.update_workflow_state(result_context)
+    result_data = result_context.model_dump()
+
+    response_path = os.path.join(dump_dir, f"wservice.ai_optimize_text_response_{dump_tag}.json")
+    try:
+        with open(response_path, "w", encoding="utf-8") as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.exception("保存 wservice.ai_optimize_text 返回数据失败: %s", response_path)
+
+    return result_data
+
+
+@celery_app.task(bind=True, name='wservice.rebuild_subtitle_with_words')
+def rebuild_subtitle_with_words(self, context: dict) -> dict:
+    """
+    词级重构字幕任务节点。
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
+    """
+    from services.workers.wservice.executors import WServiceRebuildSubtitleWithWordsExecutor
+
+    workflow_context = WorkflowContext(**context)
+    executor = WServiceRebuildSubtitleWithWordsExecutor(self.name, workflow_context)
     result_context = executor.execute()
     state_manager.update_workflow_state(result_context)
     return result_context.model_dump()

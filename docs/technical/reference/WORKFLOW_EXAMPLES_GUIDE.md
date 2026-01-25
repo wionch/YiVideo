@@ -108,13 +108,13 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
 
 ### 5. 完整视频处理工作流（带AI字幕优化）
 
-这个工作流在基础字幕生成之上，增加了AI字幕优化步骤，对转录后的字幕进行智能优化，包括错别字修正、标点补充、口头禅删除等。
+这个工作流在基础字幕生成之上，增加纯文本纠错与词级重构两个步骤，对转录后的字幕进行纠错并回填到词级时间戳。
 
 **流程**：
 1. 视频 → 视频 + 音频
 2. 音频 → 人声音频 + 背景声音频
-3. 人声音频 → 转录数据 → 字幕文件
-4. 字幕文件 → **AI智能优化** → 优化后字幕文件
+3. 人声音频 → 转录数据
+4. 转录数据 → **AI纯文本纠错** → **词级重构** → 字幕文件
 
 ```bash
 curl -X POST "${API_BASE_URL}/v1/workflows" \
@@ -126,15 +126,10 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "ffmpeg.extract_audio",
         "audio_separator.separate_vocals",
         "faster_whisper.transcribe_audio",
-        "wservice.ai_optimize_subtitles",
+        "wservice.ai_optimize_text",
+        "wservice.rebuild_subtitle_with_words",
         "wservice.generate_subtitle_files"
-      ],
-      "subtitle_optimization": {
-        "enabled": true,
-        "provider": "deepseek",
-        "batch_size": 50,
-        "overlap_size": 10
-      }
+      ]
     }
   }'
 ```
@@ -151,21 +146,16 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
     "workflow_config": {
       "workflow_chain": [
         "faster_whisper.transcribe_audio",
-        "wservice.ai_optimize_subtitles"
-      ],
-      "subtitle_optimization": {
-        "enabled": true,
-        "provider": "gemini",
-        "batch_size": 50,
-        "overlap_size": 10
-      }
+        "wservice.ai_optimize_text",
+        "wservice.rebuild_subtitle_with_words"
+      ]
     }
   }'
 ```
 
-### 7. 大体积字幕优化工作流
+### 7. 长文本字幕优化工作流
 
-对于字幕条数超过100条的视频，系统会自动启用滑窗重叠分段机制：
+当字幕文本较长时，建议在上游控制输入长度，保持文本完整性，避免模型超限导致截断：
 
 ```bash
 curl -X POST "${API_BASE_URL}/v1/workflows" \
@@ -176,23 +166,17 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
       "workflow_chain": [
         "ffmpeg.extract_audio",
         "faster_whisper.transcribe_audio",
-        "wservice.ai_optimize_subtitles",
+        "wservice.ai_optimize_text",
+        "wservice.rebuild_subtitle_with_words",
         "wservice.generate_subtitle_files"
-      ],
-      "subtitle_optimization": {
-        "enabled": true,
-        "provider": "deepseek",
-        "batch_size": 100,
-        "overlap_size": 20
-      }
+      ]
     }
   }'
 ```
 
 **说明**：
-- `batch_size`: 主区域大小（每段处理的字幕条数）
-- `overlap_size`: 重叠区域大小（每段重叠的字幕条数）
-- 滑窗重叠机制确保跨段字幕的上下文完整性，保证MOVE指令等操作的准确性
+- 纯文本纠错要求输入为完整正文文本
+- 如需分段处理，建议在上游拆分并分别执行
 
 ### 8. 带说话人分离和AI优化的工作流
 
@@ -209,15 +193,10 @@ curl -X POST "${API_BASE_URL}/v1/workflows" \
         "audio_separator.separate_vocals",
         "faster_whisper.transcribe_audio",
         "pyannote_audio.diarize_speakers",
-        "wservice.ai_optimize_subtitles",
+        "wservice.ai_optimize_text",
+        "wservice.rebuild_subtitle_with_words",
         "wservice.generate_subtitle_files"
-      ],
-      "subtitle_optimization": {
-        "enabled": true,
-        "provider": "zhipu",
-        "batch_size": 50,
-        "overlap_size": 10
-      }
+      ]
     }
   }'
 ```
