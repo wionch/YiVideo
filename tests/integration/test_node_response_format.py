@@ -69,3 +69,29 @@ class TestNodeResponseFormat:
         stage = result_context.stages["wservice.rebuild_subtitle_with_words"]
         assert stage.status == "SUCCESS"
         assert "optimized_segments_file" in stage.output
+
+    def test_wservice_translate_subtitles_response_format(self, validator, base_context):
+        from services.workers.wservice.executors import WServiceTranslateSubtitlesExecutor
+
+        context = WorkflowContext(**base_context)
+        context.input_params["input_data"] = {
+            "segments_file": "/share/transcribe.json",
+            "target_language": "zh",
+        }
+
+        with patch.object(
+            WServiceTranslateSubtitlesExecutor,
+            "execute_core_logic",
+            return_value={
+                "translated_segments_file": "/share/translated_segments.json",
+            },
+        ):
+            executor = WServiceTranslateSubtitlesExecutor(
+                "wservice.translate_subtitles",
+                context,
+            )
+            result_context = executor.execute()
+
+        stage = result_context.stages["wservice.translate_subtitles"]
+        assert stage.status == "SUCCESS"
+        assert "translated_segments_file" in stage.output

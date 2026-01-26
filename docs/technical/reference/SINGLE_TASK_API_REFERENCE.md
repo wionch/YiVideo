@@ -1128,6 +1128,88 @@ WorkflowContext 示例：
 | `max_retries` | integer | 否 | 3 | 最大重试次数 |
 | `system_prompt_override` | string | 否 | - | 覆盖系统提示词路径 |
 
+#### wservice.translate_subtitles
+复用判定：`stages.wservice.translate_subtitles.status=SUCCESS` 且 `output.translated_segments_file` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
+功能概述（wservice.translate_subtitles）：将字幕逐行提交给大模型进行翻译装词，按行回填并保持原始时间轴，输出翻译后的 segments 文件。
+请求体：
+```json
+{
+  "task_name": "wservice.translate_subtitles",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json",
+    "target_language": "zh",
+    "source_language": "en",
+    "provider": "deepseek",
+    "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
+    "cps_limit": 18,
+    "cpl_limit": 42,
+    "max_lines": 2,
+    "max_retries": 3
+  }
+}
+```
+WorkflowContext 示例：
+```json
+{
+  "workflow_id": "task-demo-001",
+  "create_at": "2025-12-17T12:00:00Z",
+  "input_params": {
+    "task_name": "wservice.translate_subtitles",
+    "input_data": {
+      "segments_file": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json",
+      "target_language": "zh",
+      "source_language": "en",
+      "provider": "deepseek",
+      "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
+      "cps_limit": 18,
+      "cpl_limit": 42,
+      "max_lines": 2,
+      "max_retries": 3
+    },
+    "callback_url": "http://localhost:5678/webhook/demo-t1"
+  },
+  "shared_storage_path": "/share/workflows/task-demo-001",
+  "stages": {
+    "wservice.translate_subtitles": {
+      "status": "SUCCESS",
+      "input_params": {
+        "segments_file": "/share/workflows/task-demo-001/optimized_segments.json",
+        "target_language": "zh",
+        "source_language": "en",
+        "provider": "deepseek",
+        "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
+        "cps_limit": 18,
+        "cpl_limit": 42,
+        "max_lines": 2,
+        "max_retries": 3
+      },
+      "output": {
+        "translated_segments_file": "/share/workflows/task-demo-001/translated_segments.json",
+        "translated_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/translated_segments.json"
+      },
+      "error": null,
+      "duration": 5.0
+    }
+  },
+  "error": null
+}
+```
+说明：该节点按行翻译并回填，不改变时间戳；若开启 `core.auto_upload_to_minio`，可能追加 `*_minio_url`，本地路径不被覆盖。
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `segments_file` | string | 是 | - | 字幕 segments 文件 |
+| `target_language` | string | 是 | - | 目标语言（ISO 码或语言名称） |
+| `source_language` | string | 否 | 自动识别 | 源语言 |
+| `provider` | string | 否 | deepseek | AI 提供商 |
+| `prompt_file_path` | string | 否 | /app/config/system_prompt/subtitle_translation_fitting.md | 系统提示词路径 |
+| `cps_limit` | integer | 否 | 18 | 阅读速度上限（CPS） |
+| `cpl_limit` | integer | 否 | 42 | 单行字符上限（CPL） |
+| `max_lines` | integer | 否 | 2 | 单段最大行数 |
+| `max_retries` | integer | 否 | 3 | 最大重试次数 |
+
 #### wservice.rebuild_subtitle_with_words
 复用判定：`stages.wservice.rebuild_subtitle_with_words.status=SUCCESS` 且 `output.optimized_segments_file` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
 功能概述（wservice.rebuild_subtitle_with_words）：将 AI 优化后的全文映射回原始词级时间戳，输出重建后的 segments 文件。

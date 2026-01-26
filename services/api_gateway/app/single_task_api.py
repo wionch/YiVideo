@@ -413,6 +413,7 @@ async def get_supported_tasks():
             "wservice.correct_subtitles",
             "wservice.ai_optimize_text",
             "wservice.rebuild_subtitle_with_words",
+            "wservice.translate_subtitles",
             "wservice.merge_speaker_segments",
             "wservice.merge_with_word_timestamps",
             "wservice.prepare_tts_segments"

@@ -630,6 +630,21 @@ def ai_optimize_text(self, context: dict) -> dict:
     return result_data
 
 
+@celery_app.task(bind=True, name='wservice.translate_subtitles')
+def translate_subtitles(self, context: dict) -> dict:
+    """
+    字幕翻译装词任务节点。
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
+    """
+    from services.workers.wservice.executors import WServiceTranslateSubtitlesExecutor
+
+    workflow_context = WorkflowContext(**context)
+    executor = WServiceTranslateSubtitlesExecutor(self.name, workflow_context)
+    result_context = executor.execute()
+    state_manager.update_workflow_state(result_context)
+    return result_context.model_dump()
+
+
 @celery_app.task(bind=True, name='wservice.rebuild_subtitle_with_words')
 def rebuild_subtitle_with_words(self, context: dict) -> dict:
     """
