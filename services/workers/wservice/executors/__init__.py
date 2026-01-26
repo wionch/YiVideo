@@ -10,6 +10,7 @@ from .merge_with_word_timestamps_executor import WServiceMergeWithWordTimestamps
 from .merge_speaker_based_subtitles_executor import WServiceMergeSpeakerBasedSubtitlesExecutor
 from .prepare_tts_segments_executor import WServicePrepareTtsSegmentsExecutor
 from .generate_subtitle_files_executor import WServiceGenerateSubtitleFilesExecutor
+from .translate_subtitles_executor import WServiceTranslateSubtitlesExecutor
 
 __all__ = [
     "WServiceCorrectSubtitlesExecutor",
@@ -19,5 +20,6 @@ __all__ = [
     "WServiceMergeWithWordTimestampsExecutor",
     "WServiceMergeSpeakerBasedSubtitlesExecutor",
     "WServicePrepareTtsSegmentsExecutor",
-    "WServiceGenerateSubtitleFilesExecutor"
+    "WServiceGenerateSubtitleFilesExecutor",
+    "WServiceTranslateSubtitlesExecutor",
 ]
