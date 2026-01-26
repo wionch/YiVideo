@@ -88,7 +88,9 @@ class SubtitleLineTranslator:
                 user_prompt,
                 provider=provider,
                 ai_call=ai_call
-            ).strip()
+            )
+            output_text = output_text if output_text is not None else ""
+            output_text = output_text.rstrip()
             last_output = output_text
             if not output_text:
                 if empty_allowed:
@@ -104,6 +106,7 @@ class SubtitleLineTranslator:
                 continue
 
             lines = [line.rstrip("\r") for line in output_text.splitlines()]
+            lines = self._fill_empty_for_zero_budget_lines(lines, budgets)
             error = self._validate_output_lines(lines, budgets)
             if error:
                 last_error = error
@@ -225,7 +228,20 @@ class SubtitleLineTranslator:
         return translated_segments
 
     def _should_allow_empty_output(self, budgets: List[int]) -> bool:
-        return any(budget <= 0 for budget in budgets)
+        return all(budget <= 0 for budget in budgets)
+
+    def _fill_empty_for_zero_budget_lines(
+        self,
+        lines: List[str],
+        budgets: List[int]
+    ) -> List[str]:
+        filled: List[str] = []
+        for line, budget in zip(lines, budgets):
+            if budget <= 0:
+                filled.append("")
+            else:
+                filled.append(line)
+        return filled
 
     def _load_segments_from_file(self, segments_file: str) -> List[Dict[str, Any]]:
         import json
