@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 新增 `wservice.translate_subtitles` 节点，实现逐行翻译装词并按原分段回填，时间轴不变。
+**Goal:** 新增 `wservice.translate_subtitles` 节点，实现逐行翻译装词并按原分段回填，时间轴不变、单行输出（max_lines=1），清空 `words` 字段。
 
-**Architecture:** 新增逐行翻译模块封装 LLM 调用与行数/预算校验；新增 executor 读取 `segments_file`、生成逐行 prompt、调用翻译并回填；输出 `translated_segments_file`。
+**Architecture:** 新增逐行翻译模块封装 LLM 调用与行数/预算校验（强制单行输出 max_lines=1）；新增 executor 读取 `segments_file`、生成逐行 prompt、调用翻译并回填，若原 segments 含 `words` 字段则清空；输出 `translated_segments_file`。
 
 **Tech Stack:** Python、Celery、现有 `SubtitleTextOptimizer`/PromptLoader/AIProviderFactory、JSON 段文件。
 

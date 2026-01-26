@@ -222,6 +222,8 @@ class SubtitleLineTranslator:
         for segment, line in zip(segments, lines):
             updated = segment.copy()
             updated["text"] = line.strip()
+            if "words" in updated:
+                updated["words"] = []
             translated_segments.append(updated)
         return translated_segments
 
