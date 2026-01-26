@@ -52,6 +52,32 @@ def test_translate_lines_fails_on_budget_exceeded():
     assert "超出字符预算" in result["error"]
 
 
+def test_translate_lines_forces_single_line_budget():
+    segments = [
+        {"start": 0.0, "end": 1.0, "text": "Hi"},
+    ]
+
+    translator = SubtitleLineTranslator(provider="deepseek")
+
+    def fake_ai(_system_prompt, _user_prompt):
+        return "12345678901"
+
+    result = translator.translate_lines(
+        segments=segments,
+        target_language="zh",
+        source_language=None,
+        prompt_file_path="/app/config/system_prompt/subtitle_translation_fitting.md",
+        ai_call=fake_ai,
+        cps_limit=18,
+        cpl_limit=10,
+        max_lines=2,
+        max_retries=1,
+    )
+
+    assert result["success"] is False
+    assert "超出字符预算" in result["error"]
+
+
 def test_translate_lines_allows_empty_when_budget_zero():
     segments = [
         {"start": 0.0, "end": 0.0, "text": "Hi"},

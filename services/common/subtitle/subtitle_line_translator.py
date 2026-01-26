@@ -63,6 +63,10 @@ class SubtitleLineTranslator:
         retry_limit = max_retries if max_retries is not None else self.config.max_retry_attempts
         retry_limit = max(1, int(retry_limit))
 
+        if max_lines != 1:
+            logger.warning("翻译装词仅支持单行输出，已强制 max_lines=1")
+        max_lines = 1
+
         budgets = self._build_budgets(segments, cps_limit, cpl_limit, max_lines)
         user_prompt = self._build_user_prompt(
             segments,
