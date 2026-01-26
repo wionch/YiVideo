@@ -90,7 +90,6 @@ class SubtitleLineTranslator:
                 ai_call=ai_call
             )
             output_text = output_text if output_text is not None else ""
-            output_text = output_text.rstrip()
             last_output = output_text
             if not output_text:
                 if empty_allowed:
@@ -105,8 +104,7 @@ class SubtitleLineTranslator:
                 logger.warning("逐行翻译输出为空，尝试重试: %s/%s", attempt, retry_limit)
                 continue
 
-            lines = [line.rstrip("\r") for line in output_text.splitlines()]
-            lines = self._fill_empty_for_zero_budget_lines(lines, budgets)
+            lines = self._normalize_output_lines(output_text, budgets)
             error = self._validate_output_lines(lines, budgets)
             if error:
                 last_error = error
@@ -230,17 +228,29 @@ class SubtitleLineTranslator:
     def _should_allow_empty_output(self, budgets: List[int]) -> bool:
         return all(budget <= 0 for budget in budgets)
 
-    def _fill_empty_for_zero_budget_lines(
+    def _normalize_output_lines(
         self,
-        lines: List[str],
+        output_text: str,
         budgets: List[int]
     ) -> List[str]:
+        text = output_text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = text.split("\n")
+
+        while lines and lines[-1] == "" and len(lines) > len(budgets):
+            lines.pop()
+
+        missing = len(budgets) - len(lines)
+        if missing > 0 and all(budget <= 0 for budget in budgets[-missing:]):
+            lines.extend([""] * missing)
+
         filled: List[str] = []
-        for line, budget in zip(lines, budgets):
-            if budget <= 0:
+        for index in range(min(len(lines), len(budgets))):
+            if budgets[index] <= 0:
                 filled.append("")
             else:
-                filled.append(line)
+                filled.append(lines[index])
+        if len(lines) > len(budgets):
+            filled.extend(lines[len(budgets):])
         return filled
 
     def _load_segments_from_file(self, segments_file: str) -> List[Dict[str, Any]]:

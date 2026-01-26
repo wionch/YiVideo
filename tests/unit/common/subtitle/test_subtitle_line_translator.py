@@ -132,6 +132,34 @@ def test_translate_lines_handles_mixed_zero_budget_lines():
     assert result["translated_segments"][1]["text"] == "你好"
 
 
+def test_translate_lines_appends_empty_for_trailing_zero_budget():
+    segments = [
+        {"start": 0.0, "end": 1.0, "text": "Hello"},
+        {"start": 1.0, "end": 1.0, "text": "Hi"},
+    ]
+
+    translator = SubtitleLineTranslator(provider="deepseek")
+
+    def fake_ai(_system_prompt, _user_prompt):
+        return "你好"
+
+    result = translator.translate_lines(
+        segments=segments,
+        target_language="zh",
+        source_language=None,
+        prompt_file_path="/app/config/system_prompt/subtitle_translation_fitting.md",
+        ai_call=fake_ai,
+        cps_limit=18,
+        cpl_limit=42,
+        max_retries=1,
+    )
+
+    assert result["success"] is True
+    assert result["translated_lines"] == ["你好", ""]
+    assert result["translated_segments"][0]["text"] == "你好"
+    assert result["translated_segments"][1]["text"] == ""
+
+
 def test_translate_lines_success_returns_segments():
     segments = [
         {"start": 0.0, "end": 1.0, "text": "Hello"},
