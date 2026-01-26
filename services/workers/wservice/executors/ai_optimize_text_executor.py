@@ -48,9 +48,6 @@ class WServiceAIOptimizeTextExecutor(BaseNodeExecutor):
             raise RuntimeError(f"纯文本纠错失败: {result.get('error', '未知错误')}")
 
         optimized_text = result.get("optimized_text", "")
-        stats = result.get("stats") or {}
-        if provider and "provider" not in stats:
-            stats["provider"] = provider
 
         base_name = os.path.splitext(os.path.basename(segments_file))[0] or "segments"
         output_path = build_node_output_path(
@@ -67,10 +64,7 @@ class WServiceAIOptimizeTextExecutor(BaseNodeExecutor):
         logger.info(f"[{workflow_id}] 纯文本纠错完成: {output_path}")
 
         return {
-            "optimized_text": optimized_text,
-            "optimized_text_file": output_path,
-            "segments_file": segments_file,
-            "stats": stats
+            "optimized_text_file": output_path
         }
 
     def get_cache_key_fields(self) -> List[str]:

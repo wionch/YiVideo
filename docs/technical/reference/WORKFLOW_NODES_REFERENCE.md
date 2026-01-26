@@ -2550,7 +2550,7 @@ faster_whisper_service:
 
 对转录后的字幕全文进行纯文本纠错。
 
-**功能描述**：将 `segments` 按顺序拼接为全文文本，调用 AI 进行纠错与规范化，输出优化后的全文文本与文件路径。
+**功能描述**：将 `segments` 按顺序拼接为全文文本，调用 AI 进行纠错与规范化，仅输出优化后的文本文件路径。
 
 **输入参数**：
 
@@ -2568,12 +2568,7 @@ faster_whisper_service:
 
 ```json
 {
-    "optimized_text": "优化后的全文文本",
-    "optimized_text_file": "/share/workflows/{workflow_id}/optimized_text.txt",
-    "segments_file": "/share/workflows/{workflow_id}/transcribe.json",
-    "stats": {
-        "provider": "deepseek"
-    }
+    "optimized_text_file": "/share/workflows/{workflow_id}/optimized_text.txt"
 }
 ```
 
@@ -2613,6 +2608,7 @@ faster_whisper_service:
 -   `segments_data` (array, 可选): 原始字幕片段数据
 -   `optimized_text` (string, 可选): 优化后的全文文本
 -   `optimized_text_file` (string, 可选): 优化后的全文文本文件路径
+-   `report` (bool, 可选): 是否生成重构报告
 
 **配置来源说明**：
 
@@ -2626,9 +2622,11 @@ faster_whisper_service:
 
 ```json
 {
-    "optimized_segments_file": "/share/workflows/{workflow_id}/optimized_segments.json"
+    "optimized_segments_file": "/share/workflows/{workflow_id}/optimized_segments.json",
+    "report_file": "/share/workflows/{workflow_id}/rebuild_report.txt"
 }
 ```
+说明：`report_file` 仅在 `report=true` 时生成。
 
 **单任务模式支持**：
 

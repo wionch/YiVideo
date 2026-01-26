@@ -34,10 +34,7 @@ class TestNodeResponseFormat:
             WServiceAIOptimizeTextExecutor,
             "execute_core_logic",
             return_value={
-                "optimized_text": "hello world",
                 "optimized_text_file": "/share/optimized_text.txt",
-                "segments_file": "/share/transcribe.json",
-                "stats": {"provider": "deepseek"},
             },
         ):
             executor = WServiceAIOptimizeTextExecutor("wservice.ai_optimize_text", context)
@@ -45,10 +42,7 @@ class TestNodeResponseFormat:
 
         stage = result_context.stages["wservice.ai_optimize_text"]
         assert stage.status == "SUCCESS"
-        assert "optimized_text" in stage.output
         assert "optimized_text_file" in stage.output
-        assert "segments_file" in stage.output
-        assert "stats" in stage.output
 
     def test_wservice_rebuild_subtitle_with_words_response_format(self, validator, base_context):
         from services.workers.wservice.executors import WServiceRebuildSubtitleWithWordsExecutor

@@ -1067,8 +1067,8 @@ WorkflowContext 示例：
 | `subtitle_path` | string | 是 | - | 输入字幕文件 |
 
 #### wservice.ai_optimize_text
-复用判定：`stages.wservice.ai_optimize_text.status=SUCCESS` 且 `output.optimized_text_file` 或 `output.optimized_text` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
-功能概述（wservice.ai_optimize_text）：将字幕全文以纯文本形式提交给大模型进行纠错，输出优化后的全文文本与文件路径。
+复用判定：`stages.wservice.ai_optimize_text.status=SUCCESS` 且 `output.optimized_text_file` 非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
+功能概述（wservice.ai_optimize_text）：将字幕全文以纯文本形式提交给大模型进行纠错，仅输出优化后的文本文件路径。
 请求体：
 ```json
 {
@@ -1109,14 +1109,7 @@ WorkflowContext 示例：
         "max_retries": 3
       },
       "output": {
-        "optimized_text": "optimized full text",
-        "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt",
-        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
-        "stats": {
-          "provider": "deepseek",
-          "processing_time": 12.3,
-          "total_tokens": 2380
-        }
+        "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt"
       },
       "error": null,
       "duration": 4.5
@@ -1125,7 +1118,7 @@ WorkflowContext 示例：
   "error": null
 }
 ```
-说明：输出为纯文本优化结果；若开启 `core.auto_upload_to_minio`，可能追加 `optimized_text_file_minio_url`，本地路径不被覆盖。
+说明：输出仅包含优化文本文件路径；若开启 `core.auto_upload_to_minio`，可能追加 `optimized_text_file_minio_url`，本地路径不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1146,7 +1139,8 @@ WorkflowContext 示例：
   "callback": "http://localhost:5678/webhook/demo-t1",
   "input_data": {
     "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-    "optimized_text_file": "http://localhost:9000/yivideo/task-demo-001/optimized_text.txt"
+    "optimized_text_file": "http://localhost:9000/yivideo/task-demo-001/optimized_text.txt",
+    "report": true
   }
 }
 ```
@@ -1159,7 +1153,8 @@ WorkflowContext 示例：
     "task_name": "wservice.rebuild_subtitle_with_words",
     "input_data": {
       "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-      "optimized_text_file": "http://localhost:9000/yivideo/task-demo-001/optimized_text.txt"
+      "optimized_text_file": "http://localhost:9000/yivideo/task-demo-001/optimized_text.txt",
+      "report": true
     },
     "callback_url": "http://localhost:5678/webhook/demo-t1"
   },
@@ -1173,7 +1168,9 @@ WorkflowContext 示例：
       },
       "output": {
         "optimized_segments_file": "/share/workflows/task-demo-001/optimized_segments.json",
-        "optimized_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json"
+        "optimized_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json",
+        "report_file": "/share/workflows/task-demo-001/rebuild_report.txt",
+        "report_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/rebuild_report.txt"
       },
       "error": null,
       "duration": 5.0
@@ -1182,13 +1179,14 @@ WorkflowContext 示例：
   "error": null
 }
 ```
-说明：该节点只重建文本，不修改时间戳；若开启 `core.auto_upload_to_minio`，可能追加 `*_minio_url`，本地路径不被覆盖。
+说明：该节点只重建文本，不修改时间戳；`report=true` 时生成重构报告；若开启 `core.auto_upload_to_minio`，可能追加 `*_minio_url`，本地路径不被覆盖。
 参数表：
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
 | `segments_file` | string | 是 | - | 转录 JSON（含 words） |
 | `optimized_text` | string | 否 | - | AI 优化后的纯文本 |
 | `optimized_text_file` | string | 否 | - | 优化文本文件路径（与 optimized_text 二选一） |
+| `report` | bool | 否 | false | 是否生成重构报告 |
 
 #### wservice.merge_speaker_segments
 复用判定：`stages.wservice.merge_speaker_segments.status=SUCCESS` 且 `output.merged_subtitle_path`（或合并结果列表）非空即命中复用；等待态返回 `status=pending`；未命中按正常流程执行。
