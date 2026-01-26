@@ -295,7 +295,6 @@ Edge-TTS 支持 SSML, 所以可以直接生成指定时长的语音.
    请确保方案中新建的功能节点和文档中的功能节点规范一致.
 
 ```
-@docs/technical/reference/WORKFLOW_NODES_REFERENCE.md
 @docs/technical/reference/SINGLE_TASK_API_REFERENCE.md
 ```
 
@@ -304,7 +303,6 @@ Edge-TTS 支持 SSML, 所以可以直接生成指定时长的语音.
 请对下述文档和代码进行交叉验证, 确认文档之间,文档和代码的一致性
 
 ```
-@docs/technical/reference/WORKFLOW_NODES_REFERENCE.md
 @docs/technical/reference/SINGLE_TASK_API_REFERENCE.md
 ```
 

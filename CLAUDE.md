@@ -221,7 +221,6 @@ HF_TOKEN=<token>
 ## 参考文档
 
 -   **API 参考**: `docs/technical/reference/SINGLE_TASK_API_REFERENCE.md`
--   **工作流示例**: `docs/technical/reference/WORKFLOW_EXAMPLES_GUIDE.md`
 -   **GPU 锁指南**: `docs/technical/reference/GPU_LOCK_COMPLETE_GUIDE.md`
 
 ## 🏛️ 全局架构约束 (Principles)
