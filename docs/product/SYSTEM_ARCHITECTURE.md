@@ -3,11 +3,11 @@
 **版本**: 1.1
 **状态**: 讨论中
 
-## 1. 核心思想：动态工作流引擎
+## 1. 核心思想：单节点任务调度
 
-本系统的核心定位是一个**动态、可配置的AI视频处理工作流引擎**。其设计目标是脱离写死的、单一的处理流水线，转向一个能够根据用户需求，灵活地、即插即用地编排组合各种原子化AI功能（如语音识别、OCR、语言模型、文本转语音等）的平台。
+本系统的核心定位是一个**单节点任务调度平台**。每个 AI 功能节点以独立服务形式提供，用户通过 `/v1/tasks` 明确指定 `task_name` 与 `input_data`，直接触发单任务执行。
 
-系统的驱动力是“**配置而非编码**”。通过一份描述“做什么”和“怎么做”的工作流配置文件，系统应能自动构建并执行一个复杂的处理链条，而无需修改任何服务端的代码。
+系统的驱动力是“**明确输入与最小调度**”。通过单任务请求参数，系统执行单个节点并返回标准化上下文结果，而无需工作流编排或动态任务链。
 
 ---
 
@@ -17,9 +17,9 @@
 
 ```mermaid
 graph TD
-    A[用户/客户端] -- "1. 发起HTTP请求 (含workflow_config)" --> B(API网关);
+    A[用户/客户端] -- "1. 发起HTTP请求 (task_name + input_data)" --> B(API网关);
     
-    B -- "2. 动态构建任务链" --> C(Celery Broker);
+    B -- "2. 提交单任务" --> C(Celery Broker);
     B -- "8. 状态查询" --> D(State Store - Redis);
 
     C -- "3. 任务分发" --> W1[ffmpeg_service];
@@ -51,10 +51,10 @@ graph TD
 ```
 
 - **API网关 (`api_gateway`)**: **系统的总入口和大脑**。
-  - 接收用户的HTTP请求，解析`workflow_config`。
-  - **动态构建** Celery任务链，并启动工作流。
-  - 创建并管理Redis中的工作流状态记录。
-  - 提供工作流状态查询接口。
+  - 接收用户的单任务请求，解析 `task_name` 与 `input_data`。
+  - 提交单任务到 Celery 队列。
+  - 创建并管理 Redis 中的任务状态记录。
+  - 提供任务状态查询接口。
   - **集成GPU锁监控系统**：提供实时监控、健康检查和自动恢复功能。
 
 - **AI功能服务 (Workers)**: **系统的“手和脚”**，每个服务都是一个独立的Celery worker。
@@ -68,7 +68,7 @@ graph TD
 
 - **基础设施 (Infrastructure)**:
   - **Celery Broker (Redis)**: 任务消息队列。
-  - **State Store (Redis)**: 集中化的工作流JSON状态存储。
+  - **State Store (Redis)**: 集中化的任务状态存储（WorkflowContext）。
   - **注意**: 在 `docker-compose.yml` 中，Redis 网络通常配置为 `external: true`，表明它被视为一个外部依赖，而不是由项目本身启动和管理。
   - **共享存储**: 存放所有视频、音频、图片等文件。
 
@@ -76,21 +76,22 @@ graph TD
 
 ## 3. 关键设计
 
-### 3.1. API 设计与 `workflow_config`
-- **端点**: `POST /v1/workflows`
+### 3.1. API 设计与单任务调用
+- **端点**: `POST /v1/tasks`
 - **请求体 (Body)**:
   ```json
   {
-      "video_path": "/share/videos/input/example.mp4",
-      "workflow_config": {
-          "subtitle_generation": { "strategy": "asr", "provider": "faster_whisper" },
-          "subtitle_refinement": { "strategy": "llm_proofread", "provider": "gemini" }
+      "task_name": "ffmpeg.extract_audio",
+      "task_id": "task-demo-001",
+      "callback": "http://localhost:5678/webhook/demo-t1",
+      "input_data": {
+          "video_path": "/share/videos/input/example.mp4"
       }
   }
   ```
 
-### 3.2. 标准化工作流上下文 (Standardized Workflow Context)
-所有任务间传递一个统一的、不断丰富的“工作流上下文”字典。
+### 3.2. 标准化任务上下文 (Standardized Task Context)
+所有任务统一使用 `WorkflowContext` 数据结构，在单任务模式下 `workflow_id` 与 `task_id` 一致。
 - **数据结构**:
   ```json
   {
@@ -163,49 +164,22 @@ gpu_lock_monitor:
 ```
 
 ### 3.5. 状态追踪与持久化
-工作流的完整状态记录被持久化在Redis中。
-- **键**: `workflow_state:{workflow_id}`
-- **值**: 一个详细的JSON对象，记录工作流生命周期。
-- **更新**: `api_gateway`创建记录；每个任务执行前后更新自己的状态。
+任务的完整状态记录被持久化在Redis中。
+- **键**: `workflow_state:{workflow_id}`（单任务模式下 `workflow_id` 与 `task_id` 一致）
+- **值**: 一个详细的JSON对象，记录任务生命周期。
+- **更新**: `api_gateway` 创建记录；任务执行前后更新自己的状态。
 - **过期**: 为每条记录设置可配置的TTL（例如7天）。
 
 ---
 
-## 4. 示例工作流：OCR字幕提取
+## 4. 示例任务：OCR字幕提取
 
-为了具体说明各组件如何协同工作，我们以一个从视频中提取字幕的OCR工作流为例，分解其详细步骤。
+为了说明各组件如何协同工作，我们以单任务模式的 OCR 节点调用为例，分解其详细步骤。
 
-1.  **[用户]**: 用户向`api_gateway`的`POST /v1/workflows`端点发起请求，`workflow_config`中指定`"strategy": "ocr"`。
-
-2.  **[API网关: 入口]**: `api_gateway`服务接收到请求。它负责：
-    *   生成一个全局唯一的 `workflow_id`。
-    *   在Redis中创建初始的状态JSON，并设置TTL。
-    *   根据`"strategy": "ocr"`，构建一个Celery任务链: `chain(extract_keyframes.s() | detect_subtitle_area.s() | crop_subtitle_images.s() | perform_ocr.s() | postprocess_and_finalize.s())`。
-    *   调用 `.apply_async()` 启动任务链，并将初始的`WorkflowContext`作为参数传入。
-    *   立即向用户返回 `workflow_id`。
-
-3.  **[F模块: GPU任务] `extract_keyframes`**: F模块的worker获取任务。
-    *   **获取GPU锁**。
-    *   为区域检测高效抽取少量关键帧。
-    *   更新Redis中的状态记录。
-    *   返回包含帧路径的`WorkflowContext`。
-
-4.  **[P模块: 回调任务] `detect_subtitle_area`**: P模块的worker获取任务。
-    *   **获取GPU锁**。
-    *   调用`SubtitleAreaDetector`计算字幕精确坐标。
-    *   **负责删除已用过的关键帧图片**。
-    *   更新Redis状态，返回包含坐标的`WorkflowContext`。
-
-5.  **[F模块: GPU并发任务] `crop_subtitle_images`**: F模块的worker获取任务。
-    *   **获取GPU锁**。
-    *   高效地裁剪出所有字幕条图片。
-    *   更新Redis状态，返回包含图片路径列表的`WorkflowContext`。
-
-6.  **[P模块: 回调任务&GPU任务] `perform_ocr`**: P模块的worker获取任务。
-    *   **获取GPU锁**。
-    *   调用`MultiProcessOCREngine`并发执行OCR。
-    *   **负责删除已用过的字幕条图片**。
-    *   更新Redis状态，返回包含结构化OCR结果的`WorkflowContext`。
+1.  **[用户]**: 用户向 `api_gateway` 的 `POST /v1/tasks` 端点发起请求，明确指定 `task_name` 与 `input_data`。
+2.  **[API网关: 入口]**: `api_gateway` 服务接收到请求，创建任务状态记录并提交 Celery 任务。
+3.  **[Worker 执行]**: 对应 OCR 节点的 worker 获取任务，处理并更新 Redis 状态。
+4.  **[结果返回]**: 若提供回调地址则发送回调，否则客户端通过状态/结果接口拉取。
 
 7.  **[P模块: 回调任务] `postprocess_and_finalize`**: P模块的worker获取任务。
     *   接收结构化的OCR结果，进行合并、排序和格式化，生成最终的字幕文件。

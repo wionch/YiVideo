@@ -95,7 +95,7 @@
 -   ✅ 导入新模块：`file_operations`, `single_task_api`
 -   ✅ 集成文件操作路由：`file_operations_router`
 -   ✅ 集成单任务路由：`single_task_router`
--   ✅ 保持与现有 `/v1/workflows` 接口的兼容性
+-   ✅ 仅保留 `/v1/tasks` 单任务接口
 -   ✅ FastAPI 应用版本更新为 1.1.1
 -   ✅ 启动时初始化监控服务
 
@@ -432,7 +432,7 @@ GET /v1/tasks/supported-tasks
 
 ### 与现有工作流的兼容性
 
--   ✅ 保持 `/v1/workflows` 接口完全不变
+-   ✅ 已移除 `/v1/workflows` 接口，仅保留单任务模式
 -   ✅ 使用相同的 Celery 配置和队列
 -   ✅ 复用现有的 state_manager 和 WorkflowContext
 -   ✅ 使用相同的 Redis 存储和配置管理

@@ -8,7 +8,7 @@
 
 *   **微服务架构 (Microservices)**: 系统功能被拆分为一系列高内聚、低耦合的独立服务，每个服务在独立的 Docker 容器中运行，并拥有独立的依赖。
 *   **异步任务驱动 (Asynchronous & Task-Driven)**: 所有耗时操作都将作为异步任务处理。系统采用 **Celery** 作为分布式任务队列框架，**Redis** 作为消息中间件 (Broker) 和结果后端。
-*   **工作流编排 (Workflow Orchestration)**: 工作流的编排和动态构建逻辑已移至 **API Gateway** 内部的 `workflow_factory` 中，不再有独立的编排服务。
+*   **单任务调度 (Single Task Dispatch)**: 系统仅提供单节点任务调度，由 **API Gateway** 直接提交任务，不再提供工作流编排服务。
 *   **事件驱动数据流 (Event-Driven Data Flow)**: 服务间通过传递共享存储中的文件路径进行协作，避免了直接的文件内容传输。
 *   **集中化数据管理 (Centralized Data)**: 所有持久化数据，包括任务文件和 AI 模型，都存储在宿主机的共享目录中，并通过 Docker Volume 挂载到各容器，确保数据的一致性和持久性。
 
@@ -21,7 +21,7 @@ graph TD
     end
 
     subgraph "后端核心"
-        B -->|2. 构建任务链并推送| C{Redis Broker};
+        B -->|2. 提交单任务并推送| C{Redis Broker};
         C -->|3. 分发子任务| E[Celery Workers 集群];
         E -->|4. 读写文件| F(共享数据卷);
         E -->|5. 写回子任务结果| C;
@@ -83,7 +83,7 @@ graph TD
 
 ### 2.1. API 网关 (`api-gateway`)
 *   **技术栈**: Python, FastAPI。
-*   **职责**: 系统的统一入口，负责认证、路由、请求校验和工作流编排。接收用户请求，通过内部的 `workflow_factory` 构建 Celery 任务链，并返回 `task_id`。
+*   **职责**: 系统的统一入口，负责认证、路由与请求校验。接收单任务请求并提交 Celery 任务，返回 `task_id`。
 
 ### 2.2. 任务队列 (`celery` + `redis`)
 *   **Celery**: 负责任务的定义、分发、执行和状态追踪。
@@ -127,16 +127,14 @@ graph TD
     *   **职责**: 将处理好的视频、音频、字幕合并成最终文件。
     *   **核心依赖**: `ffmpeg-python`。
 
-## 3. 核心工作流: “视频翻译”任务
+## 3. 核心单任务流程: “视频翻译”节点调用
 
-工作流的构建和执行已完全由 API 网关负责，不再有独立的编排服务。
+单任务模式由 API 网关直接调度单个节点，不再提供工作流编排入口。
 
-1.  **API 网关** 接收到请求 `POST /v1/workflows`，请求体为 `{ "video_path": "/share/videos/input/example.mp4", "workflow_config": {"subtitle_generation": {"strategy": "asr"}} }`。
-2.  网关内部的 `WorkflowFactory` (位于 `services/api_gateway/workflow/workflow_factory.py`) 开始工作。
-3.  工厂根据 `workflow_config` 的内容，解析并动态构建一个 Celery 任务链 (chain)。例如，`build_workflow_chain` 函数会根据配置决定是调用 `faster_whisper_service` 还是 `paddleocr_service`。
-4.  构建好的任务链被异步执行 `chain.apply_async()`，并立即向用户返回 `workflow_id`。
-5.  每个独立的 Worker 执行自己的任务，并将结果传递给链中的下一个任务。
-6.  API 网关通过 `workflow_id` 监控整个任务链的最终状态。
+1.  **API 网关** 接收到请求 `POST /v1/tasks`，请求体包含 `task_name`、`task_id` 与 `input_data`。
+2.  网关内部的单任务执行器生成 Celery 任务签名并提交到对应队列。
+3.  对应 Worker 执行任务，更新 `WorkflowContext`（单任务模式下 `workflow_id` 与 `task_id` 一致）。
+4.  若提供回调地址，API 网关完成后会发送回调；客户端也可通过 `/v1/tasks/{task_id}/status` 或 `/v1/tasks/{task_id}/result` 查询结果。
 
 ## 4. 开发与调试
 
@@ -275,9 +273,9 @@ volumes:
 
 ### 6.1. `subtitle_service` (OCR 模式) 详解
 
-这是系统中最复杂、最耗时的服务之一，其工作流经过优化以提高准确率和对复杂视频的适应性。
+这是系统中最复杂、最耗时的服务之一，其处理流程经过优化以提高准确率和对复杂视频的适应性。
 
-#### a. 核心工作流 (v2.0)
+#### a. 核心流程 (v2.0)
 
 服务将遵循一个更加健壮的流程来减少不必要的计算：
 
@@ -286,7 +284,7 @@ volumes:
 3.  **视频帧采样与字幕区域检测 (Frame Sampling & Area Detection)**: 在**每个场景内部**独立进行帧采样和字幕区域的自动检测。其内部逻辑（聚类、加权）保持不变，但这保证了即使字幕在不同场景下位置发生变化，也能被准确捕捉。
 4.  **获取字幕关键帧 (Keyframe Detection)**: 在已确定的“字幕区域”和“场景”内，通过比较相邻帧的像素差异（如SSIM），标记出字幕发生变化的“关键帧”。
 5.  **OCR 识别 (OCR Recognition)**: 仅对上一步筛选出的“关键帧”的“字幕区域”进行 `PaddleOCR` 识别。
-6.  **参数可配置化**: 将场景检测的阈值、像素比对的敏感度等关键参数作为可选配置项，允许在创建任务时由 `orchestrator_service` 传入，以便针对特定类型的视频进行效果微调。
+6.  **参数可配置化**: 将场景检测的阈值、像素比对的敏感度等关键参数作为可选配置项，允许在创建任务时由 `api_gateway` 传入，以便针对特定类型的视频进行效果微调。
 
 #### b. 性能与并发优化
 

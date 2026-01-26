@@ -1,6 +1,6 @@
 # 单任务与文件操作 HTTP API 参考
 
-本文件与 FastAPI/Celery 实现及 `WorkflowContext` 数据结构对齐，提供 `/v1/tasks` 单任务调用与 `/v1/files` 文件操作接口的完整示例。示例统一使用：
+本文件与 FastAPI/Celery 实现及 `WorkflowContext` 数据结构对齐，仅提供 `/v1/tasks` 单任务调用与 `/v1/files` 文件操作接口的完整示例。系统已不再提供 `/v1/workflows` 工作流接口。示例统一使用：
 - 基础地址：`http://localhost:8788`
 - 示例任务：`task_id=task-demo-001`
 - 示例回调：`http://localhost:5678/webhook/demo-t1`
@@ -53,7 +53,7 @@
 ```
 
 ### 查询状态：GET /v1/tasks/{task_id}/status
-返回最新工作流状态（`WorkflowContext` 序列化）并附带运行态字段（`status`/`updated_at`/`minio_files`/`callback_status` 等）。示例基于 `ffmpeg.extract_audio` 成功：
+返回最新任务状态（`WorkflowContext` 序列化）并附带运行态字段（`status`/`updated_at`/`minio_files`/`callback_status` 等）。在单任务模式下，`workflow_id` 等同于 `task_id`。示例基于 `ffmpeg.extract_audio` 成功：
 ```json
 {
   "workflow_id": "task-demo-001",
