@@ -26,7 +26,7 @@ class WServiceTranslateSubtitlesExecutor(BaseNodeExecutor):
         - prompt_file_path (str, 可选): 系统提示词路径
         - cps_limit (int, 可选): 阅读速度上限
         - cpl_limit (int, 可选): 单行字符上限
-        - max_lines (int, 可选): 最大行数
+        - max_lines (int, 可选): 最大行数（单行输出时建议为 1）
         - max_retries (int, 可选): 最大重试次数
     """
 
@@ -53,7 +53,7 @@ class WServiceTranslateSubtitlesExecutor(BaseNodeExecutor):
         prompt_file_path = input_data.get("prompt_file_path")
         cps_limit = input_data.get("cps_limit", 18)
         cpl_limit = input_data.get("cpl_limit", 42)
-        max_lines = input_data.get("max_lines", 2)
+        max_lines = input_data.get("max_lines", 1)
         max_retries = input_data.get("max_retries")
 
         translator = SubtitleLineTranslator(

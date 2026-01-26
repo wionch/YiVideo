@@ -1145,7 +1145,7 @@ WorkflowContext 示例：
     "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
     "cps_limit": 18,
     "cpl_limit": 42,
-    "max_lines": 2,
+    "max_lines": 1,
     "max_retries": 3
   }
 }
@@ -1182,7 +1182,7 @@ WorkflowContext 示例：
         "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
         "cps_limit": 18,
         "cpl_limit": 42,
-        "max_lines": 2,
+        "max_lines": 1,
         "max_retries": 3
       },
       "output": {
@@ -1207,7 +1207,7 @@ WorkflowContext 示例：
 | `prompt_file_path` | string | 否 | /app/config/system_prompt/subtitle_translation_fitting.md | 系统提示词路径 |
 | `cps_limit` | integer | 否 | 18 | 阅读速度上限（CPS） |
 | `cpl_limit` | integer | 否 | 42 | 单行字符上限（CPL） |
-| `max_lines` | integer | 否 | 2 | 单段最大行数 |
+| `max_lines` | integer | 否 | 1 | 单段最大行数（单行输出） |
 | `max_retries` | integer | 否 | 3 | 最大重试次数 |
 
 #### wservice.rebuild_subtitle_with_words

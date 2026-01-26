@@ -42,7 +42,7 @@ class SubtitleLineTranslator:
         provider: Optional[str] = None,
         cps_limit: int = 18,
         cpl_limit: int = 42,
-        max_lines: int = 2,
+        max_lines: int = 1,
         max_retries: Optional[int] = None,
         ai_call: Optional[Callable[[str, str], str]] = None
     ) -> Dict[str, Any]:
@@ -74,6 +74,8 @@ class SubtitleLineTranslator:
             max_lines
         )
 
+        empty_allowed = self._should_allow_empty_output(budgets)
+
         last_error = ""
         last_output = ""
         for attempt in range(1, retry_limit + 1):
@@ -85,6 +87,14 @@ class SubtitleLineTranslator:
             ).strip()
             last_output = output_text
             if not output_text:
+                if empty_allowed:
+                    lines = ["" for _ in budgets]
+                    translated_segments = self._apply_translated_lines(segments, lines)
+                    return {
+                        "success": True,
+                        "translated_lines": lines,
+                        "translated_segments": translated_segments
+                    }
                 last_error = "翻译结果为空"
                 logger.warning("逐行翻译输出为空，尝试重试: %s/%s", attempt, retry_limit)
                 continue
@@ -133,7 +143,8 @@ class SubtitleLineTranslator:
         cpl_limit: int,
         max_lines: int
     ) -> List[int]:
-        max_chars = max(1, int(cpl_limit)) * max(1, int(max_lines))
+        line_cap = max(1, int(cpl_limit))
+        max_chars = line_cap * max(1, int(max_lines))
         budgets: List[int] = []
         for segment in segments:
             start = float(segment.get("start", 0.0))
@@ -185,12 +196,14 @@ class SubtitleLineTranslator:
 
         for index, (line, budget) in enumerate(zip(lines, budgets), start=1):
             text = line.strip()
+            if budget <= 0:
+                if text:
+                    return f"第 {index} 行超出字符预算"
+                continue
             if not text:
                 return f"第 {index} 行为空"
             if "\n" in text:
                 return f"第 {index} 行包含换行符"
-            if budget <= 0 and text:
-                return f"第 {index} 行超出字符预算"
             if len(text) > budget:
                 return f"第 {index} 行超出字符预算"
         return None
@@ -206,6 +219,9 @@ class SubtitleLineTranslator:
             updated["text"] = line.strip()
             translated_segments.append(updated)
         return translated_segments
+
+    def _should_allow_empty_output(self, budgets: List[int]) -> bool:
+        return any(budget <= 0 for budget in budgets)
 
     def _load_segments_from_file(self, segments_file: str) -> List[Dict[str, Any]]:
         import json
