@@ -478,9 +478,6 @@ Edge-TTS 支持 SSML, 所以可以直接生成指定时长的语音.
 [2026-01-22 11:16:51,915: INFO/ForkPoolWorker-31] Callback发送完成: video_to_subtitle_task, 状态: sent
 [2026-01-22 11:16:51,915: INFO/ForkPoolWorker-31] 已更新 workflow_id='video_to_subtitle_task' 的状态。
 [2026-01-22 11:16:51,920: INFO/ForkPoolWorker-31] Task wservice.ai_optimize_subtitles[e87db717-cc8a-47b2-8464-53df857edf13] succeeded in 9.642612783005461s: {'workflow_id': 'video_to_subtitle_task', 'create_at': '2026-01-22T11:16:42.203414', 'input_params': {'task_name': 'wservice.ai_optimize_subtitles', 'input_data': {'segments_file': '/share/workflows/video_to_subtitle_task/nodes/faster_whisper.transcribe_audio/data/transcribe_data_task_id.json', 'subtitle_optimization': {...}}, 'callback_url': 'http://host.docker.internal:5678/webhook-waiting/2215/t3'}, 'shared_storage_path': '/share/workflows/video_to_subtitle_task', 'stages': {'wservice.ai_optimize_subtitles': {'status': 'SUCCESS', 'input_params': {...}, 'output': {...}, 'error': None, 'duration': 9.41}}, 'error': None, 'status': 'pending'}
-
-
-
 ```
 
 **redis中任务数据**
@@ -495,7 +492,7 @@ Edge-TTS 支持 SSML, 所以可以直接生成指定时长的语音.
 
 1. 请求数据中包括了words, 为了节省tokens, 前面制定的规则是只需要提交id, text给大模型.
 2. 最终优化文件(`@share/workflows/video_to_subtitle_task/nodes/faster_whisper.transcribe_audio/data/transcribe_data_task_id_optimized.json`)中**部分字幕**的`words`数据缺失或者异常; words重构是根据LLM返回的命令集数据 + 原始字幕文件words数据进行重构
-3. 断句优化功能存在问题. 从id1和id2字幕来看, 是需要将`id2`的  ` the masters,`移动到id1的末尾, 但是返回的命令集`{\"t\": \"M\", \"f\": 2, \"to\": 1, \"s\": 4}`明显是错误的.
+3. 断句优化功能存在问题. 从id1和id2字幕来看, 是需要将`id2`的      ` the masters,`移动到id1的末尾, 但是返回的命令集`{\"t\": \"M\", \"f\": 2, \"to\": 1, \"s\": 4}`明显是错误的.
 
 **解决思路**
 
@@ -508,7 +505,7 @@ Edge-TTS 支持 SSML, 所以可以直接生成指定时长的语音.
 
 1. 请先分析排查, 将分析结果和解决方案形成文档. 确定文档无误后再进行代码实施
 
-# AI字幕优化功能拆分
+# {done}AI字幕优化功能拆分
 
 **功能文档**: `@docs/features/AI_SUBTITLE_OPTIMIZATION.md`
 **字幕样例**: `@share/workflows/video_to_subtitle_task/nodes/faster_whisper.transcribe_audio/data/transcribe_data_task_id.json`
@@ -548,8 +545,8 @@ AI优化功能需要从原来的**指令集模式**修改成**纯文本模式**.
 
 **问题列表:**
 
-1. segments\_files中的文本`Well Well, little kitty, if you are really `  里有两个`well`, 还有`are`在输出文件中是没有被重构进去的.
-2. 输出文件中断句问题依然没有被解决. id1的字幕和原始字幕一样断在`you've got to study`这里, 这部分应该移动到id2, 或者id2的  ` the masters,`应该移动到ID1尾部
+1. segments\_files中的文本`Well Well, little kitty, if you are really `      里有两个`well`, 还有`are`在输出文件中是没有被重构进去的.
+2. 输出文件中断句问题依然没有被解决. id1的字幕和原始字幕一样断在`you've got to study`这里, 这部分应该移动到id2, 或者id2的      ` the masters,`应该移动到ID1尾部
 
 #### 优化ai文本优化功能
 
@@ -562,7 +559,7 @@ wservice.rebuild\_subtitle\_with\_words增加一个report参数(bool类型)
 如果report=true, 那么在完成重构后, 同步生成一个txt报告, 报告内容包括: 原字幕文本, 优化后的字幕文本, 所有变化明细. 最后同步上传并返回链接.
 如果report=false, 则忽略.
 
-# 工作流模式删除, 只保留单节点模式
+# {done}工作流模式删除, 只保留单节点模式
 
 ### 需求背景
 
@@ -580,4 +577,57 @@ wservice.rebuild\_subtitle\_with\_words增加一个report参数(bool类型)
 
 @docs/technical/reference/WORKFLOW\_NODES\_REFERENCE.md
 
-# LLM翻译装词功能
+# {已完成}LLM翻译装词功能
+
+### 目标
+
+增加一个LLM翻译装词功能节点
+
+### 功能背景
+
+在 \`S2ST\` 行业中非常大的难题，就是翻译之后的语音时长的对齐。
+
+因此，翻译工作在将文本翻译成指定语言的前提下，必须最大程度的满足时长对齐的需求。
+
+翻译时，重点要考虑原语言和目标语言之间语音生成时长一致的要素, 如: 字数, 语速, 音素等
+
+同时还需要遵循字幕视频的行业规范(前面检索确定的字数和时长行业规范)
+
+所以, 需要实现的是行业内主流的\*\*翻译装词\*\*来实现, 而不是简单的进行翻译.
+
+完成: `system prompt + 提交prompt`的设计和配套的本地功能模块.
+
+### 功能描述
+
+将AI优化的字幕通过LLM大模型进行翻译装词.实现S2ST工作流中的`翻译`这个关键环节
+
+1. 检索行业中对于`翻译装词`相关的信息
+2. 设计system prompt
+3. 复用`wservice.ai_optimize_text`节点中跟LLM交互的功能实现提交
+4. 将LLM返回数据转换成字幕文件(这里需要考虑是否需要重构词级时间戳的问题, 也可以考虑只划分字幕时间区间即可,无需精确到词级时间戳)
+
+# 优化字幕重构功能
+
+当前的字幕文件是通过`wservice.ai_optimize_text`进行优化产生的. 然后再通过本地重构功能进行处理.
+
+重构功能`wservice.rebuild_subtitle_with_words`完成处理后, 发现字幕的断句逻辑存在问题
+
+**执行结果**:`@share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json`
+
+1. id 74-75 断句错误
+
+2. id 69-70 断句错误
+
+3. id 57 字幕太短
+
+请排查是否还存在其他字幕重构问题, 并进行分析
+
+<br />
+
+<br />
+
+<br />
+
+<br />
+
+<br />

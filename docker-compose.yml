@@ -51,6 +51,7 @@ x-volume-paths:
     videos: &vol-videos '${YIVIDEO_ROOT}/videos:/app/videos'
     locks: &vol-locks '${YIVIDEO_ROOT}/locks:/app/locks'
     tmp: &vol-tmp '${YIVIDEO_ROOT}/tmp:/app/tmp'
+    worktrees: &vol-worktrees '${YIVIDEO_ROOT}/.worktrees:/app/.worktrees'
     tests: &vol-tests '${YIVIDEO_ROOT}/tests:/app/tests'
     share: &vol-share '${YIVIDEO_ROOT}/share:/share'
     config-yml: &vol-config-yml '${YIVIDEO_ROOT}/config.yml:/app/config.yml'
