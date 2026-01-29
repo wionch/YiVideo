@@ -1,9 +1,6 @@
 import pytest
-import sys
 
-# 直接导入模块文件，避免包导入的副作用
-sys.path.insert(0, "/app/services/common/subtitle")
-from segmenter import split_by_pause, PAUSE_THRESHOLD
+from services.common.subtitle.segmenter import split_by_pause, PAUSE_THRESHOLD
 
 
 def test_no_split_when_under_max_cpl():

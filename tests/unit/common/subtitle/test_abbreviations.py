@@ -1,9 +1,6 @@
-import sys
 import pytest
 
-# 直接导入模块文件，避免包导入的副作用
-sys.path.insert(0, "/app/services/common/subtitle")
-from abbreviations import is_abbreviation, COMMON_ABBREVIATIONS
+from services.common.subtitle.abbreviations import is_abbreviation, COMMON_ABBREVIATIONS
 
 
 def test_is_abbreviation_recognizes_dr():

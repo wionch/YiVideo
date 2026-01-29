@@ -7,33 +7,12 @@
 3. 通用规则兜底（弱标点 → 停顿 → 字数）
 """
 
-import importlib.util
 import logging
-import sys
-from pathlib import Path
 from typing import Any, Dict, List, Set
 
+from services.common.subtitle.abbreviations import is_abbreviation
+
 logger = logging.getLogger(__name__)
-
-# 延迟加载 abbreviations 模块，避免触发 __init__.py 的副作用
-_is_abbreviation = None
-
-
-def _get_is_abbreviation():
-    """获取 is_abbreviation 函数，首次调用时动态加载"""
-    global _is_abbreviation
-    if _is_abbreviation is None:
-        # 直接加载 abbreviations.py 文件，避免通过包导入触发 __init__.py
-        subtitle_dir = Path(__file__).parent
-        abbreviations_path = subtitle_dir / "abbreviations.py"
-
-        spec = importlib.util.spec_from_file_location("abbreviations", abbreviations_path)
-        abbreviations_module = importlib.util.module_from_spec(spec)
-        sys.modules["segmenter_abbreviations"] = abbreviations_module
-        spec.loader.exec_module(abbreviations_module)
-
-        _is_abbreviation = abbreviations_module.is_abbreviation
-    return _is_abbreviation
 
 
 # 强标点：句子结束标记
@@ -59,7 +38,7 @@ def split_by_strong_punctuation(words: List[Dict[str, Any]]) -> List[List[Dict[s
         word_text = word.get("word", "").strip()
 
         if word_text and word_text[-1] in STRONG_PUNCTUATION:
-            if not _get_is_abbreviation()(word_text):
+            if not is_abbreviation(word_text):
                 segments.append(current)
                 current = []
 
@@ -274,7 +253,7 @@ class MultilingualSubtitleSegmenter:
         # 第三层：通用规则兜底
         final_result = []
         for seg in segments:
-            if not self._within_limits(seg, max_cpl, max_cps, max_duration):
+            if not self._within_limits(seg, max_cpl, max_cps, min_duration, max_duration):
                 fixed = self._fallback_split(seg, max_cpl)
                 final_result.extend(fixed)
             else:
@@ -301,6 +280,7 @@ class MultilingualSubtitleSegmenter:
         words: List[Dict[str, Any]],
         max_cpl: int,
         max_cps: float,
+        min_duration: float,
         max_duration: float,
     ) -> bool:
         """检查片段是否在限制范围内"""
@@ -310,6 +290,8 @@ class MultilingualSubtitleSegmenter:
 
         if len(words) >= 2:
             duration = words[-1]["end"] - words[0]["start"]
+            if duration < min_duration:
+                return False
             if duration > max_duration:
                 return False
             if duration > 0 and len(text) / duration > max_cps:

@@ -155,7 +155,9 @@
       "Skill(document-skills:doc-coauthoring)",
       "mcp__filesystem__read_text_file",
       "WebFetch(domain:www.bbc.co.uk)",
-      "WebFetch(domain:tech.ebu.ch)"
+      "WebFetch(domain:tech.ebu.ch)",
+      "Bash(git branch:*)",
+      "Bash(git worktree remove:*)"
     ],
     "deny": [
       "Bash(docker build:*)"
