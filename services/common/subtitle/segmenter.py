@@ -8,9 +8,12 @@
 """
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Set
+
+logger = logging.getLogger(__name__)
 
 # 延迟加载 abbreviations 模块，避免触发 __init__.py 的副作用
 _is_abbreviation = None
@@ -114,3 +117,197 @@ def split_by_pause(words: List[Dict[str, Any]], max_cpl: int) -> List[List[Dict[
     left = words[:best_split + 1]
     right = words[best_split + 1:]
     return split_by_pause(left, max_cpl) + split_by_pause(right, max_cpl)
+
+
+def split_by_word_count(words: List[Dict[str, Any]], max_cpl: int) -> List[List[Dict[str, Any]]]:
+    """基于字数进行断句，确保每个片段不超过 max_cpl 字符"""
+    text = "".join(w.get("word", "") for w in words)
+    if len(text) <= max_cpl:
+        return [words]
+    if len(words) <= 1:
+        return [words]
+
+    # 找到最佳分割点（中间位置）
+    mid = len(words) // 2
+    left = words[: mid + 1]
+    right = words[mid + 1 :]
+
+    return split_by_word_count(left, max_cpl) + split_by_word_count(right, max_cpl)
+
+
+class MultilingualSubtitleSegmenter:
+    """多语言字幕断句器。三层策略: 1.强标点 2.PySBD语义 3.通用规则兜底"""
+
+    PYSBD_LANGS = {
+        "en",
+        "de",
+        "es",
+        "fr",
+        "it",
+        "pt",
+        "ru",
+        "nl",
+        "da",
+        "fi",
+        "zh",
+        "ja",
+        "ko",
+        "ar",
+        "hi",
+        "pl",
+        "cs",
+        "sk",
+        "tr",
+        "el",
+        "he",
+        "fa",
+    }
+
+    def __init__(self):
+        self._pysbd_available = False
+        self._try_import_pysbd()
+
+    def _try_import_pysbd(self):
+        try:
+            from pysbd import Segmenter
+
+            self._pysbd_available = True
+            self._pysbd_segmenters = {}
+        except ImportError:
+            logger.info("PySBD not available, using fallback segmentation")
+
+    def _get_pysbd_segmenter(self, language: str):
+        """获取或创建指定语言的 PySBD 分句器"""
+        from pysbd import Segmenter
+
+        if language not in self._pysbd_segmenters:
+            self._pysbd_segmenters[language] = Segmenter(language=language, clean=False)
+        return self._pysbd_segmenters[language]
+
+    def _apply_pysbd_split(
+        self, segments: List[List[Dict[str, Any]]], language: str, max_cpl: int
+    ) -> List[List[Dict[str, Any]]]:
+        """对过长的片段应用 PySBD 语义断句"""
+        result = []
+        for seg in segments:
+            text = "".join(w.get("word", "") for w in seg)
+            if len(text) <= max_cpl:
+                result.append(seg)
+                continue
+
+            segmenter = self._get_pysbd_segmenter(language)
+            sentences = segmenter.segment(text)
+
+            if len(sentences) <= 1:
+                result.append(seg)
+                continue
+
+            # 将词映射回分割后的句子
+            words = seg
+            char_idx = 0
+            word_idx = 0
+            current_seg = []
+
+            for sent in sentences:
+                sent_len = len(sent)
+                sent_end = char_idx + sent_len
+
+                # 收集属于当前句子的词
+                while word_idx < len(words):
+                    word_text = words[word_idx].get("word", "")
+                    word_end = char_idx + len(word_text)
+
+                    if char_idx < sent_end or word_end <= sent_end:
+                        current_seg.append(words[word_idx])
+                        char_idx = word_end
+                        word_idx += 1
+                    else:
+                        break
+
+                if current_seg:
+                    result.append(current_seg)
+                    current_seg = []
+
+            if current_seg:
+                result.append(current_seg)
+
+        return result
+
+    def segment(
+        self,
+        words: List[Dict[str, Any]],
+        language: str = "en",
+        max_cpl: int = 42,
+        max_cps: float = 18.0,
+        min_duration: float = 1.0,
+        max_duration: float = 7.0,
+    ) -> List[List[Dict[str, Any]]]:
+        """
+        执行三层断句策略
+
+        Args:
+            words: 词级时间戳列表，每个词包含 word/start/end
+            language: 语言代码
+            max_cpl: 每行最大字符数
+            max_cps: 每秒最大字符数
+            min_duration: 最小持续时间（秒）
+            max_duration: 最大持续时间（秒）
+
+        Returns:
+            分割后的片段列表
+        """
+        if not words:
+            return []
+
+        # 第一层：强标点断句
+        segments = split_by_strong_punctuation(words)
+
+        # 第二层：PySBD 语义断句（如果可用且支持该语言）
+        if self._pysbd_available and language in self.PYSBD_LANGS:
+            segments = self._apply_pysbd_split(segments, language, max_cpl)
+
+        # 第三层：通用规则兜底
+        final_result = []
+        for seg in segments:
+            if not self._within_limits(seg, max_cpl, max_cps, max_duration):
+                fixed = self._fallback_split(seg, max_cpl)
+                final_result.extend(fixed)
+            else:
+                final_result.append(seg)
+
+        return final_result
+
+    def _fallback_split(
+        self, words: List[Dict[str, Any]], max_cpl: int
+    ) -> List[List[Dict[str, Any]]]:
+        """兜底分割策略：弱标点 -> 停顿 -> 字数"""
+        segments = split_by_weak_punctuation(words, max_cpl)
+        if len(segments) > 1:
+            return segments
+
+        segments = split_by_pause(words, max_cpl)
+        if len(segments) > 1:
+            return segments
+
+        return split_by_word_count(words, max_cpl)
+
+    def _within_limits(
+        self,
+        words: List[Dict[str, Any]],
+        max_cpl: int,
+        max_cps: float,
+        max_duration: float,
+    ) -> bool:
+        """检查片段是否在限制范围内"""
+        text = "".join(w.get("word", "") for w in words)
+        if len(text) > max_cpl:
+            return False
+
+        if len(words) >= 2:
+            duration = words[-1]["end"] - words[0]["start"]
+            if duration > max_duration:
+                return False
+            if duration > 0 and len(text) / duration > max_cps:
+                return False
+
+        return True
