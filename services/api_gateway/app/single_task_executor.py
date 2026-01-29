@@ -454,11 +454,11 @@ class SingleTaskExecutor:
     def _build_deletion_plan(self, task_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
         """构建删除计划，包括本地目录、Redis键和MinIO前缀"""
         shared_dir = state.get("shared_storage_path") or f"/share/workflows/{task_id}"
-        redis_key = f"workflow_state:{task_id}"
+        redis_key_prefix = f"{task_id}:node:"
         minio_prefix = f"{task_id}/"
         return {
             "local_dir": shared_dir,
-            "redis_key": redis_key,
+            "redis_key_prefix": redis_key_prefix,
             "minio_prefix": minio_prefix,
         }
 
@@ -514,8 +514,8 @@ class SingleTaskExecutor:
                 retriable=True,
             )
 
-    def _delete_redis_state(self, redis_key: str) -> ResourceDeletionItem:
-        """删除Redis状态键（幂等）"""
+    def _delete_redis_state(self, redis_key_prefix: str) -> ResourceDeletionItem:
+        """删除Redis状态键（按前缀扫描，幂等）"""
         client = getattr(state_manager, "redis_client", None)
         if client is None:
             return ResourceDeletionItem(
@@ -525,20 +525,21 @@ class SingleTaskExecutor:
                 retriable=True,
             )
         try:
-            removed = client.delete(redis_key)
-            if removed and removed > 0:
+            keys = list(client.scan_iter(match=f"{redis_key_prefix}*"))
+            if not keys:
                 return ResourceDeletionItem(
                     resource=DeletionResource.REDIS,
-                    status=DeletionResourceStatus.DELETED,
-                    message=f"Redis 键已删除: {redis_key}",
+                    status=DeletionResourceStatus.SKIPPED,
+                    message="Redis 键不存在，已幂等",
                 )
+            removed = client.delete(*keys)
             return ResourceDeletionItem(
                 resource=DeletionResource.REDIS,
-                status=DeletionResourceStatus.SKIPPED,
-                message="Redis 键不存在，已幂等",
+                status=DeletionResourceStatus.DELETED,
+                message=f"Redis 键已删除: {redis_key_prefix}* ({removed})",
             )
         except Exception as e:
-            logger.error(f"删除 Redis 键失败: {redis_key}, 错误: {e}", exc_info=True)
+            logger.error(f"删除 Redis 键失败: {redis_key_prefix}*, 错误: {e}", exc_info=True)
             return ResourceDeletionItem(
                 resource=DeletionResource.REDIS,
                 status=DeletionResourceStatus.FAILED,
@@ -609,7 +610,7 @@ class SingleTaskExecutor:
         results: List[ResourceDeletionItem] = []
 
         results.append(self._delete_local_directory(plan["local_dir"]))
-        results.append(self._delete_redis_state(plan["redis_key"]))
+        results.append(self._delete_redis_state(plan["redis_key_prefix"]))
         results.append(self._delete_minio_objects(plan["minio_prefix"]))
 
         has_failed = any(item.status == DeletionResourceStatus.FAILED for item in results)

@@ -8,6 +8,7 @@
 """
 
 import os
+from datetime import datetime
 
 from services.common.logger import get_logger
 
@@ -17,6 +18,7 @@ import logging
 from typing import Any
 from typing import Optional
 from typing import Dict
+from typing import List
 
 from redis import Redis
 
@@ -38,9 +40,9 @@ from services.common.config_loader import get_redis_config
 
 # 使用config.yml中为状态存储定义的DB
 REDIS_STATE_DB = int(os.environ.get('REDIS_STATE_DB', 3))
-# TODO: 从config.yml动态加载TTL
-WORKFLOW_TTL_DAYS = int(os.environ.get('WORKFLOW_TTL_DAYS', 7))
-WORKFLOW_TTL_SECONDS = WORKFLOW_TTL_DAYS * 24 * 60 * 60
+# 任务节点状态统一保留 1 天
+NODE_TTL_DAYS = 1
+NODE_TTL_SECONDS = NODE_TTL_DAYS * 24 * 60 * 60
 
 try:
     redis_config = get_redis_config()
@@ -366,9 +368,66 @@ def _check_and_trigger_callback(context: WorkflowContext) -> None:
     except Exception as e:
         logger.error(f"Callback触发失败: {e}", exc_info=True)
 
-def _get_key(workflow_id: str) -> str:
-    """生成用于Redis的标准化键。"""
-    return f"workflow_state:{workflow_id}"
+def _get_node_key(task_id: str, task_name: str) -> str:
+    """生成用于Redis的节点键。"""
+    return f"{task_id}:node:{task_name}"
+
+
+def _build_node_view(context: WorkflowContext) -> Optional[WorkflowContext]:
+    """仅保留当前 task_name 的阶段数据，生成单节点视图。"""
+    data = context.model_dump()
+    input_params = data.get("input_params") or {}
+    task_name = input_params.get("task_name")
+    stages = data.get("stages") or {}
+
+    if not task_name:
+        logger.error("task_name 缺失，无法生成节点视图")
+        raise ValueError("task_name 缺失，无法生成节点视图")
+
+    node_stage = stages.get(task_name)
+    data["stages"] = {task_name: node_stage} if node_stage else {}
+    return WorkflowContext(**data)
+
+
+def _parse_time(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+
+def _merge_states(states: List[Dict[str, Any]], workflow_id: str) -> Dict[str, Any]:
+    """合并多个节点状态为一个聚合视图。"""
+    if not states:
+        return {}
+
+    merged: Dict[str, Any] = {"stages": {}}
+    latest_state: Optional[Dict[str, Any]] = None
+    latest_time: Optional[datetime] = None
+
+    for item in states:
+        for name, stage in (item.get("stages") or {}).items():
+            merged["stages"][name] = stage
+
+        candidate_time = _parse_time(item.get("updated_at")) or _parse_time(item.get("create_at"))
+        if latest_state is None:
+            latest_state = item
+            latest_time = candidate_time
+            continue
+        if candidate_time and (latest_time is None or candidate_time > latest_time):
+            latest_state = item
+            latest_time = candidate_time
+
+    if latest_state:
+        for key, value in latest_state.items():
+            if key == "stages":
+                continue
+            merged[key] = value
+
+    merged.setdefault("workflow_id", workflow_id)
+    return merged
 
 def create_workflow_state(context: WorkflowContext) -> None:
     """
@@ -381,13 +440,20 @@ def create_workflow_state(context: WorkflowContext) -> None:
         logger.error("Redis未连接，无法创建工作流状态。")
         return
 
-    key = _get_key(context.workflow_id)
-    # 将Pydantic模型序列化为JSON字符串
-    state_json = context.model_dump_json()
-    
+    node_context = _build_node_view(context)
+    if not node_context:
+        return
+    task_name = (node_context.input_params or {}).get("task_name")
+    if not task_name:
+        logger.error("task_name 缺失，无法创建节点状态。")
+        return
+
+    key = _get_node_key(node_context.workflow_id, task_name)
+    state_json = node_context.model_dump_json()
+
     # 使用setex原子地设置键、值和过期时间
-    redis_client.setex(key, WORKFLOW_TTL_SECONDS, state_json)
-    logger.info(f"已为 workflow_id='{context.workflow_id}' 创建初始状态，TTL为 {WORKFLOW_TTL_DAYS} 天。")
+    redis_client.setex(key, NODE_TTL_SECONDS, state_json)
+    logger.info(f"已为 workflow_id='{node_context.workflow_id}' 创建节点状态，TTL为 {NODE_TTL_DAYS} 天。")
 
 def update_workflow_state(context: WorkflowContext, skip_side_effects: bool = False) -> None:
     """
@@ -410,11 +476,19 @@ def update_workflow_state(context: WorkflowContext, skip_side_effects: bool = Fa
         else:
             logger.info("auto_upload_to_minio 已关闭，跳过上传。")
 
-    key = _get_key(context.workflow_id)
-    state_json = context.model_dump_json()
-    
-    # 使用set并保留TTL
-    redis_client.set(key, state_json, keepttl=True)
+    node_context = _build_node_view(context)
+    if not node_context:
+        return
+    task_name = (node_context.input_params or {}).get("task_name")
+    if not task_name:
+        logger.error("task_name 缺失，无法更新节点状态。")
+        return
+
+    key = _get_node_key(node_context.workflow_id, task_name)
+    state_json = node_context.model_dump_json()
+
+    # 使用setex刷新TTL
+    redis_client.setex(key, NODE_TTL_SECONDS, state_json)
     
     # 检查是否需要触发callback
     if not skip_side_effects:
@@ -435,11 +509,22 @@ def get_workflow_state(workflow_id: str) -> Dict[str, Any]:
         logger.error("Redis未连接，无法获取工作流状态。")
         return {"error": "State manager could not connect to Redis."}
 
-    key = _get_key(workflow_id)
-    state_json = redis_client.get(key)
+    states: List[Dict[str, Any]] = []
+    try:
+        for key in redis_client.scan_iter(match=f"{workflow_id}:node:*"):
+            state_json = redis_client.get(key)
+            if not state_json:
+                continue
+            try:
+                states.append(json.loads(state_json))
+            except Exception as e:
+                logger.error(f"解析Redis节点状态失败: {key}, 错误: {e}")
+    except Exception as e:
+        logger.error(f"扫描Redis节点状态失败: workflow_id='{workflow_id}', 错误: {e}")
+        return {"error": f"Workflow with id '{workflow_id}' not found."}
 
-    if not state_json:
+    if not states:
         logger.warning(f"尝试获取一个不存在的工作流状态: workflow_id='{workflow_id}'")
         return {"error": f"Workflow with id '{workflow_id}' not found."}
 
-    return json.loads(state_json)
+    return _merge_states(states, workflow_id)
