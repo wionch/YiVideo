@@ -41,6 +41,15 @@ def _next_is_single_letter_abbrev(words: List[Dict[str, Any]], index: int) -> bo
     return False
 
 
+def _prev_is_single_letter_abbrev(words: List[Dict[str, Any]], index: int) -> bool:
+    for prev_word in reversed(words[:index]):
+        text = str(prev_word.get("word", "")).strip()
+        if not text:
+            continue
+        return _is_single_letter_abbrev(text)
+    return False
+
+
 def _is_hyphen_boundary(words: List[Dict[str, Any]], index: int) -> bool:
     if index < 0 or index + 1 >= len(words):
         return False
@@ -51,6 +60,23 @@ def _is_hyphen_boundary(words: List[Dict[str, Any]], index: int) -> bool:
         any(left.endswith(h) for h in hyphens)
         or any(right.startswith(h) for h in hyphens)
     )
+
+
+def _has_strong_punct_split(words: List[Dict[str, Any]]) -> bool:
+    for index, word in enumerate(words):
+        word_text = str(word.get("word", "")).strip()
+        if not word_text:
+            continue
+        if word_text[-1] in STRONG_PUNCTUATION:
+            if is_abbreviation(word_text):
+                continue
+            if _is_single_letter_abbrev(word_text) and (
+                _next_is_single_letter_abbrev(words, index)
+                or _prev_is_single_letter_abbrev(words, index)
+            ):
+                continue
+            return True
+    return False
 
 
 def split_by_strong_punctuation(words: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
@@ -66,7 +92,10 @@ def split_by_strong_punctuation(words: List[Dict[str, Any]]) -> List[List[Dict[s
         word_text = word.get("word", "").strip()
 
         if word_text and word_text[-1] in STRONG_PUNCTUATION:
-            if _is_single_letter_abbrev(word_text) and _next_is_single_letter_abbrev(words, index):
+            if _is_single_letter_abbrev(word_text) and (
+                _next_is_single_letter_abbrev(words, index)
+                or _prev_is_single_letter_abbrev(words, index)
+            ):
                 continue
             if not is_abbreviation(word_text):
                 segments.append(current)
@@ -251,6 +280,8 @@ class MultilingualSubtitleSegmenter:
         segmenter = self._get_pysbd_segmenter(language)
         sentences = segmenter.segment(text)
         if not sentences:
+            return []
+        if len(sentences) <= 1 and _has_strong_punct_split(words):
             return []
 
         total_len = sum(len(sentence) for sentence in sentences)
