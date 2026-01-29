@@ -8,6 +8,7 @@
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Set
 
 from services.common.subtitle.abbreviations import is_abbreviation
@@ -24,6 +25,33 @@ WEAK_PUNCTUATION: Set[str] = {",", "，", "、", ";", ":", "：", "-", "–", "�
 # 停顿阈值（秒）
 PAUSE_THRESHOLD = 0.3
 
+_SINGLE_LETTER_ABBREV = re.compile(r"^[A-Za-z]\.$")
+
+
+def _is_single_letter_abbrev(word_text: str) -> bool:
+    return bool(_SINGLE_LETTER_ABBREV.fullmatch(word_text.strip()))
+
+
+def _next_is_single_letter_abbrev(words: List[Dict[str, Any]], index: int) -> bool:
+    for next_word in words[index + 1:]:
+        text = str(next_word.get("word", "")).strip()
+        if not text:
+            continue
+        return _is_single_letter_abbrev(text)
+    return False
+
+
+def _is_hyphen_boundary(words: List[Dict[str, Any]], index: int) -> bool:
+    if index < 0 or index + 1 >= len(words):
+        return False
+    left = str(words[index].get("word", "")).strip()
+    right = str(words[index + 1].get("word", "")).strip()
+    hyphens = {"-", "–", "—"}
+    return (
+        any(left.endswith(h) for h in hyphens)
+        or any(right.startswith(h) for h in hyphens)
+    )
+
 
 def split_by_strong_punctuation(words: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
     """在强标点处断句，但跳过缩写词"""
@@ -33,11 +61,13 @@ def split_by_strong_punctuation(words: List[Dict[str, Any]]) -> List[List[Dict[s
     segments: List[List[Dict[str, Any]]] = []
     current: List[Dict[str, Any]] = []
 
-    for word in words:
+    for index, word in enumerate(words):
         current.append(word)
         word_text = word.get("word", "").strip()
 
         if word_text and word_text[-1] in STRONG_PUNCTUATION:
+            if _is_single_letter_abbrev(word_text) and _next_is_single_letter_abbrev(words, index):
+                continue
             if not is_abbreviation(word_text):
                 segments.append(current)
                 current = []
@@ -61,6 +91,8 @@ def split_by_weak_punctuation(
     for i, word in enumerate(words[:-1]):
         word_text = word.get("word", "").strip()
         if word_text and word_text[-1] in WEAK_PUNCTUATION:
+            if word_text[-1] in {"-", "–", "—"} and len(word_text) > 1:
+                continue
             candidates.append(i)
     if not candidates:
         return [words]
@@ -126,6 +158,8 @@ def split_by_word_count(
     best_diff = None
     current_len = 0
     for i, word in enumerate(words[:-1]):
+        if _is_hyphen_boundary(words, i):
+            continue
         current_len += len(word.get("word", ""))
         diff = abs(current_len - target_len)
         if best_diff is None or diff < best_diff:
@@ -411,6 +445,8 @@ class MultilingualSubtitleSegmenter:
         best_diff = None
         current_len = 0
         for i, word in enumerate(words[:-1]):
+            if _is_hyphen_boundary(words, i):
+                continue
             current_len += len(word.get("word", ""))
             left_len = len("".join(w.get("word", "") for w in words[: i + 1]).strip())
             right_len = len("".join(w.get("word", "") for w in words[i + 1 :]).strip())

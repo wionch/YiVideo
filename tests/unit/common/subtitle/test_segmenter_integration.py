@@ -213,3 +213,16 @@ class TestMultilingualSubtitleSegmenter:
         # 应该在最后的 "." 处断句
         assert len(result) == 1
         assert "".join(w["word"] for w in result[0]) == "Dr. Smith is here."
+
+    def test_hyphen_not_split_as_weak_punct(self, segmenter, monkeypatch):
+        """测试连字符不作为弱标点断句"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "snap-", "start": 0.0, "end": 0.4},
+            {"word": "-trap", "start": 0.4, "end": 0.8},
+            {"word": " ", "start": 0.8, "end": 0.8},
+            {"word": "jaws", "start": 0.8, "end": 1.2},
+        ]
+        result = segmenter.segment(words, max_cpl=6)
+        texts = ["".join(w["word"] for w in seg) for seg in result]
+        assert any("snap-" in text and "-trap" in text for text in texts)

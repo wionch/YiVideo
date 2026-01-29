@@ -14,7 +14,7 @@ from services.common.subtitle.segmenter import MultilingualSubtitleSegmenter
 logger = logging.getLogger(__name__)
 
 _TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
-_WORD_PATTERN = re.compile(r"^\w+$", re.UNICODE)
+_WORD_PATTERN = re.compile(r"^[\w'’]+$", re.UNICODE)
 _PREFIX_PATTERN = re.compile(r"^\s*[^\w]*", re.UNICODE)
 
 
@@ -91,6 +91,11 @@ def align_words_to_text(
             continue
 
         prefix = _extract_prefix(str(word.get("word", "")))
+        if prefix.isspace() and _is_single_letter_abbrev_token(combined):
+            if aligned_words:
+                prev_text = str(aligned_words[-1].get("word", "")).strip()
+                if _is_single_letter_abbrev_token(prev_text):
+                    prefix = ""
         updated = word.copy()
         updated["word"] = f"{prefix}{combined}"
         aligned_words.append(updated)
@@ -139,11 +144,24 @@ def _append_token(base: str, token: str) -> str:
 def _should_join_without_space(base: str, token: str) -> bool:
     if not base or not token:
         return False
+    if _is_single_letter_abbrev_pair(base, token):
+        return True
     if base[-1] in ("'", "’", "-", "–", "—", "/"):
         return True
     if token[0] in ("'", "’", "-", "–", "—"):
         return True
     return not _WORD_PATTERN.match(token)
+
+
+def _is_single_letter_abbrev_pair(base: str, token: str) -> bool:
+    return bool(
+        re.fullmatch(r"[A-Za-z]\.", base)
+        and re.fullmatch(r"[A-Za-z]\.", token)
+    )
+
+
+def _is_single_letter_abbrev_token(token: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z]\.", token.strip()))
 
 
 def rebuild_segments_by_words(

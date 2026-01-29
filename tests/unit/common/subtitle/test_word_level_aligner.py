@@ -39,6 +39,16 @@ def test_word_aligner_handles_delete():
     assert result[1]["start"] == 0.5
 
 
+def test_aligner_inserts_space_after_period():
+    words = [
+        {"word": " U.", "start": 0.0, "end": 0.2},
+        {"word": " S.", "start": 0.2, "end": 0.4},
+        {"word": " It's", "start": 0.4, "end": 0.6},
+    ]
+    result = align_words_to_text(words, "U.S. It's")
+    assert "".join(w["word"] for w in result).strip() == "U.S. It's"
+
+
 def test_rebuild_segments_prefers_punctuation_over_cpl():
     segments = [
         {
