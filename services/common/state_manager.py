@@ -323,34 +323,10 @@ def _check_and_trigger_callback(context: WorkflowContext) -> None:
         task_id = context.workflow_id
         callback_url = input_params.get('callback_url')
 
-        # 构建结果数据 - 修复JSON序列化问题
-        stages_dict = {}
-        for name, stage in stages.items():
-            if hasattr(stage, "model_dump"):
-                stages_dict[name] = stage.model_dump()
-            else:
-                stages_dict[name] = stage
-
-        filtered_stages = stages_dict
-        if target_name in stages_dict:
-            filtered_stages = {target_name: stages_dict[target_name]}
-        else:
-            filtered_stages = {}
-
-        result = {
-            'workflow_id': task_id,
-            'create_at': context.create_at,
-            'input_params': input_params,
-            'shared_storage_path': context.shared_storage_path,
-            'stages': filtered_stages,
-            'error': context.error,
-            'reuse_info': getattr(context, "reuse_info", None) or context.__dict__.get("reuse_info")
-        }
-
-        # 补充阶段状态字段，便于回调端判断
-        if target_name in result['stages']:
-            result['stages'][target_name]["duration"] = stage_duration
-            result['stages'][target_name]["error"] = stage_error
+        # 构建单节点结果
+        result = build_single_node_result(target_name, target_stage)
+        result["duration"] = stage_duration
+        result["error"] = stage_error
 
         # 检查是否有minio_files信息
         minio_files = None
@@ -376,6 +352,41 @@ def _split_task_name(task_name: str) -> tuple[str, str]:
     if not node or not func_name:
         raise ValueError("task_name 格式错误，应为 <node>.<task_name>")
     return node, func_name
+
+
+def _normalize_stage_data(stage: Any) -> Dict[str, Any]:
+    """标准化阶段数据结构。"""
+    if hasattr(stage, "model_dump"):
+        stage = stage.model_dump()
+    if not isinstance(stage, dict):
+        return {
+            "status": None,
+            "input_params": {},
+            "output": {},
+            "error": None,
+            "duration": 0,
+        }
+    return {
+        "status": stage.get("status"),
+        "input_params": stage.get("input_params", {}) or {},
+        "output": stage.get("output", {}) or {},
+        "error": stage.get("error"),
+        "duration": stage.get("duration", 0),
+    }
+
+
+def build_single_node_result(task_name: str, stage: Any) -> Dict[str, Any]:
+    """构建单节点返回数据。"""
+    _split_task_name(task_name)
+    normalized = _normalize_stage_data(stage)
+    return {
+        "task_name": task_name,
+        "status": normalized["status"],
+        "input_params": normalized["input_params"],
+        "output": normalized["output"],
+        "error": normalized["error"],
+        "duration": normalized["duration"],
+    }
 
 
 def _get_node_key(task_id: str, task_name: str) -> str:

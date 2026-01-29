@@ -64,25 +64,18 @@ class SingleTaskExecutor:
     
     def _filter_context_for_response(self, context: Dict[str, Any], task_name: str) -> Dict[str, Any]:
         """
-        过滤上下文，仅保留指定 task_name 的 stage 数据。
+        过滤上下文，仅返回单节点结果。
         用于 API 响应和回调载荷，确保单任务视图的一致性。
         """
-        if not context or "stages" not in context:
-            return context
-        
-        filtered_context = deepcopy(context)
-        original_stages = filtered_context.get("stages", {})
-        
-        # 仅保留目标 task_name 的 stage
-        if task_name in original_stages:
-            filtered_context["stages"] = {task_name: original_stages[task_name]}
-        else:
-            # 如果目标 task_name 不在 stages 中（理论上不应发生，除非数据异常），
-            # 保持为空或原样？根据需求应仅保留完全匹配的。
-            # 这里选择置空，因为明确要求“仅包含当前请求的 task_name”
-            filtered_context["stages"] = {}
-            
-        return filtered_context
+        if not context or not task_name:
+            return {}
+
+        stages = context.get("stages") or {}
+        stage = stages.get(task_name)
+        if not stage:
+            return {}
+
+        return state_manager.build_single_node_result(task_name, stage)
 
     def execute_task(self, task_name: str, task_id: str, input_data: Dict[str, Any],
                     callback_url: Optional[str] = None) -> Dict[str, Any]:
@@ -229,8 +222,26 @@ class SingleTaskExecutor:
                     "status": "not_found",
                     "message": "任务不存在"
                 }
-            
-            return state
+
+            task_name = (state.get("input_params") or {}).get("task_name")
+            stages = state.get("stages") or {}
+            stage = stages.get(task_name) if task_name else None
+            node_result = (
+                state_manager.build_single_node_result(task_name, stage)
+                if task_name and stage is not None
+                else None
+            )
+
+            return {
+                "task_id": task_id,
+                "status": state.get("status"),
+                "message": state.get("message") or "任务状态获取成功",
+                "result": node_result,
+                "minio_files": state.get("minio_files"),
+                "create_at": state.get("create_at"),
+                "updated_at": state.get("updated_at"),
+                "callback_status": state.get("callback_status"),
+            }
             
         except Exception as e:
             logger.error(f"获取任务状态失败: {task_id}, 错误: {e}")

@@ -155,3 +155,25 @@ def test_create_workflow_state_requires_valid_task_name(monkeypatch):
 
     with pytest.raises(ValueError):
         state_manager.create_workflow_state(context)
+
+
+def test_build_single_node_result(monkeypatch):
+    stage = {
+        "status": "SUCCESS",
+        "input_params": {"foo": "bar"},
+        "output": {"file": "demo.txt"},
+        "error": None,
+        "duration": 1.2,
+    }
+
+    result = state_manager.build_single_node_result(
+        "wservice.translate_subtitles", stage
+    )
+
+    assert result["task_name"] == "wservice.translate_subtitles"
+    assert result["status"] == "SUCCESS"
+    assert result["input_params"] == {"foo": "bar"}
+    assert result["output"] == {"file": "demo.txt"}
+    assert result["error"] is None
+    assert result["duration"] == 1.2
+    assert "workflow_id" not in result
