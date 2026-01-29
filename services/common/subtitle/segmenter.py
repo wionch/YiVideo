@@ -64,3 +64,26 @@ def split_by_strong_punctuation(words: List[Dict[str, Any]]) -> List[List[Dict[s
         segments.append(current)
 
     return segments
+
+
+def split_by_weak_punctuation(
+    words: List[Dict[str, Any]], max_cpl: int
+) -> List[List[Dict[str, Any]]]:
+    """在弱标点处断句，保持片段长度不超过 max_cpl"""
+    text = "".join(w.get("word", "") for w in words)
+    if len(text) <= max_cpl:
+        return [words]
+    if len(words) <= 1:
+        return [words]
+    candidates = []
+    for i, word in enumerate(words[:-1]):
+        word_text = word.get("word", "").strip()
+        if word_text and word_text[-1] in WEAK_PUNCTUATION:
+            candidates.append(i)
+    if not candidates:
+        return [words]
+    mid = len(words) // 2
+    best_split = min(candidates, key=lambda x: abs(x - mid))
+    left = words[:best_split + 1]
+    right = words[best_split + 1:]
+    return split_by_weak_punctuation(left, max_cpl) + split_by_weak_punctuation(right, max_cpl)
