@@ -54,10 +54,16 @@ def test_rebuild_segments_prefers_punctuation_over_cpl():
     ]
     rebuilt = rebuild_segments_by_words(segments)
 
-    assert len(rebuilt) == 2
-    assert len(rebuilt[0]["words"]) == 5
-    assert rebuilt[0]["end"] == 5.0
-    assert rebuilt[1]["start"] == 5.0
+    assert len(rebuilt) >= 2
+    comma_segment_index = None
+    for idx, segment in enumerate(rebuilt):
+        if segment["words"] and segment["words"][-1]["word"].strip().endswith(","):
+            comma_segment_index = idx
+            break
+    assert comma_segment_index is not None
+    assert rebuilt[comma_segment_index]["end"] == 5.0
+    assert comma_segment_index + 1 < len(rebuilt)
+    assert rebuilt[comma_segment_index + 1]["start"] == 5.0
 
 
 def test_rebuild_segments_avoids_short_tail_when_splitting():

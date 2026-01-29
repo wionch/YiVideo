@@ -49,11 +49,11 @@ def split_by_strong_punctuation(words: List[Dict[str, Any]]) -> List[List[Dict[s
 
 
 def split_by_weak_punctuation(
-    words: List[Dict[str, Any]], max_cpl: int
+    words: List[Dict[str, Any]], max_cpl: int, force: bool = False
 ) -> List[List[Dict[str, Any]]]:
     """在弱标点处断句，保持片段长度不超过 max_cpl"""
     text = "".join(w.get("word", "") for w in words)
-    if len(text) <= max_cpl:
+    if not force and len(text) <= max_cpl:
         return [words]
     if len(words) <= 1:
         return [words]
@@ -71,10 +71,12 @@ def split_by_weak_punctuation(
     return split_by_weak_punctuation(left, max_cpl) + split_by_weak_punctuation(right, max_cpl)
 
 
-def split_by_pause(words: List[Dict[str, Any]], max_cpl: int) -> List[List[Dict[str, Any]]]:
+def split_by_pause(
+    words: List[Dict[str, Any]], max_cpl: int, force: bool = False
+) -> List[List[Dict[str, Any]]]:
     """基于词间停顿时间进行断句，停顿超过 PAUSE_THRESHOLD (0.3s) 视为潜在断句点"""
     text = "".join(w.get("word", "") for w in words)
-    if len(text) <= max_cpl:
+    if not force and len(text) <= max_cpl:
         return [words]
     if len(words) <= 1:
         return [words]
@@ -98,22 +100,44 @@ def split_by_pause(words: List[Dict[str, Any]], max_cpl: int) -> List[List[Dict[
     return split_by_pause(left, max_cpl) + split_by_pause(right, max_cpl)
 
 
-def split_by_word_count(words: List[Dict[str, Any]], max_cpl: int) -> List[List[Dict[str, Any]]]:
+def split_by_word_count(
+    words: List[Dict[str, Any]], max_cpl: int, force: bool = False
+) -> List[List[Dict[str, Any]]]:
     """基于字数进行断句，确保每个片段不超过 max_cpl 字符"""
     text = "".join(w.get("word", "") for w in words)
-    if len(text) <= max_cpl:
+    if not force and len(text) <= max_cpl:
         return [words]
     if len(words) <= 1:
         return [words]
+    if not text:
+        return [words]
 
-    # 找到最佳分割点（中间位置）
-    mid = len(words) // 2
-    left = words[:mid]
-    right = words[mid:]
+    max_word_len = max(len(w.get("word", "")) for w in words)
+    if max_word_len > max_cpl and len(words) == 1:
+        return [words]
 
-    # 防止无限递归：确保分割确实产生了更小的列表
-    if len(left) == 0 or len(right) == 0 or (len(left) == len(words) and len(right) == len(words)):
-        # 无法继续分割，直接返回
+    if max_cpl <= 0:
+        return [words]
+
+    num_segments = max(2, (len(text) + max_cpl - 1) // max_cpl)
+    target_len = len(text) / num_segments
+
+    best_split = None
+    best_diff = None
+    current_len = 0
+    for i, word in enumerate(words[:-1]):
+        current_len += len(word.get("word", ""))
+        diff = abs(current_len - target_len)
+        if best_diff is None or diff < best_diff:
+            best_split = i
+            best_diff = diff
+
+    if best_split is None:
+        return [words]
+
+    left = words[:best_split + 1]
+    right = words[best_split + 1:]
+    if not left or not right:
         return [words]
 
     return split_by_word_count(left, max_cpl) + split_by_word_count(right, max_cpl)
@@ -186,34 +210,48 @@ class MultilingualSubtitleSegmenter:
                 result.append(seg)
                 continue
 
-            # 将词映射回分割后的句子
-            words = seg
-            char_idx = 0
-            word_idx = 0
-            current_seg = []
+            total_len = sum(len(sentence) for sentence in sentences)
+            if total_len != len(text):
+                logger.warning("PySBD 句界长度不匹配，跳过语义断句")
+                result.append(seg)
+                continue
 
+            word_offsets = []
+            cursor = 0
+            for word in seg:
+                word_text = word.get("word", "")
+                start = cursor
+                end = cursor + len(word_text)
+                word_offsets.append((start, end))
+                cursor = end
+
+            cursor = 0
+            word_idx = 0
             for sent in sentences:
                 sent_len = len(sent)
-                sent_end = char_idx + sent_len
+                if sent_len == 0:
+                    continue
+                sent_end = cursor + sent_len
+                current_seg = []
 
-                # 收集属于当前句子的词
-                while word_idx < len(words):
-                    word_text = words[word_idx].get("word", "")
-                    word_end = char_idx + len(word_text)
+                while word_idx < len(seg) and word_offsets[word_idx][1] <= sent_end:
+                    current_seg.append(seg[word_idx])
+                    word_idx += 1
 
-                    if char_idx < sent_end or word_end <= sent_end:
-                        current_seg.append(words[word_idx])
-                        char_idx = word_end
-                        word_idx += 1
-                    else:
-                        break
+                if not current_seg and word_idx < len(seg):
+                    current_seg.append(seg[word_idx])
+                    word_idx += 1
 
                 if current_seg:
                     result.append(current_seg)
-                    current_seg = []
 
-            if current_seg:
-                result.append(current_seg)
+                cursor = sent_end
+
+            if word_idx < len(seg):
+                if result:
+                    result[-1].extend(seg[word_idx:])
+                else:
+                    result.append(seg[word_idx:])
 
         return result
 
@@ -251,29 +289,91 @@ class MultilingualSubtitleSegmenter:
             segments = self._apply_pysbd_split(segments, language, max_cpl)
 
         # 第三层：通用规则兜底
-        final_result = []
+        final_result: List[List[Dict[str, Any]]] = []
         for seg in segments:
-            if not self._within_limits(seg, max_cpl, max_cps, min_duration, max_duration):
-                fixed = self._fallback_split(seg, max_cpl)
-                final_result.extend(fixed)
-            else:
-                final_result.append(seg)
+            final_result.extend(
+                self._split_with_fallback(
+                    seg,
+                    max_cpl=max_cpl,
+                    max_cps=max_cps,
+                    min_duration=min_duration,
+                    max_duration=max_duration
+                )
+            )
 
         return final_result
 
     def _fallback_split(
-        self, words: List[Dict[str, Any]], max_cpl: int
+        self, words: List[Dict[str, Any]], max_cpl: int, force: bool = False
     ) -> List[List[Dict[str, Any]]]:
         """兜底分割策略：弱标点 -> 停顿 -> 字数"""
-        segments = split_by_weak_punctuation(words, max_cpl)
+        segments = split_by_weak_punctuation(words, max_cpl, force=force)
         if len(segments) > 1:
             return segments
 
-        segments = split_by_pause(words, max_cpl)
+        segments = split_by_pause(words, max_cpl, force=force)
         if len(segments) > 1:
             return segments
 
-        return split_by_word_count(words, max_cpl)
+        return split_by_word_count(words, max_cpl, force=force)
+
+    def _split_with_fallback(
+        self,
+        words: List[Dict[str, Any]],
+        max_cpl: int,
+        max_cps: float,
+        min_duration: float,
+        max_duration: float,
+    ) -> List[List[Dict[str, Any]]]:
+        if not self._should_split(words, max_cpl, max_cps, min_duration, max_duration):
+            return [words]
+
+        segments = self._fallback_split(words, max_cpl, force=True)
+        if len(segments) <= 1:
+            return [words]
+        result: List[List[Dict[str, Any]]] = []
+        for seg in segments:
+            if not self._should_split(seg, max_cpl, max_cps, min_duration, max_duration):
+                result.append(seg)
+                continue
+            if len(seg) <= 1:
+                result.append(seg)
+                continue
+            if seg == words:
+                result.append(seg)
+                continue
+            result.extend(
+                self._split_with_fallback(
+                    seg,
+                    max_cpl=max_cpl,
+                    max_cps=max_cps,
+                    min_duration=min_duration,
+                    max_duration=max_duration
+                )
+            )
+        return result
+
+    def _should_split(
+        self,
+        words: List[Dict[str, Any]],
+        max_cpl: int,
+        max_cps: float,
+        min_duration: float,
+        max_duration: float,
+    ) -> bool:
+        text = "".join(w.get("word", "") for w in words)
+        if len(text) > max_cpl:
+            return True
+        if len(words) < 2:
+            return False
+        duration = words[-1]["end"] - words[0]["start"]
+        if duration > max_duration:
+            return True
+        if duration > 0 and len(text) / duration > max_cps:
+            return True
+        if duration < min_duration:
+            return False
+        return False
 
     def _within_limits(
         self,
