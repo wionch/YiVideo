@@ -608,19 +608,144 @@ wservice.rebuild\_subtitle\_with\_words增加一个report参数(bool类型)
 
 # 优化字幕重构功能
 
+**需求背景:**
+
 当前的字幕文件是通过`wservice.ai_optimize_text`进行优化产生的. 然后再通过本地重构功能进行处理.
 
 重构功能`wservice.rebuild_subtitle_with_words`完成处理后, 发现字幕的断句逻辑存在问题
 
 **执行结果**:`@share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json`
 
-1. id 74-75 断句错误
+**任务:**
 
-2. id 69-70 断句错误
+1. 逐条检查字幕, 排查字幕重构中存在的问题
 
-3. id 57 字幕太短
+2. 分析这些问题的根因
 
-请排查是否还存在其他字幕重构问题, 并进行分析
+我整理了下面的断句逻辑, 你给分析分析:
+
+```
+1. 强标点处断句
+2. 使用`spacy`进行语义断句
+3. 兜底方案: 如果前面2个策略执行后还存在超CPL,CPS阈值的字幕. 则按照弱标点+ 时长和字数来断句
+    2.1 如果字幕文本中存在弱标点, 基于弱标点进行断句. 如: 如果字幕中存在逗号, 则先按逗号进行分割断句
+    2.2 如果没有弱标点, 则按照字数平均分割, 如: 字幕字符数是43(CPL=40)且没有弱标点, 那么按照22+21 这样平均值进行分割断句. 
+```
+
+# 排查翻译装词功能
+
+**n8n http请求**:
+
+```json
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_gateway/v1/tasks",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"task_name\": \"wservice.translate_subtitles\",\n    \"task_id\": \"video_to_subtitle_task\",\n    \"callback\": \"{{ $execution.resumeUrl }}/t3\",\n    \"input_data\": {\n        \"segments_file\": \"/share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json\",\n        \"target_language\": \"zh\",\n        \"source_language\": \"en\",\n        \"provider\": \"deepseek\",\n        \"prompt_file_path\": \"/app/config/system_prompt/subtitle_translation_fitting.md\",\n        \"cps_limit\": 18,\n        \"cpl_limit\": 42,\n        \"max_lines\": 1,\n        \"max_retries\": 3\n    }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -112,
+        4064
+      ],
+      "id": "39724111-8f4a-431c-b2e5-74db81093e89",
+      "name": "HttpRequest11"
+    }
+  ],
+  "connections": {
+    "HttpRequest11": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ce62717b1b8e3f0f382d7655865d4cc25bd57832825813d5d8aa77789e762603"
+  }
+}
+```
+
+wservice日志:
+
+```log
+2026-01-29T14:09:52.206049223Z [2026-01-29 14:09:52,205: INFO/MainProcess] Task wservice.translate_subtitles[420313eb-dc48-4f4b-8f53-39492f4382a3] received
+2026-01-29T14:09:52.289366432Z [2026-01-29 14:09:52,288: INFO/ForkPoolWorker-31] 加载系统提示词: /app/config/system_prompt/subtitle_translation_fitting.md
+2026-01-29T14:09:52.294799270Z [2026-01-29 14:09:52,294: INFO/ForkPoolWorker-31] 系统提示词加载成功，长度: 361字符
+2026-01-29T14:10:02.256540101Z [2026-01-29 14:10:02,256: INFO/MainProcess] Task wservice.translate_subtitles[0934d6cb-9dbd-483f-8721-217432e58b41] received
+2026-01-29T14:10:02.349002344Z [2026-01-29 14:10:02,348: INFO/ForkPoolWorker-32] 加载系统提示词: /app/config/system_prompt/subtitle_translation_fitting.md
+2026-01-29T14:10:02.349029247Z [2026-01-29 14:10:02,348: INFO/ForkPoolWorker-32] 系统提示词加载成功，长度: 361字符
+2026-01-29T14:10:13.046880773Z [2026-01-29 14:10:13,046: WARNING/ForkPoolWorker-31] 逐行翻译校验失败: 行数不一致, 尝试重试: 1/3
+2026-01-29T14:10:23.223790818Z [2026-01-29 14:10:23,222: WARNING/ForkPoolWorker-32] 逐行翻译校验失败: 行数不一致, 尝试重试: 1/3
+2026-01-29T14:10:34.609413526Z [2026-01-29 14:10:34,608: WARNING/ForkPoolWorker-31] 逐行翻译校验失败: 行数不一致, 尝试重试: 2/3
+2026-01-29T14:10:43.716541091Z [2026-01-29 14:10:43,715: WARNING/ForkPoolWorker-32] 逐行翻译校验失败: 行数不一致, 尝试重试: 2/3
+2026-01-29T14:10:56.169221496Z [2026-01-29 14:10:56,168: WARNING/ForkPoolWorker-31] 逐行翻译校验失败: 行数不一致, 尝试重试: 3/3
+2026-01-29T14:10:56.228319454Z [2026-01-29 14:10:56,227: INFO/ForkPoolWorker-31] 跳过已上传的文件: optimized_segments_file (已有 optimized_segments_file_minio_url = http://host.docker.internal:9000/yivideo/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json)
+2026-01-29T14:10:56.228352957Z [2026-01-29 14:10:56,228: INFO/ForkPoolWorker-31] 跳过已上传的文件: report_file (已有 report_file_minio_url = http://host.docker.internal:9000/yivideo/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_rebuild_report.txt)
+2026-01-29T14:10:56.229087126Z [2026-01-29 14:10:56,228: INFO/ForkPoolWorker-31] 开始发送callback，任务ID: video_to_subtitle_task, URL: http://host.docker.internal:5678/webhook-waiting/2244/t3
+2026-01-29T14:10:56.256869238Z [2026-01-29 14:10:56,256: WARNING/ForkPoolWorker-31] Callback HTTP错误，任务ID: video_to_subtitle_task, 尝试: 1/5, 错误: 409 Client Error: Conflict for url: http://host.docker.internal:5678/webhook-waiting/2244/t3
+2026-01-29T14:10:56.256959347Z [2026-01-29 14:10:56,256: ERROR/ForkPoolWorker-31] 所有callback尝试都失败，任务ID: video_to_subtitle_task
+2026-01-29T14:10:56.257302279Z [2026-01-29 14:10:56,257: INFO/ForkPoolWorker-31] Callback发送完成: video_to_subtitle_task, 状态: failed
+2026-01-29T14:10:56.257349083Z [2026-01-29 14:10:56,257: INFO/ForkPoolWorker-31] 已更新 workflow_id='video_to_subtitle_task' 的状态。
+2026-01-29T14:10:56.259778612Z [2026-01-29 14:10:56,259: INFO/ForkPoolWorker-31] Task wservice.translate_subtitles[420313eb-dc48-4f4b-8f53-39492f4382a3] succeeded in 64.05475003999891s: {'workflow_id': 'video_to_subtitle_task', 'create_at': '2026-01-29T14:09:43.873441', 'input_params': {'task_name': 'wservice.translate_subtitles', 'input_data': {'segments_file': '/share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json', 'target_language': 'zh', 'source_language': 'en', 'provider': 'deepseek', 'prompt_file_path': '/app/config/system_prompt/subtitle_translation_fitting.md', 'cps_limit': 18, 'cpl_limit': 42, 'max_lines': 1, 'max_retries': 3}, 'callback_url': 'http://host.docker.internal:5678/webhook-waiting/2244/t3'}, 'shared_storage_path': '/share/workflows/video_to_subtitle_task', 'stages': {'wservice.rebuild_subtitle_with_words': {'status': 'SUCCESS', 'input_params': {...}, 'output': {...}, 'error': None, 'duration': 0.12}, 'wservice.translate_subtitles': {'status': 'FAILED', 'input_params': {...}, 'output': {...}, 'error': '翻译装词失败: 行数不一致', 'duration': 63.96}}, 'error': 'wservice.translate_subtitles failed: 翻译装词失败:...', ...}
+2026-01-29T14:11:04.264388286Z [2026-01-29 14:11:04,262: WARNING/ForkPoolWorker-32] 逐行翻译校验失败: 行数不一致, 尝试重试: 3/3
+2026-01-29T14:11:04.320996223Z [2026-01-29 14:11:04,320: INFO/ForkPoolWorker-32] 初始化文件服务: host.docker.internal:9000, bucket: yivideo, 重试次数: 3
+2026-01-29T14:11:04.324118601Z [2026-01-29 14:11:04,323: INFO/ForkPoolWorker-32] Callback管理器初始化完成
+2026-01-29T14:11:04.324453331Z [2026-01-29 14:11:04,324: INFO/ForkPoolWorker-32] 开始发送callback，任务ID: video_to_subtitle_task, URL: http://host.docker.internal:5678/webhook-waiting/2245/t3
+2026-01-29T14:11:04.356175853Z [2026-01-29 14:11:04,355: INFO/ForkPoolWorker-32] Callback发送成功，任务ID: video_to_subtitle_task, 状态码: 200
+2026-01-29T14:11:04.356560087Z [2026-01-29 14:11:04,356: INFO/ForkPoolWorker-32] Callback发送完成: video_to_subtitle_task, 状态: sent
+2026-01-29T14:11:04.356724402Z [2026-01-29 14:11:04,356: INFO/ForkPoolWorker-32] 已更新 workflow_id='video_to_subtitle_task' 的状态。
+2026-01-29T14:11:04.360294720Z [2026-01-29 14:11:04,359: INFO/ForkPoolWorker-32] Task wservice.translate_subtitles[0934d6cb-9dbd-483f-8721-217432e58b41] succeeded in 62.10338635199878s: {'workflow_id': 'video_to_subtitle_task', 'create_at': '2026-01-29T14:10:02.248560', 'input_params': {'task_name': 'wservice.translate_subtitles', 'input_data': {'segments_file': '/share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json', 'target_language': 'zh', 'source_language': 'en', 'provider': 'deepseek', 'prompt_file_path': '/app/config/system_prompt/subtitle_translation_fitting.md', 'cps_limit': 18, 'cpl_limit': 42, 'max_lines': 1, 'max_retries': 3}, 'callback_url': 'http://host.docker.internal:5678/webhook-waiting/2245/t3'}, 'shared_storage_path': '/share/workflows/video_to_subtitle_task', 'stages': {'wservice.translate_subtitles': {'status': 'FAILED', 'input_params': {...}, 'output': {...}, 'error': '翻译装词失败: 行数不一致', 'duration': 61.98}}, 'error': 'wservice.translate_subtitles failed: 翻译装词失败: 行数不一致', 'status': 'pending'}
+```
+
+**LLM返回的数据样本**: `@tmp/llm_translate_debug`
+
+**SYSTEM PROMPT**: `@config/system_prompt/subtitle_translation_fitting.md`
+
+**问题列表:**
+
+1. LLM返回的3个样本, 但是行数是不一样.
+
+2. 日志中可以看到行数不一致的问题. 也就是说翻译返回的行数和提交的行数也是不一样的.
+
+**目标/任务**: 排查定位日志中行数不一致的问题.
+
+
+
+
+
+
+
+
+
+**问题分析:**
+
+当前项目是一个S2ST视频翻译项目.
+
+目前的执行流程是: `ffmpeg从视频提取音频 -> faster-whisper将音频转录成文本 -> LLM将文本进行纠错修正 -> 本地重构(将修正后的文本重新分配词级时间戳和字幕时间区间) -> LLM进行翻译装词`
+
+日志中行数不一致的问题, 大概率是因为提交给大模型的数据在格式上是有问题的. 本地重构的数据已按 `cpl` 和 `cps` 进行分割的情况. 提交给大模型的数据按照一行一条格式提取的. 因为存在分割就会导致语义断裂的情况. 所以当模型在翻译的时候也会出现语义上的问题这样就会
+
+
+
+
+
+
+
+# redis任务数据存储格式重构
+
+规则: 
+
+1. 每个node执行数据独立存储
+
+2. 设置有效期: 1天
 
 <br />
 

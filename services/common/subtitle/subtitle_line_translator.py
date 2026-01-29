@@ -5,6 +5,8 @@
 """
 
 import logging
+import os
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from services.common.config_loader import get_config
@@ -104,6 +106,7 @@ class SubtitleLineTranslator:
                 logger.warning("逐行翻译输出为空，尝试重试: %s/%s", attempt, retry_limit)
                 continue
 
+            self._dump_llm_response(output_text, len(budgets), attempt)
             lines = self._normalize_output_lines(output_text, budgets)
             error = self._validate_output_lines(lines, budgets)
             if error:
@@ -194,6 +197,27 @@ class SubtitleLineTranslator:
             "逐行字幕（格式: 序号 | 时长秒 | 字符预算 | 原文）:\n"
             f"{line_items}"
         )
+
+    def _dump_llm_response(self, output_text: str, expected_lines: int, attempt: int) -> None:
+        """保存 LLM 返回的原始数据到 txt 文件，用于调试行数不一致问题"""
+        try:
+            dump_dir = "/app/tmp/llm_translate_debug"
+            os.makedirs(dump_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            tag = self.dump_tag or "unknown"
+            actual_lines = len(output_text.split("\n"))
+            filename = f"{timestamp}_{tag}_attempt{attempt}_expected{expected_lines}_actual{actual_lines}.txt"
+            filepath = os.path.join(dump_dir, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(f"# 期望行数: {expected_lines}\n")
+                f.write(f"# 实际行数: {actual_lines}\n")
+                f.write(f"# 尝试次数: {attempt}\n")
+                f.write(f"# dump_tag: {tag}\n")
+                f.write("# " + "=" * 50 + "\n\n")
+                f.write(output_text)
+            logger.info("LLM 响应已保存: %s (期望 %d 行, 实际 %d 行)", filepath, expected_lines, actual_lines)
+        except Exception as e:
+            logger.warning("保存 LLM 响应失败: %s", e)
 
     def _validate_output_lines(self, lines: List[str], budgets: List[int]) -> Optional[str]:
         if len(lines) != len(budgets):

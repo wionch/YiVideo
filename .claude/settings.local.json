@@ -157,7 +157,11 @@
       "WebFetch(domain:www.bbc.co.uk)",
       "WebFetch(domain:tech.ebu.ch)",
       "Bash(git branch:*)",
-      "Bash(git worktree remove:*)"
+      "Bash(git worktree remove:*)",
+      "Bash(git -C /opt/wionch/docker/yivideo log --oneline -20)",
+      "Bash(YIVIDEO_ROOT=/opt/wionch/docker/yivideo/.worktrees/subtitle-semantic-protection docker-compose:*)",
+      "Bash(git worktree list:*)",
+      "Bash(PYTHONPATH=/opt/wionch/docker/yivideo/.worktrees/subtitle-semantic-protection python:*)"
     ],
     "deny": [
       "Bash(docker build:*)"
