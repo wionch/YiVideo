@@ -381,13 +381,8 @@ def _build_node_view(context: WorkflowContext) -> Optional[WorkflowContext]:
     stages = data.get("stages") or {}
 
     if not task_name:
-        if len(stages) == 1:
-            task_name = next(iter(stages.keys()))
-            input_params["task_name"] = task_name
-            data["input_params"] = input_params
-        else:
-            logger.error("无法识别 task_name，节点写入已跳过")
-            return None
+        logger.error("task_name 缺失，无法生成节点视图")
+        raise ValueError("task_name 缺失，无法生成节点视图")
 
     node_stage = stages.get(task_name)
     data["stages"] = {task_name: node_stage} if node_stage else {}

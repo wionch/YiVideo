@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import pytest
+
 import services.common.state_manager as state_manager
 from services.common.context import WorkflowContext
 
@@ -92,3 +94,36 @@ def test_get_workflow_state_aggregates_nodes(monkeypatch):
     assert "stages" in merged
     assert "ffmpeg.extract_audio" in merged["stages"]
     assert "faster_whisper.transcribe" in merged["stages"]
+
+
+def test_create_workflow_state_requires_task_name(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(state_manager, "redis_client", fake)
+
+    context = WorkflowContext(
+        workflow_id="task-2",
+        create_at="2026-01-29T00:00:00",
+        input_params={
+            "input_data": {"video_path": "demo.mp4"},
+            "callback_url": None,
+        },
+        shared_storage_path="/share/workflows/task-2",
+        stages={
+            "ffmpeg.extract_audio": {
+                "status": "SUCCESS",
+                "output": {"audio_path": "/share/workflows/demo.wav"},
+                "error": None,
+                "duration": 1.0,
+            },
+            "faster_whisper.transcribe": {
+                "status": "SUCCESS",
+                "output": {"text": "demo"},
+                "error": None,
+                "duration": 2.0,
+            },
+        },
+        error=None,
+    )
+
+    with pytest.raises(ValueError):
+        state_manager.create_workflow_state(context)
