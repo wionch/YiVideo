@@ -6,7 +6,7 @@
 当前所有节点阶段数据集中存放在单一 Redis 键 `workflow_state:{task_id}`，导致键体积膨胀、读写耦合。需求要求按节点拆分存储，并将 TTL 统一为 1 天。
 
 ## 目标
-- 每个节点执行数据独立存储，键格式为 `{任务id}:node:{func_name}`（`task_name` 中 `.` 替换为 `:`）。
+- 每个节点执行数据独立存储，键格式为 `{任务id}:node:{task_name}`（`task_name` 为节点名原值）。
 - TTL 固定 1 天（86400 秒）。
 - 对外 API 请求/响应格式保持不变（仍为 `WorkflowContext` 视图）。
 
@@ -17,7 +17,7 @@
 
 ## 方案概述
 在 `state_manager` 中引入“节点键”读写与聚合逻辑：
-- 写入：`create_workflow_state` / `update_workflow_state` 只写当前节点视图到 `{task_id}:node:{func_name}`，并用 `setex` 刷新 TTL。
+- 写入：`create_workflow_state` / `update_workflow_state` 只写当前节点视图到 `{task_id}:node:{task_name}`，并用 `setex` 刷新 TTL。
 - 读取：`get_workflow_state` 通过 `SCAN {task_id}:node:*` 拉取所有节点键，合并 `stages` 形成聚合 `WorkflowContext`。
 - 删除：删除任务时扫描并删除该 `task_id` 下全部节点键。
 
@@ -27,7 +27,7 @@
 
 ## 组件与改动点
 - `services/common/state_manager.py`
-  - 新增节点键生成函数（`task_name` 规范化）。
+  - 新增节点键生成函数（直接使用 `task_name`）。
   - 修改 create/update/get 的读写逻辑与 TTL。
   - 新增扫描聚合与批量删除能力。
 - `services/api_gateway/app/single_task_executor.py`
