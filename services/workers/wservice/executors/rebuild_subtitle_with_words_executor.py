@@ -67,12 +67,16 @@ class WServiceRebuildSubtitleWithWordsExecutor(BaseNodeExecutor):
             raise ValueError(error)
         self._apply_aligned_words(segments, aligned_words, word_index_map)
 
+        # 从输入数据获取语言，默认为 "en"
+        language = input_data.get("language", "en")
+
         rebuilt_segments = rebuild_segments_by_words(
             segments,
             max_cpl=42,
             max_cps=18.0,
             min_duration=1.0,
-            max_duration=7.0
+            max_duration=7.0,
+            language=language
         )
         optimized_segments = rebuilt_segments or segments
         optimized_segments_file = self._save_optimized_segments(optimized_segments, input_data)
