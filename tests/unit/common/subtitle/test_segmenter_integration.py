@@ -156,6 +156,31 @@ class TestMultilingualSubtitleSegmenter:
         assert "ja" in segmenter.PYSBD_LANGS
         assert "de" in segmenter.PYSBD_LANGS
 
+    def test_pysbd_global_sentence_first(self, segmenter, monkeypatch):
+        """测试全局语义句界优先"""
+        class FakeSegmenter:
+            def segment(self, text):
+                return ["U.S. It's famous."]
+
+        words = [
+            {"word": "U.", "start": 0.0, "end": 0.2},
+            {"word": "S.", "start": 0.2, "end": 0.4},
+            {"word": " ", "start": 0.4, "end": 0.4},
+            {"word": "It's", "start": 0.4, "end": 0.6},
+            {"word": " ", "start": 0.6, "end": 0.6},
+            {"word": "famous.", "start": 0.6, "end": 1.0},
+        ]
+        monkeypatch.setattr(segmenter, "_pysbd_available", True)
+        monkeypatch.setattr(
+            segmenter, "_get_pysbd_segmenter", lambda _lang: FakeSegmenter()
+        )
+
+        result = segmenter.segment(words, language="en")
+
+        assert len(result) == 1
+        assert "".join(w["word"] for w in result[0]) == "U.S. It's famous."
+        assert [w["start"] for w in result[0]] == [0.0, 0.2, 0.4, 0.4, 0.6, 0.6]
+
     def test_abbreviation_not_split(self, segmenter):
         """测试缩写词不会被强标点断句"""
         words = [
