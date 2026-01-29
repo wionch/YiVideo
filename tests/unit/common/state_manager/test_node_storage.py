@@ -39,7 +39,7 @@ class FakeRedis:
             for key in list(self.storage.keys()):
                 yield key
             return
-        prefix = match[:-1] if match.endswith("*") else match
+        prefix = match.split("*", 1)[0]
         for key in list(self.storage.keys()):
             if key.startswith(prefix):
                 yield key
@@ -74,7 +74,7 @@ def test_create_workflow_state_writes_node_key(monkeypatch):
     context = _build_context()
     state_manager.create_workflow_state(context)
 
-    key = f"{context.workflow_id}:node:{context.input_params['task_name']}"
+    key = f"{context.workflow_id}:ffmpeg:extract_audio"
     assert key in fake.storage
     assert fake.ttl[key] == 24 * 60 * 60
 
@@ -121,6 +121,34 @@ def test_create_workflow_state_requires_task_name(monkeypatch):
                 "error": None,
                 "duration": 2.0,
             },
+        },
+        error=None,
+    )
+
+    with pytest.raises(ValueError):
+        state_manager.create_workflow_state(context)
+
+
+def test_create_workflow_state_requires_valid_task_name(monkeypatch):
+    fake = FakeRedis()
+    monkeypatch.setattr(state_manager, "redis_client", fake)
+
+    context = WorkflowContext(
+        workflow_id="task-3",
+        create_at="2026-01-29T00:00:00",
+        input_params={
+            "task_name": "invalid_task_name",
+            "input_data": {"video_path": "demo.mp4"},
+            "callback_url": None,
+        },
+        shared_storage_path="/share/workflows/task-3",
+        stages={
+            "invalid_task_name": {
+                "status": "SUCCESS",
+                "output": {"audio_path": "/share/workflows/demo.wav"},
+                "error": None,
+                "duration": 1.0,
+            }
         },
         error=None,
     )

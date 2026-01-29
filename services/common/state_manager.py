@@ -368,9 +368,20 @@ def _check_and_trigger_callback(context: WorkflowContext) -> None:
     except Exception as e:
         logger.error(f"Callback触发失败: {e}", exc_info=True)
 
+def _split_task_name(task_name: str) -> tuple[str, str]:
+    """拆分 task_name 为节点名与方法名。"""
+    if not task_name or "." not in task_name:
+        raise ValueError("task_name 格式错误，应为 <node>.<task_name>")
+    node, func_name = task_name.split(".", 1)
+    if not node or not func_name:
+        raise ValueError("task_name 格式错误，应为 <node>.<task_name>")
+    return node, func_name
+
+
 def _get_node_key(task_id: str, task_name: str) -> str:
     """生成用于Redis的节点键。"""
-    return f"{task_id}:node:{task_name}"
+    node, func_name = _split_task_name(task_name)
+    return f"{task_id}:{node}:{func_name}"
 
 
 def _build_node_view(context: WorkflowContext) -> Optional[WorkflowContext]:
@@ -384,6 +395,7 @@ def _build_node_view(context: WorkflowContext) -> Optional[WorkflowContext]:
         logger.error("task_name 缺失，无法生成节点视图")
         raise ValueError("task_name 缺失，无法生成节点视图")
 
+    _split_task_name(task_name)
     node_stage = stages.get(task_name)
     data["stages"] = {task_name: node_stage} if node_stage else {}
     return WorkflowContext(**data)
@@ -511,7 +523,7 @@ def get_workflow_state(workflow_id: str) -> Dict[str, Any]:
 
     states: List[Dict[str, Any]] = []
     try:
-        for key in redis_client.scan_iter(match=f"{workflow_id}:node:*"):
+        for key in redis_client.scan_iter(match=f"{workflow_id}:*:*"):
             state_json = redis_client.get(key)
             if not state_json:
                 continue
