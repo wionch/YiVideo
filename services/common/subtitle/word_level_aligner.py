@@ -192,7 +192,8 @@ def rebuild_segments_by_words(
         max_cpl=max_cpl,
         max_cps=max_cps,
         min_duration=min_duration,
-        max_duration=max_duration
+        max_duration=max_duration,
+        use_semantic_protection=False
     )
 
     # 转换为片段格式

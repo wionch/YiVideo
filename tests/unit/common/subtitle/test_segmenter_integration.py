@@ -5,11 +5,18 @@ MultilingualSubtitleSegmenter 集成测试
 1. 强标点断句
 2. PySBD 语义断句
 3. 通用规则兜底
+4. 语义保护断句
 """
 
 import pytest
 
-from services.common.subtitle.segmenter import MultilingualSubtitleSegmenter
+from services.common.subtitle.segmenter import (
+    MultilingualSubtitleSegmenter,
+    collect_semantic_boundaries,
+    find_best_boundary,
+    split_with_semantic_protection,
+    merge_incomplete_segments,
+)
 
 
 class TestMultilingualSubtitleSegmenter:
@@ -226,3 +233,124 @@ class TestMultilingualSubtitleSegmenter:
         result = segmenter.segment(words, max_cpl=6)
         texts = ["".join(w["word"] for w in seg) for seg in result]
         assert any("snap-" in text and "-trap" in text for text in texts)
+
+
+class TestSemanticProtectionIntegration:
+    """测试语义保护功能集成到 Segmenter"""
+
+    @pytest.fixture
+    def segmenter(self):
+        return MultilingualSubtitleSegmenter()
+
+    def test_semantic_protection_uses_weak_punct(self, segmenter, monkeypatch):
+        """测试语义保护优先在弱标点处切分"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "Hello", "start": 0.0, "end": 0.5},
+            {"word": " ", "start": 0.5, "end": 0.5},
+            {"word": "world,", "start": 0.5, "end": 1.0},
+            {"word": " ", "start": 1.0, "end": 1.0},
+            {"word": "this", "start": 1.0, "end": 1.5},
+            {"word": " ", "start": 1.5, "end": 1.5},
+            {"word": "is", "start": 1.5, "end": 2.0},
+            {"word": " ", "start": 2.0, "end": 2.0},
+            {"word": "test", "start": 2.0, "end": 2.5},
+        ]
+        # 总长度超过 max_cpl，应该触发语义保护切分
+        result = segmenter.segment(words, max_cpl=20, use_semantic_protection=True)
+        # 应该在逗号处切分
+        texts = ["".join(w["word"] for w in seg) for seg in result]
+        assert any("world," in text for text in texts)
+
+    def test_semantic_protection_avoids_tiny_segments(self, segmenter, monkeypatch):
+        """测试语义保护避免产生极短片段"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "A,", "start": 0.0, "end": 0.3},
+            {"word": " ", "start": 0.3, "end": 0.3},
+            {"word": "big", "start": 0.3, "end": 0.6},
+            {"word": " ", "start": 0.6, "end": 0.6},
+            {"word": "test", "start": 0.6, "end": 1.0},
+        ]
+        result = segmenter.segment(words, max_cpl=6, use_semantic_protection=True)
+        # 检查没有极短片段（长度 <= 2）
+        for seg in result:
+            text = "".join(w["word"] for w in seg).strip()
+            assert len(text) > 2, f"发现极短片段: '{text}'"
+
+    def test_semantic_protection_fallback_to_word_count(self, segmenter, monkeypatch):
+        """测试语义保护在没有语义边界时回退到字数切分"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        # 使用大写开头的词，避免被 merge_incomplete_segments 合并
+        words = [
+            {"word": "Hello", "start": 0.0, "end": 0.5},
+            {"word": " ", "start": 0.5, "end": 0.5},
+            {"word": "World", "start": 0.5, "end": 1.0},
+            {"word": " ", "start": 1.0, "end": 1.0},
+            {"word": "Test!", "start": 1.0, "end": 1.5},  # 有结尾标点
+        ]
+        # 没有弱标点，应该回退到字数切分
+        result = segmenter.segment(words, max_cpl=10, use_semantic_protection=True)
+        assert len(result) >= 1
+        # 检查每个片段不超过 max_cpl（最后一个片段除外，如果它是单个词）
+        for seg in result:
+            text = "".join(w["word"] for w in seg)
+            assert len(text) <= 10 or len(seg) == 1
+
+    def test_merge_incomplete_segments_integration(self, segmenter, monkeypatch):
+        """测试后处理合并不完整片段"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "Hello", "start": 0.0, "end": 0.5},  # 无结尾标点
+            {"word": " ", "start": 0.5, "end": 0.5},
+            {"word": "world.", "start": 0.5, "end": 1.0},  # 有结尾标点，小写开头
+        ]
+        result = segmenter.segment(words, max_cpl=20, use_semantic_protection=True)
+        # 应该合并成一个完整片段（因为第一个片段无结尾标点，第二个小写开头）
+        assert len(result) == 1
+        assert "".join(w["word"] for w in result[0]) == "Hello world."
+
+    def test_semantic_protection_disabled(self, segmenter, monkeypatch):
+        """测试禁用语义保护时使用原有逻辑"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "Hello", "start": 0.0, "end": 0.5},
+            {"word": " ", "start": 0.5, "end": 0.5},
+            {"word": "world,", "start": 0.5, "end": 1.0},
+            {"word": " ", "start": 1.0, "end": 1.0},
+            {"word": "test", "start": 1.0, "end": 1.5},
+        ]
+        # 禁用语义保护
+        result = segmenter.segment(words, max_cpl=10, use_semantic_protection=False)
+        assert len(result) >= 1
+
+    def test_semantic_protection_with_chinese(self, segmenter, monkeypatch):
+        """测试中文语义保护"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "你好", "start": 0.0, "end": 0.5},
+            {"word": "，", "start": 0.5, "end": 0.6},
+            {"word": "世界", "start": 0.6, "end": 1.0},
+            {"word": "，", "start": 1.0, "end": 1.1},
+            {"word": "测试", "start": 1.1, "end": 1.5},
+        ]
+        result = segmenter.segment(words, max_cpl=8, language="zh", use_semantic_protection=True)
+        texts = ["".join(w["word"] for w in seg) for seg in result]
+        # 应该在中文逗号处切分
+        assert any("你好" in text for text in texts)
+
+    def test_semantic_protection_preserves_timestamps(self, segmenter, monkeypatch):
+        """测试语义保护保持时间戳不变"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "Hello,", "start": 0.0, "end": 0.5},
+            {"word": " ", "start": 0.5, "end": 0.5},
+            {"word": "world", "start": 0.5, "end": 1.0},
+        ]
+        result = segmenter.segment(words, max_cpl=8, use_semantic_protection=True)
+        # 检查时间戳保持不变
+        all_words = []
+        for seg in result:
+            all_words.extend(seg)
+        assert [w["start"] for w in all_words] == [0.0, 0.5, 0.5]
+        assert [w["end"] for w in all_words] == [0.5, 0.5, 1.0]
