@@ -192,6 +192,69 @@ class MultilingualSubtitleSegmenter:
             self._pysbd_segmenters[language] = Segmenter(language=language, clean=False)
         return self._pysbd_segmenters[language]
 
+    def _build_text_and_offsets(
+        self, words: List[Dict[str, Any]]
+    ) -> tuple:
+        text_parts = []
+        offsets = []
+        cursor = 0
+        for word in words:
+            token = str(word.get("word", ""))
+            start = cursor
+            cursor += len(token)
+            end = cursor
+            text_parts.append(token)
+            offsets.append((start, end))
+        return "".join(text_parts), offsets
+
+    def _apply_pysbd_global_split(
+        self, words: List[Dict[str, Any]], language: str
+    ) -> List[List[Dict[str, Any]]]:
+        text, offsets = self._build_text_and_offsets(words)
+        if not text:
+            return []
+
+        segmenter = self._get_pysbd_segmenter(language)
+        sentences = segmenter.segment(text)
+        if not sentences:
+            return []
+
+        total_len = sum(len(sentence) for sentence in sentences)
+        if total_len != len(text):
+            logger.warning("PySBD 句界长度不匹配，回退强标点断句")
+            return []
+
+        result: List[List[Dict[str, Any]]] = []
+        cursor = 0
+        word_idx = 0
+        for sent in sentences:
+            sent_len = len(sent)
+            if sent_len == 0:
+                continue
+            sent_end = cursor + sent_len
+            current_seg = []
+
+            while word_idx < len(words) and offsets[word_idx][1] <= sent_end:
+                current_seg.append(words[word_idx])
+                word_idx += 1
+
+            if not current_seg and word_idx < len(words):
+                current_seg.append(words[word_idx])
+                word_idx += 1
+
+            if current_seg:
+                result.append(current_seg)
+
+            cursor = sent_end
+
+        if word_idx < len(words):
+            if result:
+                result[-1].extend(words[word_idx:])
+            else:
+                result.append(words[word_idx:])
+
+        return result
+
     def _apply_pysbd_split(
         self, segments: List[List[Dict[str, Any]]], language: str, max_cpl: int
     ) -> List[List[Dict[str, Any]]]:
@@ -281,12 +344,14 @@ class MultilingualSubtitleSegmenter:
         if not words:
             return []
 
-        # 第一层：强标点断句
-        segments = split_by_strong_punctuation(words)
-
-        # 第二层：PySBD 语义断句（如果可用且支持该语言）
+        # 第一层：全局 PySBD 语义断句（可用且支持语言时优先）
+        segments: List[List[Dict[str, Any]]]
         if self._pysbd_available and language in self.PYSBD_LANGS:
-            segments = self._apply_pysbd_split(segments, language, max_cpl)
+            segments = self._apply_pysbd_global_split(words, language)
+            if not segments:
+                segments = split_by_strong_punctuation(words)
+        else:
+            segments = split_by_strong_punctuation(words)
 
         # 第三层：通用规则兜底
         final_result: List[List[Dict[str, Any]]] = []
