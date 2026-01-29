@@ -100,6 +100,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-share
             - *vol-tests
             - *vol-config-yml
@@ -121,6 +122,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-tests
             - *vol-share
             - *vol-config-yml
@@ -145,6 +147,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-tests
             - *vol-share
             - *vol-config-yml
@@ -172,6 +175,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-tests
             - *vol-share
             - *vol-config-yml
@@ -200,6 +204,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-tests
             - *vol-share
             - *vol-config-yml
@@ -232,6 +237,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-tests
             - *vol-share
             - audio_separator_models_volume:/models
@@ -258,6 +264,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-tests
             - *vol-share
             - *vol-config-yml
@@ -282,6 +289,7 @@ services:
             - *vol-videos
             - *vol-locks
             - *vol-tmp
+            - *vol-worktrees
             - *vol-tests
             - *vol-share
             - *vol-config-yml
