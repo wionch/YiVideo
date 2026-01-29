@@ -374,6 +374,8 @@ class MultilingualSubtitleSegmenter:
         """兜底分割策略：弱标点 -> 停顿 -> 字数"""
         segments = split_by_weak_punctuation(words, max_cpl, force=force)
         if len(segments) > 1:
+            if self._has_tiny_segment(segments):
+                return self._split_by_word_count_no_tiny(words, max_cpl)
             return segments
 
         segments = split_by_pause(words, max_cpl, force=force)
@@ -381,6 +383,56 @@ class MultilingualSubtitleSegmenter:
             return segments
 
         return split_by_word_count(words, max_cpl, force=force)
+
+    def _has_tiny_segment(self, segments: List[List[Dict[str, Any]]]) -> bool:
+        for seg in segments:
+            text = "".join(w.get("word", "") for w in seg).strip()
+            if len(text) <= 2:
+                return True
+        return False
+
+    def _split_by_word_count_no_tiny(
+        self, words: List[Dict[str, Any]], max_cpl: int
+    ) -> List[List[Dict[str, Any]]]:
+        text = "".join(w.get("word", "") for w in words)
+        if len(text) <= max_cpl:
+            return [words]
+        if len(words) <= 1:
+            return [words]
+        if not text:
+            return [words]
+        if max_cpl <= 0:
+            return [words]
+
+        num_segments = max(2, (len(text) + max_cpl - 1) // max_cpl)
+        target_len = len(text) / num_segments
+
+        best_split = None
+        best_diff = None
+        current_len = 0
+        for i, word in enumerate(words[:-1]):
+            current_len += len(word.get("word", ""))
+            left_len = len("".join(w.get("word", "") for w in words[: i + 1]).strip())
+            right_len = len("".join(w.get("word", "") for w in words[i + 1 :]).strip())
+            if left_len <= 2 or right_len <= 2:
+                continue
+            diff = abs(current_len - target_len)
+            if best_diff is None or diff < best_diff:
+                best_split = i
+                best_diff = diff
+
+        if best_split is None:
+            return [words]
+
+        left = words[: best_split + 1]
+        right = words[best_split + 1 :]
+        if not left or not right:
+            return [words]
+
+        return (
+            self._split_by_word_count_no_tiny(left, max_cpl)
+            + self._split_by_word_count_no_tiny(right, max_cpl)
+        )
 
     def _split_with_fallback(
         self,

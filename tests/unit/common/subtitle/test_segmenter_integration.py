@@ -148,6 +148,21 @@ class TestMultilingualSubtitleSegmenter:
         # 应该被分割成多个片段
         assert len(result) >= 1
 
+    def test_weak_punctuation_no_tiny_segment(self, segmenter, monkeypatch):
+        """测试弱标点不产生极短片段"""
+        monkeypatch.setattr(segmenter, "_pysbd_available", False)
+        words = [
+            {"word": "I,", "start": 0.0, "end": 0.3},
+            {"word": " ", "start": 0.3, "end": 0.3},
+            {"word": "agree", "start": 0.3, "end": 0.7},
+            {"word": " ", "start": 0.7, "end": 0.7},
+            {"word": "with", "start": 0.7, "end": 1.0},
+            {"word": " ", "start": 1.0, "end": 1.0},
+            {"word": "you", "start": 1.0, "end": 1.3},
+        ]
+        result = segmenter.segment(words, max_cpl=6)
+        assert all(len("".join(w["word"] for w in seg).strip()) > 2 for seg in result)
+
     def test_pysbd_language_support(self, segmenter):
         """测试 PySBD 语言支持列表"""
         # 检查支持的语言列表
