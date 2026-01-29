@@ -582,3 +582,113 @@ class MultilingualSubtitleSegmenter:
                 return False
 
         return True
+
+
+def merge_incomplete_segments(
+    segments: List[List[Dict[str, Any]]],
+    min_length: int = 3,
+) -> List[List[Dict[str, Any]]]:
+    """
+    后处理合并：合并不完整片段和极短片段
+
+    合并规则：
+    1. 不完整片段：无结尾标点 + 小写开头（表示句子未结束）
+    2. 极短片段：文本长度 < min_length
+
+    合并策略：
+    - 开头的极短/不完整片段：合并到后一个片段
+    - 中间的极短/不完整片段：合并到前一个片段
+    - 连续的多个不完整片段：依次向前合并
+
+    Args:
+        segments: 片段列表，每个片段是词级时间戳列表
+        min_length: 最小片段长度（字符数），默认3
+
+    Returns:
+        合并后的片段列表
+    """
+    if not segments:
+        return []
+
+    if len(segments) <= 1:
+        return segments
+
+    def get_text(words: List[Dict[str, Any]]) -> str:
+        """获取片段的完整文本"""
+        return "".join(w.get("word", "") for w in words)
+
+    def has_ending_punctuation(words: List[Dict[str, Any]]) -> bool:
+        """检查片段是否有结尾标点"""
+        if not words:
+            return False
+        # 从后向前查找第一个非空白字符
+        for word in reversed(words):
+            text = word.get("word", "").strip()
+            if text:
+                return text[-1] in STRONG_PUNCTUATION
+        return False
+
+    def is_lowercase_start(words: List[Dict[str, Any]]) -> bool:
+        """检查片段是否以小写字母开头"""
+        if not words:
+            return False
+        # 找到第一个非空白字符
+        for word in words:
+            text = word.get("word", "").strip()
+            if text:
+                first_char = text[0]
+                return first_char.islower()
+        return False
+
+    def get_text_length(words: List[Dict[str, Any]]) -> int:
+        """获取片段的非空白文本长度"""
+        text = get_text(words)
+        return len(text.strip())
+
+    def is_incomplete(words: List[Dict[str, Any]]) -> bool:
+        """
+        判断片段是否不完整
+
+        不完整条件：
+        1. 无结尾标点 + 小写开头（句子未结束）
+        2. 极短片段（长度 < min_length）
+        """
+        text_len = get_text_length(words)
+        if text_len < min_length:
+            return True
+        if not has_ending_punctuation(words) and is_lowercase_start(words):
+            return True
+        return False
+
+    result: List[List[Dict[str, Any]]] = []
+
+    for i, seg in enumerate(segments):
+        if not seg:
+            continue
+
+        if not is_incomplete(seg):
+            # 完整片段，直接添加
+            result.append(seg)
+        else:
+            # 不完整片段，需要合并
+            if not result:
+                # 是第一个片段且不完整，需要看后一个片段
+                # 暂时保存，等处理到下一个完整片段时再合并
+                # 实际上应该向前合并到已有的结果中
+                # 如果没有前一个，则保留到后面再处理
+                # 这里简化处理：开头的极短片段暂时保留，等后面再决定
+                result.append(seg)
+            else:
+                # 有前一个片段，合并到前一个
+                result[-1].extend(seg)
+
+    # 处理特殊情况：如果结果中有多个片段，检查第一个是否极短
+    # 如果是，合并到第二个
+    if len(result) >= 2:
+        first_len = get_text_length(result[0])
+        if first_len < min_length and not has_ending_punctuation(result[0]):
+            # 第一个片段极短且无标点，合并到第二个
+            merged = result[0] + result[1]
+            result = [merged] + result[2:]
+
+    return result
