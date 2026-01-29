@@ -612,7 +612,7 @@ wservice.rebuild\_subtitle\_with\_words增加一个report参数(bool类型)
 
 当前的字幕文件是通过`wservice.ai_optimize_text`进行优化产生的. 然后再通过本地重构功能进行处理.
 
-重构功能`wservice.rebuild_subtitle_with_words`完成处理后, 发现字幕的断句逻辑存在问题
+重构功能`wservice.rebuild_subtitle_with_words`完成处理后, 发现重构的字幕内容还存在问题.
 
 **执行结果**:`@share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json`
 
@@ -621,6 +621,16 @@ wservice.rebuild\_subtitle\_with\_words增加一个report参数(bool类型)
 1. 逐条检查字幕, 排查字幕重构中存在的问题
 
 2. 分析这些问题的根因
+
+
+
+
+
+ID23:极短字幕(2个字符)
+
+ID24-25: 异常分割, 被`-`分割成了两条字幕
+
+
 
 我整理了下面的断句逻辑, 你给分析分析:
 
@@ -741,11 +751,15 @@ wservice日志:
 
 # redis任务数据存储格式重构
 
-规则: 
+**节点文档**: `@docs/technical/reference/SINGLE_TASK_API_REFERENCE.md`
+
+**需求背景**: 目前所有节点的任务数据都存储在同一个的 Redis 键下, 需要将这些数据进行拆分使每个节点存储在不同的 Redis 键中.
+
+**规则**:
 
 1. 每个node执行数据独立存储
 
-2. 设置有效期: 1天
+2. 数据设置有效期: 1天
 
 <br />
 
