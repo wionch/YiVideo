@@ -9,6 +9,8 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from services.common.subtitle.segmenter import MultilingualSubtitleSegmenter
+
 logger = logging.getLogger(__name__)
 
 _TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
@@ -149,22 +151,62 @@ def rebuild_segments_by_words(
     max_cpl: int = 42,
     max_cps: float = 18.0,
     min_duration: float = 1.0,
-    max_duration: float = 7.0
+    max_duration: float = 7.0,
+    language: str = "en"
 ) -> List[Dict[str, Any]]:
+    """
+    基于词级时间戳重建字幕片段
+
+    使用三层断句策略：
+    1. 强标点断句（跳过缩写）
+    2. PySBD 语义断句（可选）
+    3. 通用规则兜底
+    """
     words = _flatten_segment_words(segments)
     if not words:
         return []
 
-    rebuilt_segments = _split_words_by_punctuation_and_limits(
+    # 使用新的 segmenter
+    segmenter = MultilingualSubtitleSegmenter()
+    word_segments = segmenter.segment(
         words,
+        language=language,
         max_cpl=max_cpl,
         max_cps=max_cps,
         min_duration=min_duration,
         max_duration=max_duration
     )
-    for idx, segment in enumerate(rebuilt_segments):
+
+    # 转换为片段格式
+    rebuilt_segments = []
+    for idx, word_seg in enumerate(word_segments):
+        segment = _create_segment_from_words(word_seg)
         segment["id"] = idx + 1
+        rebuilt_segments.append(segment)
+
     return rebuilt_segments
+
+
+def _create_segment_from_words(words: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """从词列表创建片段"""
+    text = "".join(w.get("word", "") for w in words).strip()
+    start = words[0].get("start", 0.0)
+    end = words[-1].get("end", start)
+
+    segment: Dict[str, Any] = {
+        "start": start,
+        "end": end,
+        "duration": max(end - start, 0.0),
+        "text": text,
+        "words": words
+    }
+
+    # 保留说话人信息
+    speakers = {w.get("speaker") for w in words if w.get("speaker")}
+    if len(speakers) == 1:
+        segment["speaker"] = speakers.pop()
+
+    return segment
 
 
 def _flatten_segment_words(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

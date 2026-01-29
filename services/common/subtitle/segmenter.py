@@ -129,8 +129,13 @@ def split_by_word_count(words: List[Dict[str, Any]], max_cpl: int) -> List[List[
 
     # 找到最佳分割点（中间位置）
     mid = len(words) // 2
-    left = words[: mid + 1]
-    right = words[mid + 1 :]
+    left = words[:mid]
+    right = words[mid:]
+
+    # 防止无限递归：确保分割确实产生了更小的列表
+    if len(left) == 0 or len(right) == 0 or (len(left) == len(words) and len(right) == len(words)):
+        # 无法继续分割，直接返回
+        return [words]
 
     return split_by_word_count(left, max_cpl) + split_by_word_count(right, max_cpl)
 

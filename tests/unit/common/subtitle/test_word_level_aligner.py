@@ -95,7 +95,8 @@ def test_rebuild_segments_defers_until_punctuation():
             ]
         }
     ]
-    rebuilt = rebuild_segments_by_words(segments)
+    # 使用较大的 max_cpl 避免字数限制导致的额外分割
+    rebuilt = rebuild_segments_by_words(segments, max_cpl=100)
 
     assert len(rebuilt) == 2
     assert rebuilt[0]["end"] == 6.0
