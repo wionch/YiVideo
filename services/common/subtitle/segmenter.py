@@ -87,3 +87,30 @@ def split_by_weak_punctuation(
     left = words[:best_split + 1]
     right = words[best_split + 1:]
     return split_by_weak_punctuation(left, max_cpl) + split_by_weak_punctuation(right, max_cpl)
+
+
+def split_by_pause(words: List[Dict[str, Any]], max_cpl: int) -> List[List[Dict[str, Any]]]:
+    """基于词间停顿时间进行断句，停顿超过 PAUSE_THRESHOLD (0.3s) 视为潜在断句点"""
+    text = "".join(w.get("word", "") for w in words)
+    if len(text) <= max_cpl:
+        return [words]
+    if len(words) <= 1:
+        return [words]
+    candidates = []
+    for i in range(len(words) - 1):
+        current_word_end = words[i].get("end", 0)
+        next_word_start = words[i + 1].get("start", current_word_end)
+        gap = next_word_start - current_word_end
+        if gap > PAUSE_THRESHOLD:
+            candidates.append((i, gap))
+    if not candidates:
+        return [words]
+    mid = len(words) // 2
+    def score_pause(item):
+        idx, gap = item
+        distance_penalty = abs(idx - mid) * 0.1
+        return gap - distance_penalty
+    best_split, _ = max(candidates, key=score_pause)
+    left = words[:best_split + 1]
+    right = words[best_split + 1:]
+    return split_by_pause(left, max_cpl) + split_by_pause(right, max_cpl)
