@@ -1,6 +1,6 @@
 # 单任务与文件操作 HTTP API 参考
 
-本文件与 FastAPI/Celery 实现及 `WorkflowContext` 数据结构对齐，仅提供 `/v1/tasks` 单任务调用与 `/v1/files` 文件操作接口的完整示例。系统已不再提供 `/v1/workflows` 工作流接口。示例统一使用：
+本文件与 FastAPI/Celery 实现及“单节点结果”数据结构对齐，仅提供 `/v1/tasks` 单任务调用与 `/v1/files` 文件操作接口的完整示例。系统已不再提供 `/v1/workflows` 工作流接口。示例统一使用：
 
 - 基础地址：`http://localhost:8788`
 - 示例任务：`task_id=task-demo-001`
@@ -34,12 +34,31 @@
 }
 ```
 
+### 单节点结果结构
+
+单任务所有同步结果、状态查询与回调均返回“单节点结果”，不包含 `workflow_id` / `stages` 等工作流字段：
+
+```json
+{
+  "task_name": "ffmpeg.extract_audio",
+  "status": "SUCCESS",
+  "input_params": {
+    "video_path": "/share/workflows/task-demo-001/demo.mp4"
+  },
+  "output": {
+    "audio_path": "/share/workflows/task-demo-001/audio/demo.wav"
+  },
+  "error": null,
+  "duration": 2.6
+}
+```
+
 ### 复用与回调（task_id + task_name）
 
-- 系统会在执行前检查 Redis 是否存在相同 `task_id` 下该 `task_name` 的成功阶段且 `output` 非空：命中则跳过调度，直接使用本次请求的 `callback` 地址发送回调。
-- 命中成功复用时，同步响应将返回 `status=completed`，并附带 `reuse_info` 与缓存的结果（字段保持与执行成功一致，不修改原始输出）。
+- 系统会在执行前检查 Redis 是否存在相同 `task_id` 下该 `task_name` 的成功节点结果且 `output` 非空：命中则跳过调度，直接使用本次请求的 `callback` 地址发送回调。
+- 命中成功复用时，同步响应将返回 `status=completed`，并附带 `reuse_info` 与缓存的单节点结果（字段保持与执行成功一致，不修改原始输出）。
 - 若缓存阶段状态为 `pending`/`running`，响应返回 `status=pending` 且 `reuse_info.state=pending`，不会重复调度或立即回调；需等待已有执行完成后查看 `/v1/tasks/{task_id}/status` 或接收后续回调。
-- 缓存缺失或 `FAILED`/`output` 为空时按正常流程调度，`/v1/tasks/{task_id}/status` 始终返回该 task_id 累积的全部 `stages`。
+- 缓存缺失或 `FAILED`/`output` 为空时按正常流程调度，`/v1/tasks/{task_id}/status` 返回单节点结果。
 
 命中成功复用的同步响应示例：
 
@@ -54,39 +73,30 @@
     "source": "redis",
     "cached_at": "2025-12-17T12:00:03Z"
   },
-  "result": { ...完整 WorkflowContext（含 stages[task_name]）... }
+  "result": { ...单节点结果结构... }
 }
 ```
 
 ### 查询状态：GET /v1/tasks/{task_id}/status
 
-返回最新任务状态（`WorkflowContext` 序列化）并附带运行态字段（`status`/`updated_at`/`minio_files`/`callback_status` 等）。在单任务模式下，`workflow_id` 等同于 `task_id`。示例基于 `ffmpeg.extract_audio` 成功：
+返回最新任务状态（`TaskStatusResponse`），其中 `result` 为单节点结果结构，并附带运行态字段（`status`/`updated_at`/`minio_files`/`callback_status` 等）。示例基于 `ffmpeg.extract_audio` 成功：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
+  "task_id": "task-demo-001",
   "status": "completed",
-  "create_at": "2025-12-17T12:00:00Z",
-  "input_params": {
+  "message": "任务状态获取成功",
+  "result": {
     "task_name": "ffmpeg.extract_audio",
-    "input_data": {
-      "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4"
+    "status": "SUCCESS",
+    "input_params": {
+      "video_path": "/share/workflows/task-demo-001/demo.mp4"
     },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
-  },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "ffmpeg.extract_audio": {
-      "status": "SUCCESS",
-      "input_params": {
-        "video_path": "/share/workflows/task-demo-001/demo.mp4"
-      },
-      "output": {
-        "audio_path": "/share/workflows/task-demo-001/audio/demo.wav"
-      },
-      "error": null,
-      "duration": 2.6
-    }
+    "output": {
+      "audio_path": "/share/workflows/task-demo-001/audio/demo.wav"
+    },
+    "error": null,
+    "duration": 2.6
   },
   "minio_files": [
     {
@@ -97,14 +107,14 @@
     }
   ],
   "callback_status": "sent",
-  "error": null,
+  "create_at": "2025-12-17T12:00:00Z",
   "updated_at": "2025-12-17T12:00:03Z"
 }
 ```
 
 ### 获取完整结果：GET /v1/tasks/{task_id}/result
 
-与 `/status` 返回一致。
+与 `/status` 返回一致（`TaskStatusResponse`）。
 
 ### 回调载荷
 
@@ -114,7 +124,7 @@
 {
   "task_id": "task-demo-001",
   "status": "completed",
-  "result": { ...完整 WorkflowContext 同上... },
+  "result": { ...单节点结果结构... },
   "minio_files": [
     {
       "name": "demo.wav",
@@ -129,7 +139,7 @@
 
 ## 节点清单与示例（/v1/tasks）
 
-下列示例均为“完整 WorkflowContext”形态：顶层字段 + 对应节点阶段输出。仅替换 `task_name` 与 `input_data` 即可调用。
+下列示例均为“单节点结果”形态，仅包含当前节点的数据（不再返回 `workflow_id` / `stages` 等工作流字段）。仅替换 `task_name` 与 `input_data` 即可调用。复用判定中的 `stages.<task_name>` 仅用于说明内部缓存条件，对外返回不包含 `stages` 字段。
 
 ### FFmpeg 系列
 
@@ -150,41 +160,27 @@
 }
 ```
 
-WorkflowContext 示例（含下载诊断，上传开启时追加 minio 字段）：
+单节点结果示例（含下载诊断，上传开启时追加 minio 字段）：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "ffmpeg.extract_keyframes",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "ffmpeg.extract_keyframes",
-    "input_data": {
-      "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "video_path": "/share/workflows/task-demo-001/demo.mp4"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "ffmpeg.extract_keyframes": {
-      "status": "SUCCESS",
-      "input_params": {
-        "video_path": "/share/workflows/task-demo-001/demo.mp4"
-      },
-      "output": {
-        "keyframe_dir": "/share/workflows/task-demo-001/keyframes",
-        "keyframe_minio_url": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
-        "keyframe_compressed_archive_url": "http://localhost:9000/yivideo/task-demo-001/keyframes.zip",
-        "keyframe_files_count": 100,
-        "keyframe_compression_info": {
-          "files_count": 100,
-          "compression_ratio": 0.42
-        }
-      },
-      "error": null,
-      "duration": 3.2
+  "output": {
+    "keyframe_dir": "/share/workflows/task-demo-001/keyframes",
+    "keyframe_minio_url": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
+    "keyframe_compressed_archive_url": "http://localhost:9000/yivideo/task-demo-001/keyframes.zip",
+    "keyframe_files_count": 100,
+    "keyframe_compression_info": {
+      "files_count": 100,
+      "compression_ratio": 0.42
     }
   },
-  "error": null
+  "error": null,
+  "duration": 3.2
 }
 ```
 
@@ -205,19 +201,19 @@ WorkflowContext 示例（含下载诊断，上传开启时追加 minio 字段）
 复用判定：`stages.ffmpeg.extract_audio.status=SUCCESS` 且 `output.audio_path` 非空即命中复用；`pending/running` 返回等待态并不重复调度；未命中按正常流程执行。
 功能概述（ffmpeg.extract_audio）：提取视频音频轨生成标准音频文件，支持 HTTP/MinIO/本地源，产出音频路径供后续转写或分离。
 请求体：同通用示例，仅 `task_name` 变更。
-WorkflowContext 示例（本地+可选远程）：
+单节点结果示例（本地+可选远程）：
 
 ```json
 {
-  "stages": {
-    "ffmpeg.extract_audio": {
-      "status": "SUCCESS",
-      "output": {
-        "audio_path": "/share/workflows/task-demo-001/audio/demo.wav",
-        "audio_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.wav"
-      }
-    }
-  }
+  "task_name": "ffmpeg.extract_audio",
+  "status": "SUCCESS",
+  "input_params": {},
+  "output": {
+    "audio_path": "/share/workflows/task-demo-001/audio/demo.wav",
+    "audio_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.wav"
+  },
+  "error": null,
+  "duration": 0
 }
 ```
 
@@ -247,46 +243,37 @@ WorkflowContext 示例（本地+可选远程）：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "ffmpeg.crop_subtitle_images",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "ffmpeg.crop_subtitle_images",
-    "input_data": {
-      "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4",
-      "subtitle_area": [0, 918, 1920, 1080],
-      "upload_cropped_images_to_minio": true,
-      "compress_directory_before_upload": true
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "video_path": "/share/workflows/task-demo-001/demo.mp4",
+    "subtitle_area": [
+      0,
+      918,
+      1920,
+      1080
+    ]
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "ffmpeg.crop_subtitle_images": {
-      "status": "SUCCESS",
-      "input_params": {
-        "video_path": "/share/workflows/task-demo-001/demo.mp4",
-        "subtitle_area": [0, 918, 1920, 1080]
-      },
-      "output": {
-        "cropped_images_path": "/share/workflows/task-demo-001/cropped_images",
-        "cropped_images_minio_url": "http://localhost:9000/yivideo/task-demo-001/cropped_images",
-        "cropped_images_files_count": 150,
-        "cropped_images_uploaded_files": ["frame_0001.jpg", "frame_0002.jpg"],
-        "compressed_archive_url": "http://localhost:9000/yivideo/task-demo-001/cropped_images.zip",
-        "compression_info": {
-          "files_count": 150,
-          "compression_ratio": 0.55
-        }
-      },
-      "error": null,
-      "duration": 8.5
+  "output": {
+    "cropped_images_path": "/share/workflows/task-demo-001/cropped_images",
+    "cropped_images_minio_url": "http://localhost:9000/yivideo/task-demo-001/cropped_images",
+    "cropped_images_files_count": 150,
+    "cropped_images_uploaded_files": [
+      "frame_0001.jpg",
+      "frame_0002.jpg"
+    ],
+    "compressed_archive_url": "http://localhost:9000/yivideo/task-demo-001/cropped_images.zip",
+    "compression_info": {
+      "files_count": 150,
+      "compression_ratio": 0.55
     }
   },
-  "error": null
+  "error": null,
+  "duration": 8.5
 }
 ```
 
@@ -323,60 +310,43 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
-  "input_params": {
-    "task_name": "ffmpeg.split_audio_segments",
-    "input_data": {
-      "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
-      "subtitle_path": "http://localhost:9000/yivideo/task-demo-001/subtitle.srt",
-      "group_by_speaker": true,
-      "output_format": "wav"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
-  },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-      "stages": {
-        "ffmpeg.split_audio_segments": {
-          "status": "SUCCESS",
-          "input_params": {},
-          "output": {
-            "audio_segments_dir": "/share/workflows/task-demo-001/audio_segments",
-            "audio_segments_dir_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio_segments/",
-            "audio_source": "/share/workflows/task-demo-001/demo.wav",
-            "audio_source_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
-            "subtitle_source": "/share/workflows/task-demo-001/subtitle.srt",
-            "total_segments": 148,
-            "successful_segments": 148,
-            "failed_segments": 0,
-            "total_duration": 1200.5,
-            "processing_time": 45.2,
-            "audio_format": "wav",
-            "sample_rate": 16000,
-            "channels": 1,
-            "split_info_file": "/share/workflows/task-demo-001/audio_segments/split_info.json",
-            "split_info_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio_segments/split_info.json",
-            "segments_count": 148,
-            "speaker_summary": {
-              "SPEAKER_00": {
-                "count": 80,
-                "duration": 650.3
-          },
-          "SPEAKER_01": {
-            "count": 68,
-            "duration": 550.2
-          }
-        }
+  "task_name": "ffmpeg.split_audio_segments",
+  "status": "SUCCESS",
+  "input_params": {},
+  "output": {
+    "audio_segments_dir": "/share/workflows/task-demo-001/audio_segments",
+    "audio_segments_dir_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio_segments/",
+    "audio_source": "/share/workflows/task-demo-001/demo.wav",
+    "audio_source_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+    "subtitle_source": "/share/workflows/task-demo-001/subtitle.srt",
+    "total_segments": 148,
+    "successful_segments": 148,
+    "failed_segments": 0,
+    "total_duration": 1200.5,
+    "processing_time": 45.2,
+    "audio_format": "wav",
+    "sample_rate": 16000,
+    "channels": 1,
+    "split_info_file": "/share/workflows/task-demo-001/audio_segments/split_info.json",
+    "split_info_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio_segments/split_info.json",
+    "segments_count": 148,
+    "speaker_summary": {
+      "SPEAKER_00": {
+        "count": 80,
+        "duration": 650.3
       },
-      "error": null,
-      "duration": 12.3
+      "SPEAKER_01": {
+        "count": 68,
+        "duration": 550.2
+      }
     }
   },
-  "error": null
+  "error": null,
+  "duration": 12.3
 }
 ```
 
@@ -421,50 +391,36 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "faster_whisper.transcribe_audio",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "faster_whisper.transcribe_audio",
-    "input_data": {
-      "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav"
+    "audio_source": "input_data",
+    "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+    "enable_word_timestamps": true
+  },
+  "output": {
+    "segments_file": "/share/workflows/task-demo-001/transcribe_data_abcd1234.json",
+    "segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_abcd1234.json",
+    "audio_duration": 125.5,
+    "language": "zh",
+    "transcribe_duration": 45.2,
+    "model_name": "base",
+    "device": "cuda",
+    "enable_word_timestamps": true,
+    "statistics": {
+      "total_segments": 120,
+      "total_words": 850,
+      "transcribe_duration": 45.2,
+      "average_segment_duration": 1.2
     },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_count": 120
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-      "stages": {
-        "faster_whisper.transcribe_audio": {
-          "status": "SUCCESS",
-          "input_params": {
-            "audio_source": "input_data",
-            "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
-            "enable_word_timestamps": true
-          },
-          "output": {
-            "segments_file": "/share/workflows/task-demo-001/transcribe_data_abcd1234.json",
-            "segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_abcd1234.json",
-            "audio_duration": 125.5,
-            "language": "zh",
-            "transcribe_duration": 45.2,
-            "model_name": "base",
-            "device": "cuda",
-        "enable_word_timestamps": true,
-        "statistics": {
-          "total_segments": 120,
-          "total_words": 850,
-          "transcribe_duration": 45.2,
-          "average_segment_duration": 1.2
-        },
-        "segments_count": 120
-      },
-      "error": null,
-      "duration": 45.2
-    }
-  },
-  "error": null
+  "error": null,
+  "duration": 45.2
 }
 ```
 
@@ -497,51 +453,34 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "audio_separator.separate_vocals",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "audio_separator.separate_vocals",
-    "input_data": {
-      "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
-      "audio_separator_config": {
-        "model_name": "UVR-MDX-NET-Inst_HQ_5.onnx"
-      }
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "audio_source": "input_data",
+    "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+    "model_name": "UVR-MDX-NET-Inst_HQ_5.onnx",
+    "quality_mode": "default"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "audio_separator.separate_vocals": {
-      "status": "SUCCESS",
-      "input_params": {
-        "audio_source": "input_data",
-        "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
-        "model_name": "UVR-MDX-NET-Inst_HQ_5.onnx",
-        "quality_mode": "default"
-      },
-      "output": {
-        "all_audio_files": [
-          "/share/workflows/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
-          "/share/workflows/task-demo-001/audio/audio_separated/demo_(Instrumental)_UVR-MDX-NET-Inst_HQ_5.flac"
-        ],
-        "vocal_audio": "/share/workflows/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
-        "vocal_audio_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
-        "all_audio_minio_urls": [
-          "http://localhost:9000/yivideo/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
-          "http://localhost:9000/yivideo/task-demo-001/audio/audio_separated/demo_(Instrumental)_UVR-MDX-NET-Inst_HQ_5.flac"
-        ],
-        "model_used": "UVR-MDX-NET-Inst_HQ_5.onnx",
-        "quality_mode": "default"
-      },
-      "error": null,
-      "duration": 30.5
-    }
+  "output": {
+    "all_audio_files": [
+      "/share/workflows/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
+      "/share/workflows/task-demo-001/audio/audio_separated/demo_(Instrumental)_UVR-MDX-NET-Inst_HQ_5.flac"
+    ],
+    "vocal_audio": "/share/workflows/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
+    "vocal_audio_minio_url": "http://localhost:9000/yivideo/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
+    "all_audio_minio_urls": [
+      "http://localhost:9000/yivideo/task-demo-001/audio/audio_separated/demo_(Vocals)_UVR-MDX-NET-Inst_HQ_5.flac",
+      "http://localhost:9000/yivideo/task-demo-001/audio/audio_separated/demo_(Instrumental)_UVR-MDX-NET-Inst_HQ_5.flac"
+    ],
+    "model_used": "UVR-MDX-NET-Inst_HQ_5.onnx",
+    "quality_mode": "default"
   },
-  "error": null
+  "error": null,
+  "duration": 30.5
 }
 ```
 
@@ -574,49 +513,44 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "pyannote_audio.diarize_speakers",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "pyannote_audio.diarize_speakers",
-    "input_data": {
-      "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "audio_path": "/share/workflows/task-demo-001/demo.wav"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-        "pyannote_audio.diarize_speakers": {
-          "status": "SUCCESS",
-          "input_params": {
-            "audio_path": "/share/workflows/task-demo-001/demo.wav"
-          },
-          "output": {
-            "diarization_file": "/share/workflows/task-demo-001/diarization/diarization_result.json",
-            "diarization_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
-            "detected_speakers": ["SPEAKER_00", "SPEAKER_01"],
-            "speaker_statistics": {
-              "SPEAKER_00": {"segments": 80, "duration": 650.3},
-              "SPEAKER_01": {"segments": 68, "duration": 550.2}
-            },
-        "total_speakers": 2,
-        "total_segments": 148,
-        "summary": "检测到 2 个说话人，共 148 个说话片段 (使用免费接口: base)",
-        "execution_method": "subprocess",
-        "execution_time": 60.0,
-        "audio_source": "input_data",
-        "api_type": "free",
-        "model_name": "base",
-        "use_paid_api": false
+  "output": {
+    "diarization_file": "/share/workflows/task-demo-001/diarization/diarization_result.json",
+    "diarization_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
+    "detected_speakers": [
+      "SPEAKER_00",
+      "SPEAKER_01"
+    ],
+    "speaker_statistics": {
+      "SPEAKER_00": {
+        "segments": 80,
+        "duration": 650.3
       },
-      "error": null,
-      "duration": 60.0
-    }
+      "SPEAKER_01": {
+        "segments": 68,
+        "duration": 550.2
+      }
+    },
+    "total_speakers": 2,
+    "total_segments": 148,
+    "summary": "检测到 2 个说话人，共 148 个说话片段 (使用免费接口: base)",
+    "execution_method": "subprocess",
+    "execution_time": 60.0,
+    "audio_source": "input_data",
+    "api_type": "free",
+    "model_name": "base",
+    "use_paid_api": false
   },
-  "error": null
+  "error": null,
+  "duration": 60.0
 }
 ```
 
@@ -645,7 +579,7 @@ WorkflowContext 示例：
 }
 ```
 
-响应示例（直接返回 success/data 结构，而非完整 WorkflowContext）：
+响应示例（直接返回 success/data 结构，非单节点结果）：
 
 ```json
 {
@@ -683,7 +617,7 @@ WorkflowContext 示例：
 }
 ```
 
-响应示例（直接返回 success/data 结构，而非完整 WorkflowContext）：
+响应示例（直接返回 success/data 结构，非单节点结果）：
 
 ```json
 {
@@ -728,44 +662,34 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
-  "input_params": {
-    "task_name": "paddleocr.detect_subtitle_area",
-    "input_data": {
-      "keyframe_dir": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
-      "download_from_minio": true
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
-  },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "paddleocr.detect_subtitle_area": {
-      "status": "SUCCESS",
-      "input_params": {},
-      "output": {
-        "subtitle_area": [0, 918, 1920, 1080],
-        "confidence": 0.93,
-        "keyframe_dir": "/share/workflows/task-demo-001/keyframes",
-        "keyframe_dir_minio_url": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
-        "downloaded_keyframes_dir": "/share/workflows/task-demo-001/downloaded_keyframes",
-        "input_source": "url_download",
-        "url_download_result": {
-          "total_files": 100,
-          "downloaded_files_count": 100,
-          "downloaded_local_dir": "/share/workflows/task-demo-001/downloaded_keyframes",
-          "original_url": "/share/workflows/task-demo-001/downloaded_keyframes"
-        }
-      },
-      "error": null,
-      "duration": 6.5
+  "task_name": "paddleocr.detect_subtitle_area",
+  "status": "SUCCESS",
+  "input_params": {},
+  "output": {
+    "subtitle_area": [
+      0,
+      918,
+      1920,
+      1080
+    ],
+    "confidence": 0.93,
+    "keyframe_dir": "/share/workflows/task-demo-001/keyframes",
+    "keyframe_dir_minio_url": "http://localhost:9000/yivideo/task-demo-001/keyframes/",
+    "downloaded_keyframes_dir": "/share/workflows/task-demo-001/downloaded_keyframes",
+    "input_source": "url_download",
+    "url_download_result": {
+      "total_files": 100,
+      "downloaded_files_count": 100,
+      "downloaded_local_dir": "/share/workflows/task-demo-001/downloaded_keyframes",
+      "original_url": "/share/workflows/task-demo-001/downloaded_keyframes"
     }
   },
-  "error": null
+  "error": null,
+  "duration": 6.5
 }
 ```
 
@@ -797,46 +721,34 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "paddleocr.create_stitched_images",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "paddleocr.create_stitched_images",
-    "input_data": {
-      "cropped_images_path": "http://localhost:9000/yivideo/task-demo-001/cropped_images",
-      "subtitle_area": [0, 918, 1920, 1080],
-      "upload_stitched_images_to_minio": true,
-      "auto_decompress": true
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "cropped_images_path": "/share/workflows/task-demo-001/cropped_images",
+    "subtitle_area": [
+      0,
+      918,
+      1920,
+      1080
+    ]
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "paddleocr.create_stitched_images": {
-      "status": "SUCCESS",
-      "input_params": {
-        "cropped_images_path": "/share/workflows/task-demo-001/cropped_images",
-        "subtitle_area": [0, 918, 1920, 1080]
-      },
-      "output": {
-        "multi_frames_path": "/share/workflows/task-demo-001/multi_frames",
-        "manifest_path": "/share/workflows/task-demo-001/multi_frames.json",
-        "multi_frames_minio_url": "http://localhost:9000/yivideo/task-demo-001/stitched_images.zip",
-        "manifest_minio_url": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-        "stitched_images_count": 150,
-        "compression_info": {
-          "files_count": 150,
-          "compression_ratio": 0.35
-        }
-      },
-      "error": null,
-      "duration": 12.8
+  "output": {
+    "multi_frames_path": "/share/workflows/task-demo-001/multi_frames",
+    "manifest_path": "/share/workflows/task-demo-001/multi_frames.json",
+    "multi_frames_minio_url": "http://localhost:9000/yivideo/task-demo-001/stitched_images.zip",
+    "manifest_minio_url": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+    "stitched_images_count": 150,
+    "compression_info": {
+      "files_count": 150,
+      "compression_ratio": 0.35
     }
   },
-  "error": null
+  "error": null,
+  "duration": 12.8
 }
 ```
 
@@ -871,38 +783,22 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "paddleocr.perform_ocr",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "paddleocr.perform_ocr",
-    "input_data": {
-      "manifest_path": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-      "multi_frames_path": "http://localhost:9000/yivideo/task-demo-001/multi_frames",
-      "upload_ocr_results_to_minio": true
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "manifest_path": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+    "multi_frames_path": "http://localhost:9000/yivideo/task-demo-001/multi_frames"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "paddleocr.perform_ocr": {
-      "status": "SUCCESS",
-      "input_params": {
-        "manifest_path": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-        "multi_frames_path": "http://localhost:9000/yivideo/task-demo-001/multi_frames"
-      },
-      "output": {
-        "ocr_results_path": "/share/workflows/task-demo-001/ocr_results.json",
-        "ocr_results_minio_url": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json"
-      },
-      "error": null,
-      "duration": 20.0
-    }
+  "output": {
+    "ocr_results_path": "/share/workflows/task-demo-001/ocr_results.json",
+    "ocr_results_minio_url": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json"
   },
-  "error": null
+  "error": null,
+  "duration": 20.0
 }
 ```
 
@@ -934,41 +830,25 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "paddleocr.postprocess_and_finalize",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "paddleocr.postprocess_and_finalize",
-    "input_data": {
-      "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
-      "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-      "video_path": "http://localhost:9000/yivideo/task-demo-001/demo.mp4"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
+    "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
+    "video_path": "/share/workflows/task-demo-001/demo.mp4"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-      "stages": {
-        "paddleocr.postprocess_and_finalize": {
-          "status": "SUCCESS",
-          "input_params": {
-            "ocr_results_file": "http://localhost:9000/yivideo/task-demo-001/ocr_results/ocr_results.json",
-            "manifest_file": "http://localhost:9000/yivideo/task-demo-001/manifest/multi_frames.json",
-            "video_path": "/share/workflows/task-demo-001/demo.mp4"
-          },
-          "output": {
-            "srt_file": "/share/workflows/task-demo-001/demo.srt",
-            "srt_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.srt",
-            "json_file": "/share/workflows/task-demo-001/demo.json",
-            "json_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.json"
-          },
-          "error": null,
-          "duration": 10.0
-        }
-      },
-  "error": null
+  "output": {
+    "srt_file": "/share/workflows/task-demo-001/demo.srt",
+    "srt_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.srt",
+    "json_file": "/share/workflows/task-demo-001/demo.json",
+    "json_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/demo.json"
+  },
+  "error": null,
+  "duration": 10.0
 }
 ```
 
@@ -1001,7 +881,7 @@ WorkflowContext 示例：
 }
 ```
 
-响应示例（返回普通任务字典，不写入 WorkflowContext）：
+响应示例（返回普通任务字典，不写入单节点结果）：
 
 ```json
 {
@@ -1010,7 +890,6 @@ WorkflowContext 示例：
   "output_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/tts.wav",
   "processing_time": 3.2,
   "task_id": "task-demo-001",
-  "workflow_id": "task-demo-001",
   "stage_name": "indextts.generate_speech",
   "input_params": {
     "text_length": 12,
@@ -1053,42 +932,28 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.generate_subtitle_files",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.generate_subtitle_files",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
+    "data_source": "input_data.segments_file"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.generate_subtitle_files": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
-        "data_source": "input_data.segments_file"
-      },
-      "output": {
-        "subtitle_path": "/share/workflows/task-demo-001/subtitles/subtitle.srt",
-        "json_path": "/share/workflows/task-demo-001/subtitles/subtitle_subtitle.json",
-        "subtitle_files": {
-          "basic": "/share/workflows/task-demo-001/subtitles/subtitle.srt",
-          "with_speakers": "/share/workflows/task-demo-001/subtitles/subtitle_with_speakers.srt",
-          "word_timestamps": "/share/workflows/task-demo-001/subtitles/subtitle_word_timestamps.json",
-          "json": "/share/workflows/task-demo-001/subtitles/subtitle_subtitle.json"
-        }
-      },
-      "error": null,
-      "duration": 5.0
+  "output": {
+    "subtitle_path": "/share/workflows/task-demo-001/subtitles/subtitle.srt",
+    "json_path": "/share/workflows/task-demo-001/subtitles/subtitle_subtitle.json",
+    "subtitle_files": {
+      "basic": "/share/workflows/task-demo-001/subtitles/subtitle.srt",
+      "with_speakers": "/share/workflows/task-demo-001/subtitles/subtitle_with_speakers.srt",
+      "word_timestamps": "/share/workflows/task-demo-001/subtitles/subtitle_word_timestamps.json",
+      "json": "/share/workflows/task-demo-001/subtitles/subtitle_subtitle.json"
     }
   },
-  "error": null
+  "error": null,
+  "duration": 5.0
 }
 ```
 
@@ -1118,35 +983,21 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.correct_subtitles",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.correct_subtitles",
-    "input_data": {
-      "subtitle_path": "http://localhost:9000/yivideo/task-demo-001/subtitle.srt"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "subtitle_path": "/share/workflows/task-demo-001/subtitle.srt"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-      "stages": {
-        "wservice.correct_subtitles": {
-          "status": "SUCCESS",
-          "input_params": {
-            "subtitle_path": "/share/workflows/task-demo-001/subtitle.srt"
-          },
-          "output": {
-            "corrected_subtitle_path": "/share/workflows/task-demo-001/subtitle_corrected.srt",
-            "corrected_subtitle_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/subtitle_corrected.srt"
-          },
-          "error": null,
-      "duration": 4.0
-    }
+  "output": {
+    "corrected_subtitle_path": "/share/workflows/task-demo-001/subtitle_corrected.srt",
+    "corrected_subtitle_path_minio_url": "http://localhost:9000/yivideo/task-demo-001/subtitle_corrected.srt"
   },
-  "error": null
+  "error": null,
+  "duration": 4.0
 }
 ```
 
@@ -1176,40 +1027,23 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.ai_optimize_text",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.ai_optimize_text",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-      "provider": "deepseek",
-      "timeout": 300,
-      "max_retries": 3
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
+    "provider": "deepseek",
+    "timeout": 300,
+    "max_retries": 3
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.ai_optimize_text": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
-        "provider": "deepseek",
-        "timeout": 300,
-        "max_retries": 3
-      },
-      "output": {
-        "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt"
-      },
-      "error": null,
-      "duration": 4.5
-    }
+  "output": {
+    "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt"
   },
-  "error": null
+  "error": null,
+  "duration": 4.5
 }
 ```
 
@@ -1248,51 +1082,29 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.translate_subtitles",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.translate_subtitles",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json",
-      "target_language": "zh",
-      "source_language": "en",
-      "provider": "deepseek",
-      "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
-      "cps_limit": 18,
-      "cpl_limit": 42,
-      "max_lines": 2,
-      "max_retries": 3
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "/share/workflows/task-demo-001/optimized_segments.json",
+    "target_language": "zh",
+    "source_language": "en",
+    "provider": "deepseek",
+    "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
+    "cps_limit": 18,
+    "cpl_limit": 42,
+    "max_lines": 1,
+    "max_retries": 3
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.translate_subtitles": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "/share/workflows/task-demo-001/optimized_segments.json",
-        "target_language": "zh",
-        "source_language": "en",
-        "provider": "deepseek",
-        "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
-        "cps_limit": 18,
-        "cpl_limit": 42,
-        "max_lines": 1,
-        "max_retries": 3
-      },
-      "output": {
-        "translated_segments_file": "/share/workflows/task-demo-001/translated_segments.json",
-        "translated_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/translated_segments.json"
-      },
-      "error": null,
-      "duration": 5.0
-    }
+  "output": {
+    "translated_segments_file": "/share/workflows/task-demo-001/translated_segments.json",
+    "translated_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/translated_segments.json"
   },
-  "error": null
+  "error": null,
+  "duration": 5.0
 }
 ```
 
@@ -1329,40 +1141,24 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.rebuild_subtitle_with_words",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.rebuild_subtitle_with_words",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-      "optimized_text_file": "http://localhost:9000/yivideo/task-demo-001/optimized_text.txt",
-      "report": true
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
+    "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.rebuild_subtitle_with_words": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "/share/workflows/task-demo-001/transcribe_data.json",
-        "optimized_text_file": "/share/workflows/task-demo-001/optimized_text.txt"
-      },
-      "output": {
-        "optimized_segments_file": "/share/workflows/task-demo-001/optimized_segments.json",
-        "optimized_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json",
-        "report_file": "/share/workflows/task-demo-001/rebuild_report.txt",
-        "report_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/rebuild_report.txt"
-      },
-      "error": null,
-      "duration": 5.0
-    }
+  "output": {
+    "optimized_segments_file": "/share/workflows/task-demo-001/optimized_segments.json",
+    "optimized_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/optimized_segments.json",
+    "report_file": "/share/workflows/task-demo-001/rebuild_report.txt",
+    "report_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/rebuild_report.txt"
   },
-  "error": null
+  "error": null,
+  "duration": 5.0
 }
 ```
 
@@ -1393,44 +1189,34 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.merge_speaker_segments",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.merge_speaker_segments",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+    "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.merge_speaker_segments": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-        "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
-      },
-      "output": {
-        "merged_segments": [
-          {"start": 0.0, "end": 5.2, "speaker": "SPEAKER_00", "text": "示例文本"}
-        ],
-        "input_summary": {
-          "transcript_segments_count": 148,
-          "speaker_segments_count": 148,
-          "merged_segments_count": 148,
-          "data_source": "faster_whisper.transcribe_audio"
-        }
-      },
-      "error": null,
-      "duration": 5.0
+  "output": {
+    "merged_segments": [
+      {
+        "start": 0.0,
+        "end": 5.2,
+        "speaker": "SPEAKER_00",
+        "text": "示例文本"
+      }
+    ],
+    "input_summary": {
+      "transcript_segments_count": 148,
+      "speaker_segments_count": 148,
+      "merged_segments_count": 148,
+      "data_source": "faster_whisper.transcribe_audio"
     }
   },
-  "error": null
+  "error": null,
+  "duration": 5.0
 }
 ```
 
@@ -1461,37 +1247,22 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.merge_with_word_timestamps",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.merge_with_word_timestamps",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+    "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.merge_with_word_timestamps": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-        "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json"
-      },
-      "output": {
-        "merged_segments_file": "/share/workflows/task-demo-001/transcribe_data_word_timestamps_merged.json",
-        "merged_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_word_timestamps_merged.json"
-      },
-      "error": null,
-      "duration": 5.5
-    }
+  "output": {
+    "merged_segments_file": "/share/workflows/task-demo-001/transcribe_data_word_timestamps_merged.json",
+    "merged_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_word_timestamps_merged.json"
   },
-  "error": null
+  "error": null,
+  "duration": 5.5
 }
 ```
 
@@ -1523,42 +1294,26 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.merge_speaker_based_subtitles",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.merge_speaker_based_subtitles",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-      "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
-      "overlap_threshold": 0.5
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
+    "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
+    "overlap_threshold": 0.5
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.merge_speaker_based_subtitles": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json",
-        "diarization_file": "http://localhost:9000/yivideo/task-demo-001/diarization/diarization_result.json",
-        "overlap_threshold": 0.5
-      },
-      "output": {
-        "merged_segments_file": "/share/workflows/task-demo-001/merged_segments_speaker_based.json",
-        "merged_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/merged_segments_speaker_based.json",
-        "total_segments": 58,
-        "matched_segments": 56,
-        "empty_segments": 2
-      },
-      "error": null,
-      "duration": 3.2
-    }
+  "output": {
+    "merged_segments_file": "/share/workflows/task-demo-001/merged_segments_speaker_based.json",
+    "merged_segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/merged_segments_speaker_based.json",
+    "total_segments": 58,
+    "matched_segments": 56,
+    "empty_segments": 2
   },
-  "error": null
+  "error": null,
+  "duration": 3.2
 }
 ```
 
@@ -1589,43 +1344,33 @@ WorkflowContext 示例：
 }
 ```
 
-WorkflowContext 示例：
+单节点结果示例：
 
 ```json
 {
-  "workflow_id": "task-demo-001",
-  "create_at": "2025-12-17T12:00:00Z",
+  "task_name": "wservice.prepare_tts_segments",
+  "status": "SUCCESS",
   "input_params": {
-    "task_name": "wservice.prepare_tts_segments",
-    "input_data": {
-      "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json"
-    },
-    "callback_url": "http://localhost:5678/webhook/demo-t1"
+    "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json"
   },
-  "shared_storage_path": "/share/workflows/task-demo-001",
-  "stages": {
-    "wservice.prepare_tts_segments": {
-      "status": "SUCCESS",
-      "input_params": {
-        "segments_file": "http://localhost:9000/yivideo/task-demo-001/transcribe_data.json"
-      },
-      "output": {
-        "prepared_segments": [
-          {"start": 0.0, "end": 5.2, "text": "示例文本"}
-        ],
-        "source_stage": "wservice.generate_subtitle_files",
-        "total_segments": 100,
-        "input_summary": {
-          "original_segments_count": 120,
-          "prepared_segments_count": 100,
-          "data_source": "wservice.generate_subtitle_files"
-        }
-      },
-      "error": null,
-      "duration": 4.0
+  "output": {
+    "prepared_segments": [
+      {
+        "start": 0.0,
+        "end": 5.2,
+        "text": "示例文本"
+      }
+    ],
+    "source_stage": "wservice.generate_subtitle_files",
+    "total_segments": 100,
+    "input_summary": {
+      "original_segments_count": 120,
+      "prepared_segments_count": 100,
+      "data_source": "wservice.generate_subtitle_files"
     }
   },
-  "error": null
+  "error": null,
+  "duration": 4.0
 }
 ```
 
