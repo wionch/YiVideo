@@ -265,7 +265,7 @@ class SingleTaskExecutor:
         
         # 验证服务名和方法名
         valid_services = {
-            'ffmpeg', 'faster_whisper', 'audio_separator', 'pyannote_audio',
+            'ffmpeg', 'faster_whisper', 'qwen3_asr', 'audio_separator', 'pyannote_audio',
             'paddleocr', 'indextts', 'wservice'
         }
         
