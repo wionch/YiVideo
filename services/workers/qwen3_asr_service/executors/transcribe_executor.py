@@ -6,6 +6,9 @@ Qwen3-ASR 转录执行器。
 
 from __future__ import annotations
 
+import sys
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from services.common.base_node_executor import BaseNodeExecutor
 
@@ -42,6 +45,74 @@ def map_words(time_stamps: List[Dict[str, Any]] | None, enable: bool) -> Tuple[l
             "probability": None,
         })
     return words, len(words)
+
+
+def build_infer_command(
+    audio_path: str,
+    output_file: str,
+    model_name: str,
+    backend: str,
+    language: str | None,
+    enable_word_timestamps: bool,
+    forced_aligner_model: str | None,
+) -> list[str]:
+    """构建 subprocess 推理命令。"""
+    infer_script = Path(__file__).resolve().parents[1] / "app" / "qwen3_asr_infer.py"
+    cmd = [
+        sys.executable,
+        str(infer_script),
+        "--audio_path", audio_path,
+        "--output_file", output_file,
+        "--model_name", model_name,
+        "--backend", backend,
+    ]
+    if language:
+        cmd += ["--language", language]
+    if enable_word_timestamps:
+        cmd += ["--enable_word_timestamps"]
+    if forced_aligner_model:
+        cmd += ["--forced_aligner_model", forced_aligner_model]
+    return cmd
+
+
+def build_transcribe_json(
+    stage_name: str,
+    workflow_id: str,
+    audio_file_name: str,
+    segments: List[Dict[str, Any]],
+    audio_duration: float,
+    language: str,
+    model_name: str,
+    device: str,
+    enable_word_timestamps: bool,
+    transcribe_duration: float,
+) -> Dict[str, Any]:
+    total_segments = len(segments)
+    total_words = sum(len(seg.get("words", [])) for seg in segments)
+    avg_duration = 0
+    if total_segments > 0:
+        avg_duration = sum(seg.get("end", 0) - seg.get("start", 0) for seg in segments) / total_segments
+    return {
+        "metadata": {
+            "task_name": stage_name,
+            "workflow_id": workflow_id,
+            "audio_file": audio_file_name,
+            "total_duration": audio_duration,
+            "language": language,
+            "word_timestamps_enabled": enable_word_timestamps,
+            "model_name": model_name,
+            "device": device,
+            "transcribe_method": "qwen3-asr-subprocess",
+            "created_at": time.time(),
+        },
+        "segments": segments,
+        "statistics": {
+            "total_segments": total_segments,
+            "total_words": total_words,
+            "transcribe_duration": transcribe_duration,
+            "average_segment_duration": avg_duration,
+        },
+    }
 
 
 class Qwen3ASRTranscribeExecutor(BaseNodeExecutor):
