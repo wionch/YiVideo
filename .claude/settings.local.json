@@ -162,7 +162,9 @@
       "Bash(YIVIDEO_ROOT=/opt/wionch/docker/yivideo/.worktrees/subtitle-semantic-protection docker-compose:*)",
       "Bash(git worktree list:*)",
       "Bash(PYTHONPATH=/opt/wionch/docker/yivideo/.worktrees/subtitle-semantic-protection python:*)",
-      "mcp__filesystem__create_directory"
+      "mcp__filesystem__create_directory",
+      "Bash(black:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "deny": [
       "Bash(docker build:*)"

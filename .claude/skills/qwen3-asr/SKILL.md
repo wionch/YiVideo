@@ -1,0 +1,239 @@
+---
+name: qwen3-asr-github-0-qwenlm-qwen3-asr
+description: Use when working with &nbsp&nbsp🤗 hugging face&nbsp&nbsp | &nbsp&nbsp🤖 modelscope&nbsp&nbsp | &nbsp&nbsp📑 blog&nbsp&nbsp | &nbsp&nbsp📑 paper&nbsp&nbsp
+---
+
+# Qwen3-ASR
+
+Use when working with &nbsp&nbsp🤗 hugging face&nbsp&nbsp | &nbsp&nbsp🤖 modelscope&nbsp&nbsp | &nbsp&nbsp📑 blog&nbsp&nbsp | &nbsp&nbsp📑 paper&nbsp&nbsp
+
+## Description
+
+Qwen3-ASR is an open-source series of ASR models developed by the Qwen team at Alibaba Cloud, supporting stable multilingual speech/music/song recognition, language detection and timestamp prediction.
+
+**Repository:** [QwenLM/Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)
+**Language:** Python
+**Stars:** 568
+**License:** Apache License 2.0
+
+## When to Use This Skill
+
+Use this skill when you need to:
+- Understand how to use Qwen3-ASR
+- Look up API documentation and implementation details
+- Find real-world usage examples from the codebase
+- Review design patterns and architecture
+- Check for known issues or recent changes
+- Explore release history and changelogs
+
+## ⚡ Quick Reference
+
+### Repository Info
+- **Homepage:** None
+- **Topics:** 
+- **Open Issues:** 5
+- **Last Updated:** 2026-01-30
+
+### Languages
+- **Python:** 100.0%
+
+### Design Patterns Detected
+
+*From C3.1 codebase analysis (confidence > 0.7)*
+
+- **Strategy**: 14 instances
+- **Factory**: 7 instances
+- **Command**: 1 instances
+- **Builder**: 1 instances
+
+*Total: 20 high-confidence patterns*
+
+## 🔧 API Reference
+
+*Extracted from codebase analysis (C2.5)*
+
+### example_qwen3_asr_vllm
+
+# API Reference: example_qwen3_asr_vllm.py
+
+**Language**: Python
+
+**Source**: `examples/example_qwen3_asr_vllm.py`
+
+---
+
+## Functions
+
+### _download_audio_bytes(url: str, timeout: int = 30) → bytes
+
+**Parameters**:
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| url | str | - | - |
+| timeout | int | 30 | - |
+
+**Returns**: `bytes`
+
+
+
+### _read_wav_from_bytes(audio_bytes: bytes) → Tuple[np.ndarray, int]
+
+**Parameters**:
+
+| Name | Type | Default | Description |
+|-...
+
+### example_qwen3_asr_transformers
+
+# API Reference: example_qwen3_asr_transformers.py
+
+**Language**: Python
+
+**Source**: `examples/example_qwen3_asr_transformers.py`
+
+---
+
+## Functions
+
+### _download_audio_bytes(url: str, timeout: int = 30) → bytes
+
+**Parameters**:
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| url | str | - | - |
+| timeout | int | 30 | - |
+
+**Returns**: `bytes`
+
+
+
+### _read_wav_from_bytes(audio_bytes: bytes) → Tuple[np.ndarray, int]
+
+**Parameters**:
+
+| Name | Type | Default | ...
+
+### __main__
+
+# API Reference: __main__.py
+
+**Language**: Python
+
+**Source**: `qwen_asr/__main__.py`
+
+---
+
+## Functions
+
+### main()
+
+**Returns**: (none)
+
+
+
+
+### qwen3_forced_aligner
+
+# API Reference: qwen3_forced_aligner.py
+
+**Language**: Python
+
+**Source**: `qwen_asr/inference/qwen3_forced_aligner.py`
+
+---
+
+## Classes
+
+### Qwen3ForceAlignProcessor
+
+**Inherits from**: (none)
+
+#### Methods
+
+##### __init__(self)
+
+**Parameters**:
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| self | None | - | - |
+
+
+##### is_kept_char(self, ch: str) → bool
+
+**Parameters**:
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| self...
+
+### utils
+
+# API Reference: utils.py
+
+**Language**: Python
+
+**Source**: `qwen_asr/inference/utils.py`
+
+---
+
+## Classes
+
+### AudioChunk
+
+One chunk cut from an original audio.
+
+Attributes:
+    orig_index: Index of the original sample in the input batch.
+    chunk_index: Index of this chunk within the original sample.
+    wav: Mono float32 waveform.
+    sr: Sampling rate.
+    offset_sec: Start offset of this chunk in the original audio, in seconds.
+
+**Inherits from**: (none)
+
+
+
+## Functions
+
+### normalize_lan...
+
+*See `references/codebase_analysis/api_reference/` for complete API docs*
+
+## ⚠️ Known Issues
+
+*Recent issues from GitHub*
+
+- **#20**: VRAM control anomaly
+- **#19**: vLLM backend: TypeError: MMEncoderAttention.__init__() got unexpected keyword argument 'multimodal_config'
+- **#16**: Audio clips must be in a single language; mixing languages (e.g., Chinese and English) is not allowed.
+- **#15**: vllm + FlashAttention2 cannot run
+- **#12**: 群满了
+
+*See `references/issues.md` for complete list*
+
+### Recent Releases
+No releases available
+
+## 📖 Available References
+
+- `references/README.md` - Complete README documentation
+- `references/CHANGELOG.md` - Version history and changes
+- `references/issues.md` - Recent GitHub issues
+- `references/releases.md` - Release notes
+- `references/file_structure.md` - Repository structure
+
+### Codebase Analysis References
+
+- `references/codebase_analysis/patterns/` - Design patterns detected
+- `references/codebase_analysis/configuration/` - Configuration analysis
+
+## 💻 Usage
+
+See README.md for complete usage instructions and examples.
+
+---
+
+**Generated by Skill Seeker** | GitHub Repository Scraper with C3.x Codebase Analysis

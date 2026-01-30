@@ -5,7 +5,7 @@ LLM优化器模块
 """
 
 import re
-import time
+import asyncio
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ from services.common.subtitle.optimizer_v2.models import (
     OptimizationResult,
     OptimizationStatus,
 )
-from services.common.subtitle.ai_providers import AIProviderBase, AIProviderFactory
+from services.common.subtitle.optimizer_v2.llm_providers import LLMProvider, LLMProviderFactory
 from services.common.subtitle.optimizer_v2.config import LLMConfig
 
 logger = logging.getLogger(__name__)
@@ -45,14 +45,14 @@ class LLMOptimizer:
 
     def __init__(
         self,
-        provider: Optional[AIProviderBase] = None,
+        provider: Optional[LLMProvider] = None,
         llm_config: Optional[LLMConfig] = None,
         retry_config: Optional[LLMOptimizerConfig] = None,
     ):
         """初始化LLM优化器
 
         Args:
-            provider: AI提供商实例，如果为None则使用默认配置创建
+            provider: LLM提供商实例，如果为None则使用默认配置创建
             llm_config: LLM配置
             retry_config: 重试配置
         """
@@ -65,7 +65,7 @@ class LLMOptimizer:
                 "max_tokens": self.llm_config.max_tokens,
                 "temperature": self.llm_config.temperature,
             }
-            self.provider = AIProviderFactory.create_provider("gemini", provider_config)
+            self.provider = LLMProviderFactory.create_provider("gemini", provider_config)
         else:
             self.provider = provider
 
@@ -85,20 +85,20 @@ class LLMOptimizer:
 5. 每行文本对应原始ID必须保持一致
 
 输入格式：
-每行格式为 "ID|时间范围|文本内容"
+每行格式为 "[ID]文本内容"
 例如：
-1|0.0-2.5|这是一段字幕文本
-2|2.5-5.0|这是第二段字幕
+[1]这是一段字幕文本
+[2]这是第二段字幕
 
 输出格式要求：
 - 必须保持与输入相同的行数
-- 每行必须包含ID、时间范围和优化后的文本
-- 格式：ID|开始时间-结束时间|优化后的文本
+- 每行必须包含ID和优化后的文本
+- 格式：[ID]优化后的文本
 - 只输出优化后的内容，不要添加解释
 
 示例输出：
-1|0.0-2.5|这是一段优化后的字幕文本
-2|2.5-5.0|这是第二段优化后的字幕"""
+[1]这是一段优化后的字幕文本
+[2]这是第二段优化后的字幕"""
 
     def _build_user_prompt(
         self,
@@ -127,7 +127,7 @@ class LLMOptimizer:
         # 添加需要优化的内容
         lines.append("【需要优化的字幕】")
         for segment in task.segments:
-            line = f"{segment.id}|{segment.start:.1f}-{segment.end:.1f}|{segment.text}"
+            line = f"[{segment.id}]{segment.text}"
             lines.append(line)
 
         # 添加上下文后文
@@ -162,16 +162,19 @@ class LLMOptimizer:
         expected_ids = {seg.id for seg in task.segments}
         found_ids = set()
 
+        # 构建ID到原始段的映射
+        id_to_segment = {seg.id: seg for seg in task.segments}
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
 
-            # 解析格式: ID|开始时间-结束时间|文本内容
-            match = re.match(r"^(\d+)\|([\d.]+)-([\d.]+)\|(.+)$", line)
+            # 解析格式: [ID]文本内容
+            match = re.match(r"^\[(\d+)\](.+)$", line)
             if not match:
                 # 尝试更宽松的格式
-                match = re.match(r"^(\d+)\s*\|\s*([\d.]+)\s*-\s*([\d.]+)\s*\|\s*(.+)$", line)
+                match = re.match(r"^\[(\d+)\]\s*(.+)$", line)
 
             if not match:
                 logger.warning(f"无法解析行: {line}")
@@ -179,9 +182,7 @@ class LLMOptimizer:
 
             try:
                 seg_id = int(match.group(1))
-                start = float(match.group(2))
-                end = float(match.group(3))
-                text = match.group(4).strip()
+                text = match.group(2).strip()
 
                 # 验证ID是否在预期范围内
                 if seg_id not in expected_ids:
@@ -194,12 +195,17 @@ class LLMOptimizer:
 
                 found_ids.add(seg_id)
 
-                # 查找原始文本
-                original_text = None
-                for seg in task.segments:
-                    if seg.id == seg_id:
-                        original_text = seg.text
-                        break
+                # 获取原始段的时间戳和文本
+                original_seg = id_to_segment.get(seg_id)
+                if original_seg:
+                    start = original_seg.start
+                    end = original_seg.end
+                    original_text = original_seg.text
+                else:
+                    # 不应该发生，因为已经验证了ID
+                    start = 0.0
+                    end = 0.0
+                    original_text = None
 
                 optimized_lines.append(
                     OptimizedLine(
@@ -218,7 +224,7 @@ class LLMOptimizer:
         if not optimized_lines:
             raise ValueError("未能从响应中解析出任何有效字幕行")
 
-        # 按ID排序
+        # 按开始时间排序
         optimized_lines.sort(key=lambda x: x.start)
 
         return optimized_lines
@@ -321,13 +327,9 @@ class LLMOptimizer:
                 )
 
                 # 调用LLM
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ]
-
-                response = await self.provider.chat_completion(
-                    messages=messages,
+                response = await self.provider.call(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
                     max_tokens=self.llm_config.max_tokens,
                     temperature=self.llm_config.temperature,
                 )
@@ -366,7 +368,7 @@ class LLMOptimizer:
                 if attempt < self.retry_config.max_retries - 1:
                     delay = self._calculate_backoff_delay(attempt)
                     logger.info(f"等待 {delay:.1f} 秒后重试...")
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
 
         # 所有重试都失败了
         error_message = f"优化失败，已重试{self.retry_config.max_retries}次: {last_error}"

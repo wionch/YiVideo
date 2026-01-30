@@ -1,0 +1,252 @@
+{
+  "total_files": 6,
+  "total_settings": 14,
+  "detected_patterns": {},
+  "config_files": [
+    {
+      "file_path": "/opt/wionch/docker/Skill_Seekers/.skillseeker-cache/qwen3-asr/repos/0_QwenLM_Qwen3-ASR/pyproject.toml",
+      "relative_path": "pyproject.toml",
+      "type": "toml",
+      "purpose": "package_configuration",
+      "patterns": [],
+      "settings_count": 0,
+      "settings": [],
+      "parse_errors": [
+        "toml/tomli not installed"
+      ]
+    },
+    {
+      "file_path": "/opt/wionch/docker/Skill_Seekers/.skillseeker-cache/qwen3-asr/repos/0_QwenLM_Qwen3-ASR/.github/workflows/inactive.yaml",
+      "relative_path": ".github/workflows/inactive.yaml",
+      "type": "yaml",
+      "purpose": "ci_cd_configuration",
+      "patterns": [],
+      "settings_count": 1,
+      "settings": [
+        {
+          "key": "name",
+          "value": "Close and lock inactive threads",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        }
+      ],
+      "parse_errors": [
+        "Error parsing .github/workflows/inactive.yaml: sequence item 0: expected str instance, bool found"
+      ]
+    },
+    {
+      "file_path": "/opt/wionch/docker/Skill_Seekers/.skillseeker-cache/qwen3-asr/repos/0_QwenLM_Qwen3-ASR/.github/workflows/translate.yaml",
+      "relative_path": ".github/workflows/translate.yaml",
+      "type": "yaml",
+      "purpose": "ci_cd_configuration",
+      "patterns": [],
+      "settings_count": 1,
+      "settings": [
+        {
+          "key": "name",
+          "value": "translator",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        }
+      ],
+      "parse_errors": [
+        "Error parsing .github/workflows/translate.yaml: sequence item 0: expected str instance, bool found"
+      ]
+    },
+    {
+      "file_path": "/opt/wionch/docker/Skill_Seekers/.skillseeker-cache/qwen3-asr/repos/0_QwenLM_Qwen3-ASR/.github/ISSUE_TEMPLATE/bug_report.yml",
+      "relative_path": ".github/ISSUE_TEMPLATE/bug_report.yml",
+      "type": "yaml",
+      "purpose": "ci_cd_configuration",
+      "patterns": [],
+      "settings_count": 3,
+      "settings": [
+        {
+          "key": "name",
+          "value": "🐞 Bug Report",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        },
+        {
+          "key": "description",
+          "value": "Something unexpected happened, errors or badcases",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        },
+        {
+          "key": "body",
+          "value": [
+            {
+              "type": "markdown",
+              "attributes": {
+                "value": "**We appreciate your time and effort in filing this report. ❤**\n\nIssues are a vital part of open-source collaboration. They help identify and resolve real-world problems, improve the project for everyone, and create a transparent, well-documented knowledge base that benefits the entire community. **By reporting an issue, you're not just solving a problem for yourself --- you're helping others who may encounter the same challenge.**\n\nTo ensure your issue is addressed efficiently and effectively, please follow these guidelines when submitting:\n\n1.  **Use English**  \n    Please write your issue in English. This ensures the widest possible audience can understand and contribute. Most translation tools also work best with English, making your report more accessible globally.\n\n2.  **Choose a clear and descriptive title**  \n    Your title should summarize the issue clearly and include relevant details such as the model ID (e.g., `Qwen3-ASR-1.7B`) and the framework or environment (e.g., `qwen-asr`, `vllm`).  \n    Example: `Qwen3-ASR-1.7B generates errors with vllm under CUDA 12.8`\n\n3.  **Provide reproducible steps**  \n    Help us help you: include a minimal, self-contained code snippet and clear instructions to reproduce the issue. Be sure to specify:\n    - Your environment (OS, Python version, package versions)\n    - The exact commands or code used; the prompts and the sampling parameters in terms of badcases\n    - Expected vs. actual behavior\n\n4.  **Be precise and concise**  \n    - Focus on **one issue per report**. If you have multiple bugs, please open separate issues.\n    - Include only the context and code necessary to understand and reproduce the problem.\n    - Think of your issue as a future reference for others --- aim to make it a helpful documentation entry.\n\n\nAlso keep in mind that this repository is dedicated to the open-weight versions of the **Qwen ASR**. \n- For **Qwen API services** or closed-source variants, please contact Alibaba Cloud support directly.\n"
+              }
+            },
+            {
+              "type": "textarea",
+              "attributes": {
+                "label": "Description",
+                "description": "Please describe the problem you have encountered.\n"
+              },
+              "validations": {
+                "required": true
+              }
+            },
+            {
+              "type": "textarea",
+              "attributes": {
+                "label": "Reproduction",
+                "description": "Please provide minimal reproducible code.\n"
+              },
+              "validations": {
+                "required": true
+              }
+            },
+            {
+              "type": "textarea",
+              "attributes": {
+                "label": "Logs",
+                "description": "Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.\nIf the log is too long, feel free to put it in a public gist and link it in the issue: https://gist.github.com. \n",
+                "render": "shell"
+              },
+              "validations": {
+                "required": false
+              }
+            },
+            {
+              "type": "textarea",
+              "attributes": {
+                "label": "Environment Information",
+                "description": "Please provide information about you environment, e.g., the software versions and the information on the OS, GPUs, CUDA, and NVIDIA Driver if GPUs are used.\n"
+              },
+              "validations": {
+                "required": true
+              }
+            },
+            {
+              "type": "checkboxes",
+              "attributes": {
+                "label": "Known Issue",
+                "options": [
+                  {
+                    "label": "The issue hasn't been already addressed in Documentation, Issues, and Discussions."
+                  }
+                ]
+              }
+            }
+          ],
+          "type": "array",
+          "env_var": null,
+          "description": ""
+        }
+      ],
+      "parse_errors": []
+    },
+    {
+      "file_path": "/opt/wionch/docker/Skill_Seekers/.skillseeker-cache/qwen3-asr/repos/0_QwenLM_Qwen3-ASR/.github/ISSUE_TEMPLATE/config.yml",
+      "relative_path": ".github/ISSUE_TEMPLATE/config.yml",
+      "type": "yaml",
+      "purpose": "ci_cd_configuration",
+      "patterns": [],
+      "settings_count": 2,
+      "settings": [
+        {
+          "key": "blank_issues_enabled",
+          "value": false,
+          "type": "boolean",
+          "env_var": null,
+          "description": ""
+        },
+        {
+          "key": "contact_links",
+          "value": [
+            {
+              "name": "🚀 Feature Request",
+              "url": "https://github.com/QwenLM/Qwen3-ASR/discussions/categories/polls",
+              "about": "Create a poll and see if others are interested in a new feature as well"
+            },
+            {
+              "name": "🙏 Question",
+              "url": "https://github.com/QwenLM/Qwen3-ASR/discussions/categories/q-a",
+              "about": "Quick question, what/when/where/why/how ..."
+            },
+            {
+              "name": "💬 General Discussion",
+              "url": "https://github.com/QwenLM/Qwen3-ASR/discussions/categories/general",
+              "about": "Discuss in general"
+            }
+          ],
+          "type": "array",
+          "env_var": null,
+          "description": ""
+        }
+      ],
+      "parse_errors": []
+    },
+    {
+      "file_path": "/opt/wionch/docker/Skill_Seekers/.skillseeker-cache/qwen3-asr/repos/0_QwenLM_Qwen3-ASR/docker/Dockerfile-qwen3-asr-cu128",
+      "relative_path": "docker/Dockerfile-qwen3-asr-cu128",
+      "type": "dockerfile",
+      "purpose": "docker_configuration",
+      "patterns": [],
+      "settings_count": 7,
+      "settings": [
+        {
+          "key": "CUDA_VERSION",
+          "value": "12.8.0",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        },
+        {
+          "key": "from",
+          "value": "nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        },
+        {
+          "key": "DEBIAN_FRONTEND",
+          "value": "noninteractive",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        },
+        {
+          "key": "MAX_JOBS",
+          "value": "32",
+          "type": "string",
+          "env_var": "MAX_JOBS",
+          "description": ""
+        },
+        {
+          "key": "NVCC_THREADS",
+          "value": "2",
+          "type": "string",
+          "env_var": "NVCC_THREADS",
+          "description": ""
+        },
+        {
+          "key": "CCACHE_DIR",
+          "value": "/root/.cache/ccache",
+          "type": "string",
+          "env_var": "CCACHE_DIR",
+          "description": ""
+        },
+        {
+          "key": "BUNDLE_FLASH_ATTENTION",
+          "value": "true",
+          "type": "string",
+          "env_var": null,
+          "description": ""
+        }
+      ],
+      "parse_errors": []
+    }
+  ],
+  "errors": []
+}
