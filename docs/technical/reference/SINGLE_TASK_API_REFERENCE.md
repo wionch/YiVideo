@@ -376,6 +376,72 @@
 
 #### faster_whisper.transcribe_audio
 
+#### qwen3_asr.transcribe_audio
+
+复用判定：`stages.qwen3_asr.transcribe_audio.status=SUCCESS` 且 `output.segments_file` 非空即命中复用；等待态返回 `status=pending`、`reuse_info.state=pending`；未命中按正常流程执行。
+功能概述（qwen3_asr.transcribe_audio）：使用 Qwen3-ASR 将音频转写为文本，支持 vLLM/Transformers 后端，默认输出词级时间戳并生成转录文件。
+请求体：
+
+```json
+{
+  "task_name": "qwen3_asr.transcribe_audio",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+    "backend": "vllm",
+    "model_size": "0.6B",
+    "language": "auto",
+    "enable_word_timestamps": true
+  }
+}
+```
+
+单节点结果示例：
+
+```json
+{
+  "task_name": "qwen3_asr.transcribe_audio",
+  "status": "SUCCESS",
+  "input_params": {
+    "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+    "backend": "vllm",
+    "model_size": "0.6B",
+    "enable_word_timestamps": true
+  },
+  "output": {
+    "segments_file": "/share/workflows/task-demo-001/transcribe_data_abcd1234.json",
+    "segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_abcd1234.json",
+    "audio_duration": 125.5,
+    "language": "zh",
+    "transcribe_duration": 45.2,
+    "model_name": "Qwen/Qwen3-ASR-0.6B",
+    "device": "cuda",
+    "enable_word_timestamps": true,
+    "statistics": {
+      "total_segments": 120,
+      "total_words": 850,
+      "transcribe_duration": 45.2,
+      "average_segment_duration": 1.2
+    },
+    "segments_count": 120
+  },
+  "error": null,
+  "duration": 45.2
+}
+```
+
+说明：本地结果文件恒存在；当 `core.auto_upload_to_minio=true` 时追加 `segments_file_minio_url`，本地字段不被覆盖。
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `audio_path` | string | 是 | 无 | 必填，不做智能回退，支持 HTTP/MinIO |
+| `backend` | string | 否 | "vllm" | 推理后端：vllm/transformers；CPU 仅支持 transformers |
+| `model_size` | string | 否 | "0.6B" | 模型大小：0.6B/1.7B |
+| `language` | string | 否 | "auto" | 语言（auto/zh/en 等，内部映射为 Qwen3 语言名） |
+| `enable_word_timestamps` | bool | 否 | true | 是否启用词级时间戳 |
+| `forced_aligner_model` | string | 否 | "Qwen/Qwen3-ForcedAligner-0.6B" | 强制对齐模型 |
+
 复用判定：`stages.faster_whisper.transcribe_audio.status=SUCCESS` 且 `output.segments_file` 或转写输出非空即命中复用；等待态返回 `status=pending`、`reuse_info.state=pending`；未命中按正常流程执行。
 功能概述（faster_whisper.transcribe_audio）：使用 Faster-Whisper 将音频转写为文本，可启用词级时间戳，输出转录文件及语言/时长统计并可上传。
 请求体：
