@@ -391,6 +391,9 @@ async def get_supported_tasks():
         "faster_whisper": [
             "faster_whisper.transcribe_audio"
         ],
+        "qwen3_asr": [
+            "qwen3_asr.transcribe_audio"
+        ],
         "audio_separator": [
             "audio_separator.separate_vocals"
         ],

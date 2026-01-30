@@ -252,6 +252,36 @@ services:
         deploy:
             <<: *gpu-deploy
 
+
+    qwen3_asr_service:
+        <<: *celery-worker-base
+        container_name: yivideo-qwen3-asr
+        build:
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/qwen3_asr_service/Dockerfile
+        command: ['celery', '-A', 'app.celery_app', 'worker', '-l', 'info', '-Q', 'qwen3_asr_queue', '--concurrency=1', '-n', 'qwen3_asr_worker@%h']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-worktrees
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
+        environment:
+            <<: [*base-env, *gpu-env, *cache-env]
+            CELERY_WORKER_NAME: qwen3_asr_worker
+            HF_TOKEN: ${HF_TOKEN}
+        deploy:
+            <<: *gpu-deploy
+        depends_on:
+            - redis
+            - minio
+
     wservice:
         <<: *celery-worker-base
         container_name: wservice

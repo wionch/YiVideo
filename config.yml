@@ -804,3 +804,10 @@ indextts_service:
     enable_monitoring: true # 启用基础监控
     log_processing_time: true # 记录处理时间
     log_gpu_usage: true # 记录GPU使用情况
+qwen3_asr_service:
+    device: cuda
+    backend: vllm
+    model_size: "0.6B"
+    enable_word_timestamps: true
+    forced_aligner_model: "Qwen/Qwen3-ForcedAligner-0.6B"
+
