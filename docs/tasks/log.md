@@ -559,6 +559,8 @@ wservice.rebuild\_subtitle\_with\_words增加一个report参数(bool类型)
 如果report=true, 那么在完成重构后, 同步生成一个txt报告, 报告内容包括: 原字幕文本, 优化后的字幕文本, 所有变化明细. 最后同步上传并返回链接.
 如果report=false, 则忽略.
 
+---
+
 # {done}工作流模式删除, 只保留单节点模式
 
 ### 需求背景
@@ -576,6 +578,8 @@ wservice.rebuild\_subtitle\_with\_words增加一个report参数(bool类型)
 @docs/technical/reference/SINGLE\_TASK\_API\_REFERENCE.md
 
 @docs/technical/reference/WORKFLOW\_NODES\_REFERENCE.md
+
+---
 
 # {已完成}LLM翻译装词功能
 
@@ -729,7 +733,77 @@ wservice日志:
 
 日志中行数不一致的问题, 大概率是因为提交给大模型的数据在格式上是有问题的. 本地重构的数据已按 `cpl` 和 `cps` 进行分割的情况. 提交给大模型的数据按照一行一条格式提取的. 因为存在分割就会导致语义断裂的情况. 所以当模型在翻译的时候也会出现语义上的问题这样就会
 
-# redis任务数据存储格式重构
+# 字幕优化功能重构(第二版)
+
+### 问题背景
+
+基于`faster-whisper`等ASR工具转录的字幕文件存在语义错误, 断句错误, 少译, 多译等问题. 需要通过LLM大模型进行相关的修复.
+
+现有的设计在本地重构方案重构后总是会出现断句错误. 调试多次都无法解决. 
+
+更换个优化思路: 由LLM基于字幕行数为基准进行修正/优化处理. **用字幕行数进行锚定**, 确保能够LLM处理以后能够将各条字幕正确匹配到时间区间
+
+### 优化思路
+
+1. **提取字幕文本**: 从字幕json文件中提取字幕文本, **一行一条!** **格式**: `[ID]字幕文本`
+
+2. **设计system prompt**:
+   
+   1. **修正字幕内容**: 错别字, 语义错误, 标点等ASR场景可能存在的错误.
+   
+   2. **修复断句错误**: 如果某一行字幕的部分文本从语义上明显属于另外一行, 则需要将这部分内容移动到正确的字幕行. 
+   
+   3. **行数检查**: 输出最终字幕数据必须进行行数检查. 确保输出的字幕行数和meta数据一致
+   
+   4. **输出格式**: 只输出优化后的字幕内容, 一行一条, 格式: `[ID]字幕文本`; 禁止输出字幕文本以外的内容
+   
+   5. **第一原则**:**字幕的行数**绝对不允许增减. 如果因为**增删改**导致字幕行**置空**了, 则需要保留`[ID]`后面字幕文本留空即可. 确保LLM返回的数据和输入的字幕行数是一样的
+
+3. **设计提交prompt**: meta数据 + 字幕文本
+   
+   1. meta数据: 包括`描述, 字幕行数`等信息.
+   
+   2. 字幕文本: 上面提取的字幕文本
+
+4. **本地重构字幕**: 
+   
+   1. 文本重构: 按照LLM返回字幕内容, 按照ID重构字幕json文件
+   
+   2. 时间重构: 根据词级时间戳列表(words)和字幕文本匹配, 然后同步更新词级时间戳和字幕时间区间; 
+      
+      **重点**! 因为字幕文本在LLM处理过程过程有可能会存在**增删改**的情况, 所以需要设计一个完善的同步机制来保证字幕时间区间的准确.
+
+```markdown
+关于时间戳计算: 首先words列表中的word是通过start-end来划定时间的. 不是时间戳. 这里要先澄清. 还有, 如果两个稳定词之间出现新增词语直接将其添加到稳定值中即可, 不需要去重新划定中间的时间区间;
+关于LLM重试机制: 1自动重试三次
+性能优化: 分段并发处理; 可配置; 配置并发数, 每段字幕条数; 滑轨重叠提交. 返回后重叠部分进行去重.澄清:
+```
+
+**澄清:**
+
+1. system prompt中: `修复断句错误：如果某行内容从语义上明显属于另一行，将该内容移动到正确行` , 这里应该要覆盖只移动字幕的部分内容的场景. 
+   
+   比如: `[1]今天天气不  [2]错, 你好啊`, 像这种情况就需要将 `ID2` 里的`错`移动到 `ID1` 的末尾
+
+2. system prompt中的`每行是否以 `[数字]` 开头`, 同时要和user prompt的任务信息中的**本段范围**是一致的.
+
+3. 输入数据文件参考: `@share/workflows/video_to_subtitle_task/nodes/faster_whisper.transcribe_audio/data/transcribe_data_task_id.json`
+
+
+
+澄清:
+
+1. system prompt:
+   
+   ```
+   整行移动：如果某行内容从语义上明显属于另一行，将该行内容移动到正确行
+   ```
+
+    这里要强点, 整行移动了 必须保留[ID], 文本留空即可
+
+---
+
+# {done}redis任务数据存储格式重构
 
 **节点文档**: `@docs/technical/reference/SINGLE_TASK_API_REFERENCE.md`
 
@@ -741,11 +815,202 @@ wservice日志:
 
 2. 数据设置有效期: 1天
 
-<br />
+**问题列表:**
 
-<br />
+执行以下两个请求:
 
-<br />
+```json
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_gateway/v1/tasks",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"task_name\": \"wservice.rebuild_subtitle_with_words\",\n    \"task_id\": \"video_to_subtitle_task\",\n    \"callback\": \"{{ $execution.resumeUrl }}/t3\",\n    \"input_data\": {\n        \"segments_file\": \"/share/workflows/video_to_subtitle_task/nodes/faster_whisper.transcribe_audio/data/transcribe_data_task_id.json\",\n        \"optimized_text_file\": \"/share/workflows/video_to_subtitle_task/nodes/wservice.ai_optimize_text/data/transcribe_data_task_id_optimized_text.txt\",\n        \"report\": true\n    }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -128,
+        3696
+      ],
+      "id": "4ab97036-bf36-4397-b8e0-14fcbcc31ef8",
+      "name": "HttpRequest10"
+    }
+  ],
+  "connections": {
+    "HttpRequest10": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ce62717b1b8e3f0f382d7655865d4cc25bd57832825813d5d8aa77789e762603"
+  }
+}
+```
+
+```json
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_gateway/v1/tasks",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"task_name\": \"wservice.translate_subtitles\",\n    \"task_id\": \"video_to_subtitle_task\",\n    \"callback\": \"{{ $execution.resumeUrl }}/t3\",\n    \"input_data\": {\n        \"segments_file\": \"/share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json\",\n        \"target_language\": \"zh\",\n        \"source_language\": \"en\",\n        \"provider\": \"deepseek\",\n        \"prompt_file_path\": \"/app/config/system_prompt/subtitle_translation_fitting.md\",\n        \"cps_limit\": 18,\n        \"cpl_limit\": 42,\n        \"max_lines\": 1,\n        \"max_retries\": 3\n    }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -112,
+        4064
+      ],
+      "id": "39724111-8f4a-431c-b2e5-74db81093e89",
+      "name": "HttpRequest11"
+    }
+  ],
+  "connections": {
+    "HttpRequest11": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ce62717b1b8e3f0f382d7655865d4cc25bd57832825813d5d8aa77789e762603"
+  }
+}
+```
+
+redis中数据`workflow_state:video_to_subtitle_task`:
+
+```json
+{
+    "workflow_id": "video_to_subtitle_task",
+    "create_at": "2026-01-29T22:02:16.324872",
+    "input_params": {
+        "task_name": "wservice.translate_subtitles",
+        "input_data": {
+            "segments_file": "/share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json",
+            "target_language": "zh",
+            "source_language": "en",
+            "provider": "deepseek",
+            "prompt_file_path": "/app/config/system_prompt/subtitle_translation_fitting.md",
+            "cps_limit": 18,
+            "cpl_limit": 42,
+            "max_lines": 1,
+            "max_retries": 3
+        },
+        "callback_url": "http://host.docker.internal:5678/webhook-waiting/2249/t3"
+    },
+    "shared_storage_path": "/share/workflows/video_to_subtitle_task",
+    "stages": {
+        "wservice.translate_subtitles": {
+            "status": "pending",
+            "input_params": {},
+            "output": {},
+            "error": null,
+            "duration": 0
+        }
+    },
+    "error": null,
+    "status": "running",
+    "updated_at": "2026-01-29T22:02:16.374874",
+    "celery_task_id": "fd536f39-8343-43ef-b08c-9bcfd5a5140c"
+}
+```
+
+callback获取到的结果:
+
+```json
+[
+  {
+    "headers": {
+      "host": "host.docker.internal:5678",
+      "user-agent": "YiVideo-API-Gateway/1.0",
+      "accept-encoding": "gzip, deflate",
+      "accept": "*/*",
+      "connection": "keep-alive",
+      "content-type": "application/json",
+      "content-length": "1882"
+    },
+    "params": {},
+    "query": {},
+    "body": {
+      "task_id": "video_to_subtitle_task",
+      "status": "completed",
+      "result": {
+        "workflow_id": "video_to_subtitle_task",
+        "create_at": "2026-01-29T22:03:23.064619",
+        "input_params": {
+          "task_name": "wservice.rebuild_subtitle_with_words",
+          "input_data": {
+            "segments_file": "/share/workflows/video_to_subtitle_task/nodes/faster_whisper.transcribe_audio/data/transcribe_data_task_id.json",
+            "optimized_text_file": "/share/workflows/video_to_subtitle_task/nodes/wservice.ai_optimize_text/data/transcribe_data_task_id_optimized_text.txt",
+            "report": true
+          },
+          "callback_url": "http://host.docker.internal:5678/webhook-waiting/2250/t3"
+        },
+        "shared_storage_path": "/share/workflows/video_to_subtitle_task",
+        "stages": {
+          "wservice.rebuild_subtitle_with_words": {
+            "status": "SUCCESS",
+            "input_params": {
+              "segments_file": "/share/workflows/video_to_subtitle_task/nodes/faster_whisper.transcribe_audio/data/transcribe_data_task_id.json",
+              "optimized_text_file": "/share/workflows/video_to_subtitle_task/nodes/wservice.ai_optimize_text/data/transcribe_data_task_id_optimized_text.txt",
+              "report": true
+            },
+            "output": {
+              "optimized_segments_file": "/share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json",
+              "report_file": "/share/workflows/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_rebuild_report.txt",
+              "optimized_segments_file_minio_url": "http://host.docker.internal:9000/yivideo/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_optimized_words.json",
+              "report_file_minio_url": "http://host.docker.internal:9000/yivideo/video_to_subtitle_task/nodes/wservice.rebuild_subtitle_with_words/data/transcribe_data_task_id_rebuild_report.txt"
+            },
+            "error": null,
+            "duration": 0.14
+          }
+        },
+        "error": null,
+        "reuse_info": null
+      },
+      "timestamp": "2026-01-29T22:03:23.329735Z"
+    },
+    "webhookUrl": "http://host.docker.internal:5678/webhook-test/t3",
+    "executionMode": "test"
+  }
+]
+```
+
+**问题:**
+
+1. 数据缺失, 发送了两个请求, 但是只有一条数据
+
+2. redis键`workflow_state:video_to_subtitle_task`是错误的, 不符合`{task_id}:{node}:{task_name}`
+
+3. callback返回的数据是工作流数据, 而不是单节点数据
+
+**目标**: 请排查并修复这些问题
+
+**变量解释**:
+
+1. {task_id}应该是`"workflow_id`
+
+2. node是`task_name`的`wservice`, 也就是第一个`.`之前的内容
+
+3. {task_name}是`task_name`的第一个`.`后面的内容
+
+---
 
 <br />
 

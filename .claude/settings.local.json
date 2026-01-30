@@ -161,7 +161,8 @@
       "Bash(git -C /opt/wionch/docker/yivideo log --oneline -20)",
       "Bash(YIVIDEO_ROOT=/opt/wionch/docker/yivideo/.worktrees/subtitle-semantic-protection docker-compose:*)",
       "Bash(git worktree list:*)",
-      "Bash(PYTHONPATH=/opt/wionch/docker/yivideo/.worktrees/subtitle-semantic-protection python:*)"
+      "Bash(PYTHONPATH=/opt/wionch/docker/yivideo/.worktrees/subtitle-semantic-protection python:*)",
+      "mcp__filesystem__create_directory"
     ],
     "deny": [
       "Bash(docker build:*)"
