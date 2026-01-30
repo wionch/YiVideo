@@ -589,7 +589,49 @@ wservice:
     # 文件保留时间（小时）
     file_retention_hours: 24
 
-# 15. 字幕校正服务配置 (新增)
+# 15. 字幕优化器V2配置 (新增)
+# 基于LLM的字幕分段优化器，支持大文件分段处理和并发优化
+subtitle_optimizer:
+    # === 分段配置 ===
+    # 每段字幕行数（推荐100行，平衡处理速度和上下文理解）
+    segment_size: 100
+    # 相邻分段之间的重叠行数（推荐20行，确保边界平滑过渡）
+    overlap_lines: 20
+
+    # === 并发配置 ===
+    # 最大并发处理数（推荐3，避免API限流）
+    max_concurrent: 3
+
+    # === 重试配置 ===
+    # 最大重试次数
+    max_retries: 3
+    # 重试退避基数（秒）
+    retry_backoff_base: 1
+
+    # === 差异检测配置 ===
+    # 差异阈值（0-1），用于检测LLM是否修改了内容
+    # 低于此阈值认为内容未变化
+    diff_threshold: 0.3
+    # 最大重叠扩展行数（处理边界问题时使用）
+    max_overlap_expand: 50
+
+    # === 调试配置 ===
+    debug:
+        # 是否启用调试日志
+        enabled: true
+        # 调试日志目录
+        log_dir: "tmp/subtitle_optimizer_logs"
+
+    # === LLM配置 ===
+    llm:
+        # 默认模型
+        model: "gemini-pro"
+        # 最大令牌数
+        max_tokens: 4096
+        # 温度参数（越低越保守）
+        temperature: 0.1
+
+# 16. 字幕校正服务配置 (新增)
 # 基于AI的字幕校正功能，支持多个AI服务提供商进行字幕质量优化
 subtitle_correction:
     # === 基础配置 ===
