@@ -165,7 +165,9 @@
       "mcp__filesystem__create_directory",
       "Bash(black:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(wget:*)"
+      "Bash(wget:*)",
+      "mcp__tavily-remote__tavily_map",
+      "mcp__tavily-remote__tavily_crawl"
     ],
     "deny": [
       "Bash(docker build:*)"
