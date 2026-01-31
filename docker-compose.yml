@@ -252,10 +252,9 @@ services:
         deploy:
             <<: *gpu-deploy
 
-
     qwen3_asr_service:
         <<: *celery-worker-base
-        container_name: yivideo-qwen3-asr
+        container_name: qwen3_asr_service
         build:
             <<: *build-base
             dockerfile: ${YIVIDEO_ROOT}/services/workers/qwen3_asr_service/Dockerfile

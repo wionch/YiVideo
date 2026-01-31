@@ -372,9 +372,7 @@
 | `segment_compression_format` | string | 否 | "zip" | 压缩格式：zip/tar.gz（预留功能） |
 | `segment_compression_level` | string | 否 | "default" | 压缩级别：fast/default/best（预留功能） |
 
-### Faster-Whisper
-
-#### faster_whisper.transcribe_audio
+### Qwen3-ASR
 
 #### qwen3_asr.transcribe_audio
 
@@ -441,6 +439,10 @@
 | `language` | string | 否 | "auto" | 语言（auto/zh/en 等，内部映射为 Qwen3 语言名） |
 | `enable_word_timestamps` | bool | 否 | true | 是否启用词级时间戳 |
 | `forced_aligner_model` | string | 否 | "Qwen/Qwen3-ForcedAligner-0.6B" | 强制对齐模型 |
+
+### Faster-Whisper
+
+#### faster_whisper.transcribe_audio
 
 复用判定：`stages.faster_whisper.transcribe_audio.status=SUCCESS` 且 `output.segments_file` 或转写输出非空即命中复用；等待态返回 `status=pending`、`reuse_info.state=pending`；未命中按正常流程执行。
 功能概述（faster_whisper.transcribe_audio）：使用 Faster-Whisper 将音频转写为文本，可启用词级时间戳，输出转录文件及语言/时长统计并可上传。

@@ -11,12 +11,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
 # 2. 安装构建时所必需的系统依赖
+# cmake 和 ccache 是 vLLM/Triton 编译 CUDA 内核所需
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
     python3-dev \
     build-essential \
+    cmake \
+    ccache \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
@@ -37,22 +40,36 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04
 
 # 1. 再次设置环境变量
+# MAX_JOBS: 限制 Triton/vLLM 编译 CUDA 内核时的并行度，避免内存不足
+# HF_ENDPOINT: 使用 Hugging Face 镜像站，解决国内访问问题
+# CCACHE_DIR: ccache 缓存目录
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    MAX_JOBS=4 \
+    NVCC_THREADS=2 \
+    HF_ENDPOINT=https://hf-mirror.com \
+    CCACHE_DIR=/app/.cache/ccache
 
 # 2. 安装运行时依赖
+# build-essential 和 python3-dev 是必需的：vLLM + Triton 需要 C 编译器和 Python 头文件来动态编译 CUDA 内核
+# cmake 和 ccache 用于加速 CUDA 内核的编译
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
+    python3-dev \
     ffmpeg \
     libsndfile1 \
+    build-essential \
+    cmake \
+    ccache \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. 创建非 root 用户
+# 3. 创建非 root 用户和 ccache 缓存目录
 RUN groupadd --gid 1001 appuser && \
     useradd --uid 1001 --gid 1001 --shell /bin/bash --create-home appuser && \
     mkdir -p /app && \
+    mkdir -p /app/.cache/ccache && \
     chown -R appuser:appuser /app
 
 # 4. 切换用户
