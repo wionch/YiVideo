@@ -26,30 +26,30 @@ class CallbackManager:
         self.timeout = 30  # 请求超时时间
         logger.info("Callback管理器初始化完成")
     
-    def send_result(self, task_id: str, result: Dict[str, Any], 
+    def send_result(self, task_id: str, result: Dict[str, Any],
                    minio_files: Optional[List[Dict[str, str]]], callback_url: str) -> bool:
         """
         发送任务结果到callback URL
-        
+
         Args:
             task_id: 任务ID
             result: 任务执行结果
             minio_files: MinIO文件信息列表
             callback_url: callback URL
-            
+
         Returns:
             bool: 是否发送成功
         """
         if not callback_url:
             logger.warning(f"任务 {task_id} 没有提供callback URL")
             return False
-        
+
         # 构建callback数据
         callback_data = self._build_callback_data(task_id, result, minio_files)
-        
+
         logger.info(f"开始发送callback，任务ID: {task_id}, URL: {callback_url}")
-        
-        # 重试发送
+
+        # 重试发送 - 所有错误都重试5次
         for attempt in range(self.max_retries):
             try:
                 response = requests.post(
@@ -62,31 +62,25 @@ class CallbackManager:
                     timeout=self.timeout
                 )
                 response.raise_for_status()
-                
+
                 logger.info(f"Callback发送成功，任务ID: {task_id}, 状态码: {response.status_code}")
                 return True
-                
+
             except requests.exceptions.Timeout:
                 logger.warning(f"Callback超时，任务ID: {task_id}, 尝试: {attempt + 1}/{self.max_retries}")
             except requests.exceptions.ConnectionError as e:
                 logger.warning(f"Callback连接错误，任务ID: {task_id}, 尝试: {attempt + 1}/{self.max_retries}, 错误: {e}")
             except requests.exceptions.HTTPError as e:
                 logger.warning(f"Callback HTTP错误，任务ID: {task_id}, 尝试: {attempt + 1}/{self.max_retries}, 错误: {e}")
-                # 对于HTTP错误，如果是不成功的状态码，也进行重试
-                if e.response.status_code >= 500:  # 服务器错误才重试
-                    pass
-                else:
-                    # 客户端错误（4xx），不重试
-                    break
             except Exception as e:
                 logger.warning(f"Callback发送未知错误，任务ID: {task_id}, 尝试: {attempt + 1}/{self.max_retries}, 错误: {e}")
-            
+
             # 如果不是最后一次尝试，等待后重试
             if attempt < self.max_retries - 1:
                 delay = self.retry_delays[min(attempt, len(self.retry_delays) - 1)]
                 logger.info(f"等待 {delay} 秒后重试...")
                 time.sleep(delay)
-        
+
         logger.error(f"所有callback尝试都失败，任务ID: {task_id}")
         return False
     
