@@ -16,9 +16,9 @@
 
 ## 目标模型与官方能力（摘要）
 
-来源：FunASR 官方 README_zh 提供的模型仓库与示例。
+来源：FunASR 官方 README_zh 与 Fun-ASR-Nano-2512 模型卡 README。
 
-- **Fun-ASR-Nano-2512**：多语言 ASR（中文/英文/日语及方言），适合作为默认模型。
+- **Fun-ASR-Nano-2512**：中文/英文/日文 ASR，中文含 7 种方言与 26 种地域口音，额外包含歌词与说唱识别；训练数据“数千万小时”；参数量约 8 亿。模型卡 TODO 明确：**时间戳与说话人识别尚未支持**，需在实现中做能力降级。
 - **SenseVoiceSmall**：ASR + LID + SER + AED，适合需要语音理解扩展信息的场景。
 - **paraformer-zh**：中文 ASR，官方说明支持时间戳输出，非实时。
 - **paraformer-en**：英文 ASR，非实时。
@@ -26,7 +26,7 @@
 
 ## 官方样例（抽取关键参数）
 
-- **Fun-ASR-Nano**：`AutoModel(model=Fun-ASR-Nano-2512, vad_model=fsmn-vad, vad_kwargs, batch_size_s)`
+- **Fun-ASR-Nano**：`AutoModel(model=Fun-ASR-Nano-2512, trust_remote_code=True, remote_code=./model.py, device)`；`generate(input=[wav], batch_size=1, hotwords=[...], language=..., itn=True/False)`；可选 `vad_model=fsmn-vad` + `vad_kwargs`。
 - **SenseVoiceSmall**：`AutoModel(model=SenseVoiceSmall, vad_model, language=auto, use_itn, merge_vad, merge_length_s)` + `rich_transcription_postprocess`
 - **Paraformer**：`AutoModel(model=paraformer-zh, vad_model, punc_model, spk_model 可选, hotword)`
 
@@ -62,8 +62,9 @@
 可选（覆盖配置）：
 - `model_name` / `device` / `enable_word_timestamps`
 - `vad_model` / `punc_model` / `spk_model`
-- `language` / `hotword`
-- `batch_size_s` / `use_itn` / `merge_vad` / `merge_length_s`
+- `language` / `hotword` / `hotwords`
+- `batch_size_s` / `use_itn` / `itn` / `merge_vad` / `merge_length_s`
+- `trust_remote_code` / `remote_code`（Fun-ASR-Nano 需要）
 
 ### 输出（与 faster_whisper 核心对齐）
 
@@ -89,6 +90,7 @@
 - 统一使用 `funasr.AutoModel`。
 - 根据模型与参数选择性启用：`vad_model`、`punc_model`、`spk_model`。
 - 对 SenseVoice：可选执行 `rich_transcription_postprocess`，并保留扩展属性。
+- 对 Fun-ASR-Nano：按模型卡 TODO **默认关闭时间戳与说话人识别**，并在日志中提示已自动降级。
 - 结果输出规范化：
   - 无时间戳时退化为单段覆盖全音频
   - words 结构统一映射为 `word/start/end/probability`
@@ -99,6 +101,7 @@
 - 子进程失败/超时 → 记录 stdout/stderr 摘要并抛错
 - 输出为空 → 仍生成 `segments_file`，至少包含一段空文本
 - 说话人输出异常 → 记录告警并将 `speaker` 置空
+- 模型能力不支持（如 Fun-ASR-Nano 时间戳/说话人）→ 自动关闭并记录原因
 
 ## 配置与部署
 
@@ -108,15 +111,18 @@
 funasr_service:
   model_name: "FunAudioLLM/Fun-ASR-Nano-2512"
   device: "cuda"
-  enable_word_timestamps: true
+  enable_word_timestamps: false  # Fun-ASR-Nano 模型卡标注暂不支持时间戳
   vad_model: "fsmn-vad"
   punc_model: "ct-punc"
   spk_model: "cam++"
   language: "auto"
   use_itn: true
+  itn: true
   merge_vad: true
   merge_length_s: 15
   batch_size_s: 60
+  trust_remote_code: true
+  remote_code: "./model.py"
 ```
 
 ### Docker
@@ -136,7 +142,7 @@ funasr_service:
 
 ## 未确定项（上线前补齐）
 
-- ModelScope 模型卡细节（许可证/语言覆盖范围/模型输入约束）需在上线前补证。
+- 模型许可协议细节、输入音频格式/采样率约束、线上推理资源占用（需补充模型卡或部署文档证据）。
 
 ## 实施清单（后续）
 
@@ -145,4 +151,3 @@ funasr_service:
 3. 实现 `transcribe_executor.py` 与输出构建
 4. 接入 `config.yml`、`docker-compose.yml`、API Gateway 路由
 5. 补齐单元测试与容器内验证
-
