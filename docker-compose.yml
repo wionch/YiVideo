@@ -280,6 +280,34 @@ services:
         deploy:
             <<: *gpu-deploy
 
+    funasr_service:
+        <<: *celery-worker-base
+        container_name: funasr_service
+        build:
+            <<: *build-base
+            dockerfile: ${YIVIDEO_ROOT}/services/workers/funasr_service/Dockerfile
+        command: ['celery', '-A', 'app.celery_app', 'worker', '-l', 'info', '-Q', 'funasr_queue', '--concurrency=1', '-n', 'funasr_worker@%h']
+        volumes:
+            - *vol-services
+            - *vol-videos
+            - *vol-locks
+            - *vol-tmp
+            - *vol-worktrees
+            - *vol-tests
+            - *vol-share
+            - *vol-config-yml
+            - *vol-config-dir
+            - *vol-ssh
+            - *vol-gemini
+            - *vol-hf-cache
+            - *vol-tf-cache
+        environment:
+            <<: [*base-env, *gpu-env, *cache-env]
+            CELERY_WORKER_NAME: funasr_worker
+            HF_TOKEN: ${HF_TOKEN}
+        deploy:
+            <<: *gpu-deploy
+
     wservice:
         <<: *celery-worker-base
         container_name: wservice

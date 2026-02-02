@@ -440,6 +440,78 @@
 | `enable_word_timestamps` | bool | 否 | true | 是否启用词级时间戳 |
 | `forced_aligner_model` | string | 否 | "Qwen/Qwen3-ForcedAligner-0.6B" | 强制对齐模型 |
 
+### FunASR
+
+#### funasr.transcribe_audio
+
+复用判定：`stages.funasr.transcribe_audio.status=SUCCESS` 且 `output.segments_file` 或转写输出非空即命中复用；等待态返回 `status=pending`、`reuse_info.state=pending`；未命中按正常流程执行。
+功能概述（funasr.transcribe_audio）：使用 FunASR（AutoModel）对音频进行转写，可配置 VAD/标点/说话人组件与热词；部分模型（如 Fun-ASR-Nano）不支持时间戳/说话人时会自动降级并记录告警。
+请求体：
+
+```json
+{
+  "task_name": "funasr.transcribe_audio",
+  "task_id": "task-demo-001",
+  "callback": "http://localhost:5678/webhook/demo-t1",
+  "input_data": {
+    "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+    "model_name": "paraformer-zh",
+    "language": "auto",
+    "enable_word_timestamps": true,
+    "hotwords": ["热词A", "热词B"]
+  }
+}
+```
+
+单节点结果示例：
+
+```json
+{
+  "task_name": "funasr.transcribe_audio",
+  "status": "SUCCESS",
+  "input_params": {
+    "audio_source": "input_data",
+    "audio_path": "http://localhost:9000/yivideo/task-demo-001/demo.wav",
+    "enable_word_timestamps": true
+  },
+  "output": {
+    "segments_file": "/share/workflows/task-demo-001/transcribe_data_abcd1234.json",
+    "segments_file_minio_url": "http://localhost:9000/yivideo/task-demo-001/transcribe_data_abcd1234.json",
+    "audio_duration": 125.5,
+    "language": "zh",
+    "model_name": "paraformer-zh",
+    "device": "cuda",
+    "enable_word_timestamps": true,
+    "statistics": {
+      "total_segments": 120,
+      "total_words": 850,
+      "transcribe_duration": 45.2,
+      "average_segment_duration": 1.2
+    },
+    "segments_count": 120
+  },
+  "error": null,
+  "duration": 45.2
+}
+```
+
+说明：本地结果文件恒存在；当 `core.auto_upload_to_minio=true` 时追加 `*_minio_url`，本地字段不被覆盖。
+参数表：
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `audio_path` | string | 是 | 无 | 必填，不做智能回退，支持 HTTP/MinIO |
+| `model_name` | string | 否 | config 默认 | FunASR 模型名或模型仓库路径 |
+| `language` | string | 否 | config 默认 | 语言或 auto |
+| `enable_word_timestamps` | bool | 否 | true | 是否启用词级时间戳 |
+| `vad_model` | string | 否 | config 默认 | VAD 模型 |
+| `punc_model` | string | 否 | config 默认 | 标点模型 |
+| `spk_model` | string | 否 | null | 说话人模型（不支持时自动降级） |
+| `hotwords` | list/string | 否 | [] | 热词列表或逗号分隔字符串 |
+| `batch_size_s` | int | 否 | 60 | 动态 batch 时长（秒） |
+| `use_itn` | bool | 否 | true | 是否启用逆文本正则化 |
+| `merge_vad` | bool | 否 | true | 是否合并 VAD 切片 |
+| `merge_length_s` | int | 否 | 15 | VAD 合并长度（秒） |
+
 ### Faster-Whisper
 
 #### faster_whisper.transcribe_audio

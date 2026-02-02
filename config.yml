@@ -232,6 +232,43 @@ faster_whisper_service:
     # 日志级别: DEBUG, INFO, WARNING, ERROR
     log_level: 'INFO'
 
+# 9. FunASR Service 配置 (新增)
+funasr_service:
+    # === 基础 ASR 配置 ===
+    # FunASR 模型设置
+    model_name: 'paraformer-zh'
+    # ASR 语言代码。如果设置为 null，将自动检测/由模型决定。
+    language: null
+    # 推理设备: "cuda" 或 "cpu"
+    device: 'cuda'
+    # 启用词级时间戳（部分模型可能自动降级）
+    enable_word_timestamps: true
+
+    # === 组件模型配置 ===
+    vad_model: 'fsmn-vad'
+    punc_model: 'ct-punc'
+    spk_model: null
+
+    # === 推理参数 ===
+    hotwords: []
+    batch_size_s: 60
+    use_itn: true
+    merge_vad: true
+    merge_length_s: 15
+
+    # === 远程代码与版本 ===
+    trust_remote_code: true
+    remote_code: null
+    model_revision: null
+    vad_model_revision: null
+    punc_model_revision: null
+    spk_model_revision: null
+
+    # === LM 相关 ===
+    lm_model: null
+    lm_weight: null
+    beam_size: null
+
 # 10. GPU锁配置
 # 用于优化GPU资源的并发访问控制,提升系统吞吐量
 # 最近更新 (2025-12-24): 修复了锁释放竞态条件、IndexTTS服务锁泄漏、实现三层异常保护
@@ -810,4 +847,3 @@ qwen3_asr_service:
     model_size: "0.6B"
     enable_word_timestamps: true
     forced_aligner_model: "Qwen/Qwen3-ForcedAligner-0.6B"
-

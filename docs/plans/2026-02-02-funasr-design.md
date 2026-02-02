@@ -37,6 +37,13 @@
 
 > 设计中仅使用上述参数族，确保与官方示例一致。
 
+## AutoModel 与 ModelScope pipeline 的区别（简明版）
+
+- **FunASR AutoModel**：FunASR 官方 Python 接口，直接构建模型并调用 `model.generate`；更接近官方示例，控制参数更灵活，适合服务端长期运行。
+- **ModelScope pipeline**：ModelScope 的统一推理封装，适合快速试用和交互式推理，但对参数与输出的可控性较弱。
+
+**本项目实现选择：**服务端统一使用 **FunASR AutoModel**，ModelScope pipeline 仅作为模型卡参考，不纳入实现范围（降低依赖复杂度与输出不确定性）。
+
 ## 架构与组件
 
 新增服务目录：`services/workers/funasr_service/`
@@ -69,10 +76,18 @@
 - `vad_model` / `punc_model` / `spk_model`
 - `language` / `hotword` / `hotwords`
 - `batch_size_s` / `use_itn` / `itn` / `merge_vad` / `merge_length_s` / `ban_emo_unk`
-- `model_revision`（ModelScope pipeline 场景）
+- `model_revision`（AutoModel 版本选择）
 - `vad_model_revision` / `punc_model_revision` / `spk_model_revision`
 - `lm_model` / `lm_weight` / `beam_size`（Paraformer 可选 LM）
 - `trust_remote_code` / `remote_code`（Fun-ASR-Nano 需要）
+
+### 参数归一化与优先级
+
+- `hotwords` 优先于 `hotword`；若仅提供 `hotword`（字符串），转换为单元素列表。
+- `use_itn` 优先于 `itn`；两者都缺失时回退到配置默认值。
+- `model_revision` / `*_revision`：输入参数优先于配置。
+- Fun-ASR-Nano 若显式开启 `enable_word_timestamps` 或配置了 `spk_model`，则强制降级为关闭并记录告警（输出 `metadata.funasr.warnings`）。
+- CLI 传入 `hotwords` 支持 JSON 列表字符串或逗号分隔字符串，最终统一为列表。
 
 ### 输出（与 faster_whisper 核心对齐）
 
@@ -100,6 +115,8 @@
 - 对 SenseVoice：可选执行 `rich_transcription_postprocess`，并保留扩展属性。
 - 对 Fun-ASR-Nano：按模型卡 TODO **默认关闭时间戳与说话人识别**，并在日志中提示已自动降级。
 - 结果输出规范化：
+  - 若推理脚本已返回 `segments` 列表（含 `start/end/text/words/speaker`），直接使用
+  - 若仅返回 `text` + `time_stamps`，构建单段 `segments`
   - 无时间戳时退化为单段覆盖全音频
   - words 结构统一映射为 `word/start/end/probability`
 
@@ -139,6 +156,38 @@ funasr_service:
 
 - `docker compose build funasr_service`
 - `docker compose up -d funasr_service`
+
+### docker-compose 服务示例（与 qwen3_asr_service 对齐）
+
+```yaml
+funasr_service:
+  <<: *celery-worker-base
+  container_name: funasr_service
+  build:
+    <<: *build-base
+    dockerfile: ${YIVIDEO_ROOT}/services/workers/funasr_service/Dockerfile
+  command: ['celery', '-A', 'app.celery_app', 'worker', '-l', 'info', '-Q', 'funasr_queue', '--concurrency=1', '-n', 'funasr_worker@%h']
+  volumes:
+    - *vol-services
+    - *vol-videos
+    - *vol-locks
+    - *vol-tmp
+    - *vol-worktrees
+    - *vol-tests
+    - *vol-share
+    - *vol-config-yml
+    - *vol-config-dir
+    - *vol-ssh
+    - *vol-gemini
+    - *vol-hf-cache
+    - *vol-tf-cache
+  environment:
+    <<: [*base-env, *gpu-env, *cache-env]
+    CELERY_WORKER_NAME: funasr_worker
+    HF_TOKEN: ${HF_TOKEN}
+  deploy:
+    <<: *gpu-deploy
+```
 
 ## 测试策略
 
