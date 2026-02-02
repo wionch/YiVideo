@@ -1,6 +1,6 @@
 ---
 name: yivideo-mcp-orchestrator
-description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：serena（代码符号/LSP/引用/调用链/重构影响面）、context7（版本特定的最新库文档/示例）、sequential-thinking（分步规划/结构化推理）、brave-search & exa（Web 检索/证据来源）、tavily-remote（URL 抽取/结构化提取/站点 map/crawl）、filesystem（文件读写/目录管理/批量改动）。当任务涉及：代码定位/重构、查最新 API、逐步推理、Web 研究与抽取/爬取、文件批处理时启用。
+description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：serena（代码符号/LSP/引用/调用链/重构影响面）、context7（版本特定的最新库文档/示例）、sequential-thinking（分步规划/结构化推理）、brave-search & exa（Web 检索/证据来源）、tavily-remote（URL 抽取/结构化提取/站点 map/crawl）、filesystem（文件读写/目录管理/批量改动）、chrome-devtools（浏览器渲染/动态页面获取）。当任务涉及：代码定位/重构、查最新 API、逐步推理、Web 研究与抽取/爬取、文件批处理时启用。
 ---
 
 # YiVideo MCP 编排器（MCP Orchestrator）
@@ -27,6 +27,7 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 -   exa
 -   tavily-remote
 -   filesystem
+-   chrome-devtools
 
 > 环境备注：n8n-mcp 若连接失败，编排时直接忽略，不作为依赖。
 
@@ -123,7 +124,37 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 -   需要原文证据 → 直接 tavily-remote 抽取
 -   结果冲突 → 抓一手来源（官方文档/规范/主仓库）并解释差异
 
-### F) 文件读写与目录管理：filesystem
+### F) 浏览器渲染兜底：chrome-devtools
+
+适用：
+
+-   **tavily-remote 或其他工具抽取页面内容失败**（反爬、动态渲染、JavaScript 依赖）
+-   需要与网页交互（点击、填写表单、等待元素加载）才能获取内容
+-   需要验证页面可视化状态（截图确认、元素存在性）
+
+策略（作为兜底路径）：
+
+1. **其他工具失败后启用**：当 tavily-remote `extract`/`crawl` 返回空或异常时，切换到 chrome-devtools
+2. **导航与等待**：
+   - `navigate_page` 加载目标 URL
+   - `wait_for` 等待关键文本或元素出现
+   - `take_snapshot` 获取可交互元素列表
+3. **交互获取内容**：
+   - 需要点击展开/加载更多 → `click`
+   - 需要填写搜索/过滤 → `fill`
+   - 动态内容 → `evaluate_script` 执行 JS 提取
+4. **内容提取**：
+   - `take_snapshot` 获取页面文本结构
+   - `evaluate_script` 执行 `document.body.innerText` 或特定选择器提取
+5. **验证与截图**：必要时 `take_screenshot` 保存页面状态作为证据
+
+与其他工具的配合：
+
+-   **brave-search/exa** 发现目标 URL → **chrome-devtools** 渲染获取内容
+-   **tavily-remote** 抽取失败 → **chrome-devtools** 作为兜底
+-   获取的内容可再通过 **filesystem** 保存供后续处理
+
+### G) 文件读写与目录管理：filesystem
 
 适用：
 
@@ -159,7 +190,12 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
     -   不重复无意义重试（除非用户提供新线索）
     -   立刻切到下一条兜底路径，并在输出中说明“失败点 + 兜底方案”
 -   exa 不可用 → brave-search + tavily-remote（抽取官方页面）兜底
--   tavily-remote 不可用 → brave/exa 给出来源列表 + 手动摘要（明确“未抽取原文”）
+-   tavily-remote 不可用 → brave/exa 给出来源列表 + 手动摘要（明确"未抽取原文"）
+-   **tavily-remote 抽取失败（反爬/动态渲染）→ chrome-devtools 浏览器渲染兜底**：
+    -   使用 `navigate_page` 加载页面
+    -   使用 `wait_for` 等待内容加载
+    -   使用 `evaluate_script` 或 `take_snapshot` 提取内容
+    -   输出中注明「通过浏览器渲染获取」
 
 ---
 
@@ -195,7 +231,9 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 -   brave-search：找候选权威来源
 -   exa：精筛补齐
 -   tavily-remote：抽取关键页面形成结构化摘要（日期/版本/条款）
--   输出：结论 + 证据链 + 时间信息
+-   **chrome-devtools（兜底）**：tavily-remote 抽取失败时（反爬/动态渲染），通过浏览器渲染获取内容
+    -   `navigate_page` → `wait_for` → `evaluate_script`/`take_snapshot` 提取
+-   输出：结论 + 证据链 + 时间信息 + 获取方式说明
 
 ### 模式 4：文件批处理 / 配置变更（文件系统为主）
 
