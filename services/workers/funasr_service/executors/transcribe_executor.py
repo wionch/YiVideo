@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Tuple
 
 
@@ -67,3 +68,50 @@ def build_segments_from_payload(
         audio_duration=audio_duration,
         speaker=payload.get("speaker"),
     )
+
+
+def build_transcribe_json(
+    stage_name: str,
+    workflow_id: str,
+    audio_file_name: str,
+    segments: List[Dict[str, Any]],
+    audio_duration: float,
+    language: str,
+    model_name: str,
+    device: str,
+    enable_word_timestamps: bool,
+    transcribe_duration: float,
+    funasr_metadata: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    total_segments = len(segments)
+    total_words = sum(len(seg.get("words", [])) for seg in segments)
+    avg_duration = 0.0
+    if total_segments > 0:
+        avg_duration = (
+            sum(seg.get("end", 0) - seg.get("start", 0) for seg in segments)
+            / total_segments
+        )
+    metadata = {
+        "task_name": stage_name,
+        "workflow_id": workflow_id,
+        "audio_file": audio_file_name,
+        "total_duration": audio_duration,
+        "language": language,
+        "word_timestamps_enabled": enable_word_timestamps,
+        "model_name": model_name,
+        "device": device,
+        "transcribe_method": "funasr-subprocess",
+        "created_at": time.time(),
+    }
+    if funasr_metadata:
+        metadata["funasr"] = funasr_metadata
+    return {
+        "metadata": metadata,
+        "segments": segments,
+        "statistics": {
+            "total_segments": total_segments,
+            "total_words": total_words,
+            "transcribe_duration": transcribe_duration,
+            "average_segment_duration": avg_duration,
+        },
+    }
