@@ -512,6 +512,28 @@
 | `merge_vad` | bool | 否 | true | 是否合并 VAD 切片 |
 | `merge_length_s` | int | 否 | 15 | VAD 合并长度（秒） |
 
+模型参数速查（常用模型）
+> 说明：下表用于“可填哪些参数”的快速判断。若标记“—”，该模型不支持或无意义；标记“⚠️”表示会被自动降级或仅部分生效。
+
+| 模型 | 语言/多语 | `enable_word_timestamps` | `vad_model` | `punc_model` | `spk_model` | `hotwords` | 备注 |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| `FunAudioLLM/Fun-ASR-Nano-2512` | 中/英/日 | ⚠️ | ✅ | ✅ | ⚠️ | ✅ | 时间戳/说话人自动降级；支持歌词/说唱场景 |
+| `FunAudioLLM/Fun-ASR-MLT-Nano-2512` | 31 语种 | ⚠️ | ✅ | ✅ | ⚠️ | ✅ | 多语种版本，时间戳/说话人自动降级 |
+| `iic/SenseVoiceSmall` | 多语/情感/事件 | ✅ | ✅ | ✅ | ⚠️ | ✅ | 支持 LID/SER/AED（见 `extra` 字段） |
+| `iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch` | 中文 | ✅ | ✅ | ✅ | ⚠️ | ✅ | 长音频+标点+时间戳，非说话人版 |
+| `iic/speech_paraformer-large-vad-punc-spk_asr_nat-zh-cn` | 中文 | ✅ | ✅ | ✅ | ✅ | ✅ | 说话人聚类分类版，输出 `segments.speaker` |
+
+参数适用性说明
+| 参数 | 适用范围 |
+| :--- | :--- |
+| `enable_word_timestamps` | Paraformer 长音频版支持；Fun‑ASR‑Nano/MLT‑Nano 自动降级 |
+| `vad_model` | FunASR 体系通用参数，长音频/非实时场景推荐启用 |
+| `punc_model` | 适用于中文/中英标点模型；英文专用模型请选对应 punc 模型 |
+| `spk_model` | 仅在说话人版本模型上有效（如 paraformer‑spk）；其余自动降级 |
+| `hotwords` | Paraformer 热词版/支持热词的模型有效；否则可能无效果 |
+| `model_revision`/`*_revision` | 仅在需要固定版本时使用，默认 `null` |
+| `trust_remote_code`/`remote_code` | 使用第三方自定义模型实现时需要；默认由配置控制 |
+
 ### Faster-Whisper
 
 #### faster_whisper.transcribe_audio
