@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 
@@ -115,3 +117,82 @@ def build_transcribe_json(
             "average_segment_duration": avg_duration,
         },
     }
+
+
+def build_infer_command(
+    audio_path: str,
+    output_file: str,
+    model_name: str,
+    device: str,
+    enable_word_timestamps: bool,
+    vad_model: str | None,
+    punc_model: str | None,
+    spk_model: str | None,
+    language: str | None,
+    hotwords: list | None,
+    batch_size_s: int | None,
+    use_itn: bool | None,
+    merge_vad: bool | None,
+    merge_length_s: int | None,
+    trust_remote_code: bool | None,
+    remote_code: str | None,
+    model_revision: str | None,
+    vad_model_revision: str | None,
+    punc_model_revision: str | None,
+    spk_model_revision: str | None,
+    lm_model: str | None,
+    lm_weight: float | None,
+    beam_size: int | None,
+) -> list[str]:
+    infer_script = Path(__file__).resolve().parents[1] / "app" / "funasr_infer.py"
+    cmd = [
+        sys.executable,
+        str(infer_script),
+        "--audio_path",
+        audio_path,
+        "--output_file",
+        output_file,
+        "--model_name",
+        model_name,
+        "--device",
+        device,
+    ]
+    if enable_word_timestamps:
+        cmd.append("--enable_word_timestamps")
+    if vad_model:
+        cmd += ["--vad_model", vad_model]
+    if punc_model:
+        cmd += ["--punc_model", punc_model]
+    if spk_model:
+        cmd += ["--spk_model", spk_model]
+    if language:
+        cmd += ["--language", language]
+    if hotwords:
+        cmd += ["--hotwords", ",".join(hotwords)]
+    if batch_size_s is not None:
+        cmd += ["--batch_size_s", str(batch_size_s)]
+    if use_itn is not None:
+        cmd += ["--use_itn", str(use_itn).lower()]
+    if merge_vad is not None:
+        cmd += ["--merge_vad", str(merge_vad).lower()]
+    if merge_length_s is not None:
+        cmd += ["--merge_length_s", str(merge_length_s)]
+    if trust_remote_code is not None:
+        cmd += ["--trust_remote_code", str(trust_remote_code).lower()]
+    if remote_code:
+        cmd += ["--remote_code", remote_code]
+    if model_revision:
+        cmd += ["--model_revision", model_revision]
+    if vad_model_revision:
+        cmd += ["--vad_model_revision", vad_model_revision]
+    if punc_model_revision:
+        cmd += ["--punc_model_revision", punc_model_revision]
+    if spk_model_revision:
+        cmd += ["--spk_model_revision", spk_model_revision]
+    if lm_model:
+        cmd += ["--lm_model", lm_model]
+    if lm_weight is not None:
+        cmd += ["--lm_weight", str(lm_weight)]
+    if beam_size is not None:
+        cmd += ["--beam_size", str(beam_size)]
+    return cmd
