@@ -29,6 +29,11 @@ logger = get_logger('single_task_api')
 # 创建路由器
 router = APIRouter(prefix="/v1/tasks", tags=["Single Task Operations"])
 
+# 任务分类映射（用于文档展示，非强校验）
+TASK_CATEGORY_MAPPING = {
+    "funasr": ["funasr.transcribe_audio"],
+}
+
 
 @router.post("", response_model=None)
 async def create_single_task(request: SingleTaskRequest):
