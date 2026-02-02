@@ -119,6 +119,31 @@ def get_audio_duration(audio_path: str) -> float:
         return 0.0
 
 
+def resolve_remote_code_path(
+    model_name: str | None,
+    remote_code: str | None,
+    snapshot_download=None,
+) -> str | None:
+    if remote_code:
+        return remote_code
+    if not model_name:
+        return None
+    if snapshot_download is None:
+        try:
+            from modelscope import snapshot_download as _snapshot_download
+        except Exception:
+            return None
+        snapshot_download = _snapshot_download
+    try:
+        model_dir = snapshot_download(model_name)
+    except Exception:
+        return None
+    candidate = os.path.join(model_dir, "model.py")
+    if os.path.exists(candidate):
+        return candidate
+    return None
+
+
 def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
     start_time = time.time()
     if model_loader is None:
@@ -130,8 +155,10 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
         "model": args.model_name,
         "device": args.device,
     }
+    trust_remote_code = None
     if args.trust_remote_code is not None:
-        model_kwargs["trust_remote_code"] = str(args.trust_remote_code).lower() == "true"
+        trust_remote_code = str(args.trust_remote_code).lower() == "true"
+        model_kwargs["trust_remote_code"] = trust_remote_code
     if args.remote_code:
         model_kwargs["remote_code"] = args.remote_code
     if args.vad_model:
@@ -149,7 +176,22 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
     if args.spk_model_revision:
         model_kwargs["spk_model_revision"] = args.spk_model_revision
 
-    model = model_loader(**model_kwargs)
+    try:
+        model = model_loader(**model_kwargs)
+    except AssertionError as exc:
+        if (
+            "is not registered" in str(exc)
+            and model_kwargs.get("trust_remote_code")
+            and not model_kwargs.get("remote_code")
+        ):
+            remote_code_path = resolve_remote_code_path(args.model_name, None)
+            if remote_code_path:
+                model_kwargs["remote_code"] = remote_code_path
+                model = model_loader(**model_kwargs)
+            else:
+                raise
+        else:
+            raise
     generate_kwargs: Dict[str, Any] = {"input": [args.audio_path], "cache": {}}
     if args.language:
         generate_kwargs["language"] = args.language

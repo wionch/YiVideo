@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import services.workers.funasr_service.app.funasr_infer as funasr_infer
 from services.workers.funasr_service.app.funasr_infer import (
     build_infer_payload,
     main,
@@ -114,5 +115,57 @@ def test_main_writes_output(tmp_path):
         ],
         model_loader=fake_loader,
     )
+    assert payload["text"] == "ok"
+    assert output_file.exists()
+
+
+def test_run_infer_retry_with_remote_code(tmp_path, monkeypatch):
+    class FakeModel:
+        def generate(self, **kwargs):
+            return [{"text": "ok"}]
+
+    def fake_loader(**kwargs):
+        if not kwargs.get("remote_code"):
+            raise AssertionError("FunASRNano is not registered")
+        return FakeModel()
+
+    remote_code_path = tmp_path / "model.py"
+    remote_code_path.write_text("# dummy")
+
+    monkeypatch.setattr(
+        funasr_infer,
+        "resolve_remote_code_path",
+        lambda *_args, **_kwargs: str(remote_code_path),
+    )
+    monkeypatch.setattr(funasr_infer, "get_audio_duration", lambda *_: 0.0)
+
+    output_file = tmp_path / "out.json"
+    args = SimpleNamespace(
+        audio_path="/tmp/demo.wav",
+        output_file=str(output_file),
+        model_name="FunAudioLLM/Fun-ASR-Nano-2512",
+        device="cpu",
+        enable_word_timestamps=True,
+        vad_model=None,
+        punc_model=None,
+        spk_model=None,
+        language="auto",
+        hotwords=None,
+        batch_size_s=None,
+        use_itn=None,
+        merge_vad=None,
+        merge_length_s=None,
+        trust_remote_code=True,
+        remote_code=None,
+        model_revision=None,
+        vad_model_revision=None,
+        punc_model_revision=None,
+        spk_model_revision=None,
+        lm_model=None,
+        lm_weight=None,
+        beam_size=None,
+    )
+
+    payload = run_infer(args, model_loader=fake_loader)
     assert payload["text"] == "ok"
     assert output_file.exists()
