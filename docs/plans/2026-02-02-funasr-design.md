@@ -16,10 +16,10 @@
 
 ## 目标模型与官方能力（摘要）
 
-来源：FunASR 官方 README_zh 与 Fun-ASR-Nano-2512 模型卡 README。
+来源：FunASR 官方 README_zh、Fun-ASR-Nano-2512 模型卡 README、SenseVoiceSmall 模型卡 README。
 
 - **Fun-ASR-Nano-2512**：中文/英文/日文 ASR，中文含 7 种方言与 26 种地域口音，额外包含歌词与说唱识别；训练数据“数千万小时”；参数量约 8 亿。模型卡 TODO 明确：**时间戳与说话人识别尚未支持**，需在实现中做能力降级。
-- **SenseVoiceSmall**：ASR + LID + SER + AED，适合需要语音理解扩展信息的场景。
+- **SenseVoiceSmall**：ASR + LID + SER + AED + ITN，训练数据 40 万小时以上、支持 50+ 语言；模型卡声明许可证为 Apache 2.0，适合需要语音理解扩展信息的场景。
 - **paraformer-zh**：中文 ASR，官方说明支持时间戳输出，非实时。
 - **paraformer-en**：英文 ASR，非实时。
 - **paraformer-zh-spk**：在 ASR 基础上启用说话人模型（spk），输出说话人标签。
@@ -27,7 +27,10 @@
 ## 官方样例（抽取关键参数）
 
 - **Fun-ASR-Nano**：`AutoModel(model=Fun-ASR-Nano-2512, trust_remote_code=True, remote_code=./model.py, device)`；`generate(input=[wav], batch_size=1, hotwords=[...], language=..., itn=True/False)`；可选 `vad_model=fsmn-vad` + `vad_kwargs`。
-- **SenseVoiceSmall**：`AutoModel(model=SenseVoiceSmall, vad_model, language=auto, use_itn, merge_vad, merge_length_s)` + `rich_transcription_postprocess`
+- **SenseVoiceSmall**：
+  - ModelScope pipeline：`pipeline(task=auto_speech_recognition, model=iic/SenseVoiceSmall, model_revision=master)`
+  - FunASR：`AutoModel(model=SenseVoiceSmall, trust_remote_code=True, remote_code=./model.py, vad_model, language=auto, use_itn, merge_vad, merge_length_s, ban_emo_unk)`
+  - 后处理：`rich_transcription_postprocess`
 - **Paraformer**：`AutoModel(model=paraformer-zh, vad_model, punc_model, spk_model 可选, hotword)`
 
 > 设计中仅使用上述参数族，确保与官方示例一致。
@@ -63,7 +66,8 @@
 - `model_name` / `device` / `enable_word_timestamps`
 - `vad_model` / `punc_model` / `spk_model`
 - `language` / `hotword` / `hotwords`
-- `batch_size_s` / `use_itn` / `itn` / `merge_vad` / `merge_length_s`
+- `batch_size_s` / `use_itn` / `itn` / `merge_vad` / `merge_length_s` / `ban_emo_unk`
+- `model_revision`（ModelScope pipeline 场景）
 - `trust_remote_code` / `remote_code`（Fun-ASR-Nano 需要）
 
 ### 输出（与 faster_whisper 核心对齐）
@@ -123,6 +127,8 @@ funasr_service:
   batch_size_s: 60
   trust_remote_code: true
   remote_code: "./model.py"
+  model_revision: "master"
+  ban_emo_unk: false
 ```
 
 ### Docker
@@ -142,7 +148,7 @@ funasr_service:
 
 ## 未确定项（上线前补齐）
 
-- 模型许可协议细节、输入音频格式/采样率约束、线上推理资源占用（需补充模型卡或部署文档证据）。
+- SenseVoiceSmall 许可证已明确为 Apache 2.0；其余模型的许可协议细节、输入音频格式/采样率约束、线上推理资源占用仍需补充证据。
 
 ## 实施清单（后续）
 
