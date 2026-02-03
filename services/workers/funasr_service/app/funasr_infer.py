@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import time
@@ -16,7 +17,16 @@ def normalize_model_output(raw: Dict[str, Any]) -> Dict[str, Any]:
     )
     speaker = raw.get("speaker") or raw.get("spk")
     segments = []
-    for idx, item in enumerate(raw.get("sentence_info", []) or raw.get("sentences", [])):
+    sentence_list = raw.get("sentence_info", []) or raw.get("sentences", [])
+    # 处理可能的嵌套情况：sentence_list 可能是 [[{...}]] 而不是 [{...}]
+    while isinstance(sentence_list, list) and sentence_list and isinstance(sentence_list[0], list):
+        sentence_list = sentence_list[0]
+    for idx, item in enumerate(sentence_list):
+        # 确保 item 是字典而非列表
+        if isinstance(item, list) and item:
+            item = item[0] if isinstance(item[0], dict) else {}
+        if not isinstance(item, dict):
+            continue
         seg = {
             "id": idx,
             "start": item.get("start", 0.0),
@@ -119,6 +129,12 @@ def get_audio_duration(audio_path: str) -> float:
         return 0.0
 
 
+def _is_funasr_nano(model_name: str | None) -> bool:
+    if not model_name:
+        return False
+    return model_name.startswith("FunAudioLLM/Fun-ASR")
+
+
 def resolve_remote_code_path(
     model_name: str | None,
     remote_code: str | None,
@@ -126,6 +142,10 @@ def resolve_remote_code_path(
 ) -> str | None:
     if remote_code:
         return remote_code
+    if _is_funasr_nano(model_name):
+        spec = importlib.util.find_spec("funasr.models.fun_asr_nano.model")
+        if spec and spec.origin:
+            return spec.origin
     if not model_name:
         return None
     if snapshot_download is None:
@@ -159,6 +179,10 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
     if args.trust_remote_code is not None:
         trust_remote_code = str(args.trust_remote_code).lower() == "true"
         model_kwargs["trust_remote_code"] = trust_remote_code
+        if trust_remote_code and not args.remote_code:
+            auto_remote_code = resolve_remote_code_path(args.model_name, None)
+            if auto_remote_code:
+                model_kwargs["remote_code"] = auto_remote_code
     if args.remote_code:
         model_kwargs["remote_code"] = args.remote_code
     if args.vad_model:
@@ -167,6 +191,8 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
         model_kwargs["punc_model"] = args.punc_model
     if args.spk_model:
         model_kwargs["spk_model"] = args.spk_model
+    if _is_funasr_nano(args.model_name) and args.vad_model:
+        model_kwargs["ctc_decoder"] = None
     if args.model_revision:
         model_kwargs["model_revision"] = args.model_revision
     if args.vad_model_revision:
@@ -201,7 +227,10 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
     if args.batch_size_s is not None:
         generate_kwargs["batch_size_s"] = args.batch_size_s
     if args.use_itn is not None:
-        generate_kwargs["use_itn"] = str(args.use_itn).lower() == "true"
+        itn_value = str(args.use_itn).lower() == "true"
+        generate_kwargs["use_itn"] = itn_value
+        if _is_funasr_nano(args.model_name):
+            generate_kwargs["itn"] = itn_value
     if args.merge_vad is not None:
         generate_kwargs["merge_vad"] = str(args.merge_vad).lower() == "true"
     if args.merge_length_s is not None:
@@ -212,9 +241,16 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
         generate_kwargs["lm_weight"] = args.lm_weight
     if args.beam_size is not None:
         generate_kwargs["beam_size"] = args.beam_size
+    if _is_funasr_nano(args.model_name):
+        generate_kwargs["batch_size"] = 1
+        generate_kwargs["batch_size_s"] = 0
 
     result = model.generate(**generate_kwargs)
+    # 处理可能的嵌套列表情况（某些模型返回 [[{...}]] 而不是 [{...}]）
     raw = result[0] if isinstance(result, list) and result else (result or {})
+    # 如果还是列表（多层嵌套），继续解包直到拿到字典或空值
+    while isinstance(raw, list):
+        raw = raw[0] if raw else {}
     normalized = normalize_model_output(raw)
     payload = build_infer_payload(
         text=normalized.get("text", ""),

@@ -113,7 +113,7 @@ ehthumbs.db
 # 4. 文档构建
 docs/_build/
 site/
-
+docs/
 # 5. Node.js（如果有前端组件）
 node_modules/
 npm-debug.log*

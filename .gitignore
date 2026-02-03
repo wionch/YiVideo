@@ -244,7 +244,7 @@ run_pipeline.py
 .tmp.drivedownload/
 .worktrees/
 tmp/
-
+docs/
 
 # Model checkpoints
 services/workers/indextts_service/checkpoints/"services/workers/indextts_service/checkpoints/" 

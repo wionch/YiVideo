@@ -433,6 +433,11 @@ class SingleTaskExecutor:
             if not state:
                 raise ValueError(f"任务不存在: {task_id}")
             
+            # 检查 Redis 是否连接（state 中包含 error 表示 Redis 未连接或状态不存在）
+            if state.get("error"):
+                logger.warning(f"Redis 未连接或状态获取失败，跳过状态更新: {task_id}, 错误: {state.get('error')}")
+                return
+            
             # 更新状态
             state["status"] = status
             state["updated_at"] = datetime.now().isoformat()

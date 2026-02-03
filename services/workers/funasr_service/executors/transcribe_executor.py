@@ -20,8 +20,16 @@ logger = get_logger(__name__)
 def map_words(time_stamps: List[Dict[str, Any]] | None, enable: bool) -> Tuple[list, int]:
     if not enable or not time_stamps:
         return [], 0
+    # 处理可能的嵌套列表情况
+    while isinstance(time_stamps, list) and time_stamps and isinstance(time_stamps[0], list):
+        time_stamps = time_stamps[0]
     words = []
     for item in time_stamps:
+        # 确保 item 是字典
+        if isinstance(item, list) and item:
+            item = item[0] if isinstance(item[0], dict) else None
+        if not isinstance(item, dict):
+            continue
         words.append(
             {
                 "word": item.get("text", ""),
@@ -66,9 +74,17 @@ def build_segments_from_payload(
     payload: Dict[str, Any], audio_duration: float, enable_word_timestamps: bool
 ) -> List[Dict[str, Any]]:
     segments = payload.get("segments") or []
+    # 处理可能的嵌套列表情况
+    while isinstance(segments, list) and segments and isinstance(segments[0], list):
+        segments = segments[0]
     if segments:
         normalized = []
         for idx, seg in enumerate(segments):
+            # 确保 seg 是字典
+            if isinstance(seg, list) and seg:
+                seg = seg[0] if isinstance(seg[0], dict) else {}
+            if not isinstance(seg, dict):
+                continue
             item = dict(seg)
             if "id" not in item:
                 item["id"] = idx
