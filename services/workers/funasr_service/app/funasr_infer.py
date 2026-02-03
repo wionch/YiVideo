@@ -5,7 +5,7 @@ import importlib.util
 import json
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 def normalize_model_output(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,6 +135,76 @@ def _is_funasr_nano(model_name: str | None) -> bool:
     return model_name.startswith("FunAudioLLM/Fun-ASR")
 
 
+def _is_paraformer_en(model_name: str | None) -> bool:
+    """检测是否为英文 Paraformer 模型（不支持 language/use_itn 参数）。"""
+    if not model_name:
+        return False
+    return "paraformer" in model_name.lower() and "-en" in model_name.lower()
+
+
+def _load_token_list_if_mismatch(model_name: str | None) -> List[str] | None:
+    """当 bpe.model vocab 小于 tokens.json 时返回 token_list，用于绕过解码越界。"""
+    if not model_name:
+        return None
+    try:
+        from modelscope import snapshot_download
+    except Exception:
+        return None
+    try:
+        model_dir = snapshot_download(model_name)
+    except Exception:
+        return None
+    tokens_path = os.path.join(model_dir, "tokens.json")
+    bpe_path = os.path.join(model_dir, "bpe.model")
+    if not (os.path.exists(tokens_path) and os.path.exists(bpe_path)):
+        return None
+    try:
+        with open(tokens_path, "r", encoding="utf-8") as handle:
+            tokens = json.load(handle)
+        if not isinstance(tokens, list) or not tokens:
+            return None
+        import sentencepiece as spm
+
+        sp = spm.SentencePieceProcessor()
+        sp.load(bpe_path)
+        if len(tokens) <= sp.get_piece_size():
+            return None
+        return tokens
+    except Exception:
+        return None
+
+
+def _ensure_token_list_tokenizer_registered() -> bool:
+    """注册基于 token_list 的 tokenizer，避免 SentencePiece 解码越界。"""
+    try:
+        from funasr.register import tables
+        from funasr.tokenizer.abs_tokenizer import BaseTokenizer
+        from funasr.utils import postprocess_utils
+    except Exception:
+        return False
+
+    if tables.tokenizer_classes.get("TokenListTokenizer") is not None:
+        return True
+
+    @tables.register("tokenizer_classes", "TokenListTokenizer")
+    class TokenListTokenizer(BaseTokenizer):
+        def __init__(self, token_list: List[str], **kwargs):
+            super().__init__(token_list=token_list, **kwargs)
+
+        def text2tokens(self, line: str) -> List[str]:
+            # 最小实现：仅用于满足抽象方法，不影响推理解码
+            text = str(line or "")
+            if " " in text:
+                return [item for item in text.split(" ") if item]
+            return list(text) if text else []
+
+        def tokens2text(self, tokens):
+            text, _ = postprocess_utils.sentence_postprocess(list(tokens))
+            return text
+
+    return True
+
+
 def resolve_remote_code_path(
     model_name: str | None,
     remote_code: str | None,
@@ -183,6 +253,9 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
             auto_remote_code = resolve_remote_code_path(args.model_name, None)
             if auto_remote_code:
                 model_kwargs["remote_code"] = auto_remote_code
+        if trust_remote_code and not model_kwargs.get("remote_code"):
+            # 未找到 remote_code 时关闭 trust_remote_code，避免尝试导入不存在的 model 模块
+            model_kwargs["trust_remote_code"] = False
     if args.remote_code:
         model_kwargs["remote_code"] = args.remote_code
     if args.vad_model:
@@ -202,6 +275,12 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
     if args.spk_model_revision:
         model_kwargs["spk_model_revision"] = args.spk_model_revision
 
+    token_list = _load_token_list_if_mismatch(args.model_name)
+    if token_list and _ensure_token_list_tokenizer_registered():
+        model_kwargs["tokenizer"] = "TokenListTokenizer"
+        model_kwargs["tokenizer_conf"] = {"token_list": token_list}
+        print("检测到 bpe.model 与 tokens.json 词表不一致，已切换 TokenListTokenizer")
+
     try:
         model = model_loader(**model_kwargs)
     except AssertionError as exc:
@@ -219,14 +298,20 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
         else:
             raise
     generate_kwargs: Dict[str, Any] = {"input": [args.audio_path], "cache": {}}
-    if args.language:
+
+    # 检测是否为英文 Paraformer 模型（不支持 language/use_itn 参数）
+    is_paraformer_en = _is_paraformer_en(args.model_name)
+
+    # 只有非英文 Paraformer 模型才传递 language 参数
+    if args.language and not is_paraformer_en:
         generate_kwargs["language"] = args.language
     hotwords = parse_hotwords(args.hotwords)
     if hotwords:
         generate_kwargs["hotwords"] = hotwords
     if args.batch_size_s is not None:
         generate_kwargs["batch_size_s"] = args.batch_size_s
-    if args.use_itn is not None:
+    if args.use_itn is not None and not is_paraformer_en:
+        # 英文 Paraformer 模型不支持 use_itn 参数
         itn_value = str(args.use_itn).lower() == "true"
         generate_kwargs["use_itn"] = itn_value
         if _is_funasr_nano(args.model_name):
