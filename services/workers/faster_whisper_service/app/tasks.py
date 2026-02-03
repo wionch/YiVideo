@@ -217,98 +217,101 @@ def _execute_transcription(
     start_time = time.time()
 
     try:
-        # 使用新的实时日志输出函数
-        from services.common.subprocess_utils import run_gpu_command
-        
-        result = run_gpu_command(
-            cmd,
-            stage_name=stage_name,
-            timeout=1800,  # 30 分钟超时
-            cwd=str(current_dir),
-            env=os.environ.copy()  # 继承环境变量（包括 CUDA_VISIBLE_DEVICES）
-        )
+        try:
+            # 使用新的实时日志输出函数
+            from services.common.subprocess_utils import run_gpu_command
 
-        # ===== 检查执行结果 =====
-        if result.returncode != 0:
-            error_msg = f"subprocess 执行失败，返回码: {result.returncode}"
+            result = run_gpu_command(
+                cmd,
+                stage_name=stage_name,
+                timeout=1800,  # 30 分钟超时
+                cwd=str(current_dir),
+                env=os.environ.copy()  # 继承环境变量（包括 CUDA_VISIBLE_DEVICES）
+            )
+
+            # ===== 检查执行结果 =====
+            if result.returncode != 0:
+                error_msg = f"subprocess 执行失败，返回码: {result.returncode}"
+                logger.error(f"[{stage_name}] {error_msg}")
+                logger.error(f"[{stage_name}] stdout: {result.stdout}")
+                logger.error(f"[{stage_name}] stderr: {result.stderr}")
+                raise RuntimeError(f"{error_msg}\nstderr: {result.stderr}")
+
+            logger.info(f"[{stage_name}] subprocess 执行成功")
+            logger.info(f"[{stage_name}] 总执行时间: {result.execution_time:.3f}s")
+
+            # 记录 stderr 输出（推理脚本的日志）
+            if result.stderr:
+                logger.debug(f"[{stage_name}] subprocess stderr 输出:")
+                for line in result.stderr.strip().split('\n')[:20]:  # 只显示前20行
+                    logger.debug(f"  | {line}")
+
+        except subprocess.TimeoutExpired as e:
+            error_msg = f"subprocess 执行超时 (30分钟)"
             logger.error(f"[{stage_name}] {error_msg}")
-            logger.error(f"[{stage_name}] stdout: {result.stdout}")
-            logger.error(f"[{stage_name}] stderr: {result.stderr}")
-            raise RuntimeError(f"{error_msg}\nstderr: {result.stderr}")
+            raise RuntimeError(error_msg) from e
 
-        logger.info(f"[{stage_name}] subprocess 执行成功")
-        logger.info(f"[{stage_name}] 总执行时间: {result.execution_time:.3f}s")
+        except Exception as e:
+            error_msg = f"subprocess 执行异常: {str(e)}"
+            logger.error(f"[{stage_name}] {error_msg}")
+            raise RuntimeError(error_msg) from e
 
-        # 记录 stderr 输出（推理脚本的日志）
-        if result.stderr:
-            logger.debug(f"[{stage_name}] subprocess stderr 输出:")
-            for line in result.stderr.strip().split('\n')[:20]:  # 只显示前20行
-                logger.debug(f"  | {line}")
+        # ===== 读取结果文件 =====
+        if not output_file.exists():
+            raise RuntimeError(f"推理结果文件不存在: {output_file}")
 
-    except subprocess.TimeoutExpired as e:
-        error_msg = f"subprocess 执行超时 (30分钟)"
-        logger.error(f"[{stage_name}] {error_msg}")
-        raise RuntimeError(error_msg) from e
+        logger.info(f"[{stage_name}] 读取推理结果: {output_file}")
 
-    except Exception as e:
-        error_msg = f"subprocess 执行异常: {str(e)}"
-        logger.error(f"[{stage_name}] {error_msg}")
-        raise RuntimeError(error_msg) from e
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                result_data = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error(f"[{stage_name}] 结果文件 JSON 解析失败: {e}")
+            raise RuntimeError(f"结果文件 JSON 解析失败: {e}") from e
 
-    # ===== 读取结果文件 =====
-    if not output_file.exists():
-        raise RuntimeError(f"推理结果文件不存在: {output_file}")
+        # ===== 验证结果 =====
+        if not result_data.get('success', False):
+            error_info = result_data.get('error', {})
+            error_msg = error_info.get('message', '未知错误')
+            error_type = error_info.get('type', 'Unknown')
 
-    logger.info(f"[{stage_name}] 读取推理结果: {output_file}")
+            logger.error(f"[{stage_name}] 推理失败: {error_type}: {error_msg}")
+            raise RuntimeError(f"推理失败: {error_type}: {error_msg}")
 
-    try:
-        with open(output_file, 'r', encoding='utf-8') as f:
-            result_data = json.load(f)
-    except json.JSONDecodeError as e:
-        logger.error(f"[{stage_name}] 结果文件 JSON 解析失败: {e}")
-        raise RuntimeError(f"结果文件 JSON 解析失败: {e}") from e
+        # ===== 提取结果数据 =====
+        segments_list = result_data.get('segments', [])
+        info_dict = result_data.get('info', {})
+        statistics = result_data.get('statistics', {})
 
-    # ===== 验证结果 =====
-    if not result_data.get('success', False):
-        error_info = result_data.get('error', {})
-        error_msg = error_info.get('message', '未知错误')
-        error_type = error_info.get('type', 'Unknown')
+        logger.info(f"[{stage_name}] ========== 转录结果统计 ==========")
+        logger.info(f"[{stage_name}] 转录片段数: {statistics.get('total_segments', len(segments_list))}")
+        logger.info(f"[{stage_name}] 音频时长: {statistics.get('audio_duration', 0):.2f}s")
+        logger.info(f"[{stage_name}] 转录耗时: {statistics.get('transcribe_duration', 0):.2f}s")
+        logger.info(f"[{stage_name}] 检测语言: {statistics.get('language', 'unknown')}")
+        logger.info(f"[{stage_name}] =====================================")
 
-        logger.error(f"[{stage_name}] 推理失败: {error_type}: {error_msg}")
-        raise RuntimeError(f"推理失败: {error_type}: {error_msg}")
+        # ===== 构建返回结果（保持与原格式兼容）=====
+        result = {
+            "segments": segments_list,
+            "audio_path": audio_path,
+            "audio_duration": info_dict.get('duration', 0),
+            "language": info_dict.get('language'),
+            "transcribe_duration": statistics.get('transcribe_duration', 0),
+            "model_name": model_name,
+            "device": device,
+            "enable_word_timestamps": word_timestamps
+        }
 
-    # ===== 提取结果数据 =====
-    segments_list = result_data.get('segments', [])
-    info_dict = result_data.get('info', {})
-    statistics = result_data.get('statistics', {})
+        return result
 
-    logger.info(f"[{stage_name}] ========== 转录结果统计 ==========")
-    logger.info(f"[{stage_name}] 转录片段数: {statistics.get('total_segments', len(segments_list))}")
-    logger.info(f"[{stage_name}] 音频时长: {statistics.get('audio_duration', 0):.2f}s")
-    logger.info(f"[{stage_name}] 转录耗时: {statistics.get('transcribe_duration', 0):.2f}s")
-    logger.info(f"[{stage_name}] 检测语言: {statistics.get('language', 'unknown')}")
-    logger.info(f"[{stage_name}] =====================================")
-
-    # ===== 清理临时文件 =====
-    try:
-        output_file.unlink()
-        logger.debug(f"[{stage_name}] 已清理临时结果文件: {output_file}")
-    except Exception as e:
-        logger.warning(f"[{stage_name}] 清理临时文件失败: {e}")
-
-    # ===== 构建返回结果（保持与原格式兼容）=====
-    result = {
-        "segments": segments_list,
-        "audio_path": audio_path,
-        "audio_duration": info_dict.get('duration', 0),
-        "language": info_dict.get('language'),
-        "transcribe_duration": statistics.get('transcribe_duration', 0),
-        "model_name": model_name,
-        "device": device,
-        "enable_word_timestamps": word_timestamps
-    }
-
-    return result
+    finally:
+        # ===== 清理临时文件（无论成功或失败）=====
+        try:
+            if output_file.exists():
+                output_file.unlink()
+                logger.debug(f"[{stage_name}] 已清理临时结果文件: {output_file}")
+        except Exception as e:
+            logger.warning(f"[{stage_name}] 清理临时文件失败: {e}")
 
 
 

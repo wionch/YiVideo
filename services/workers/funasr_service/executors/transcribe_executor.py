@@ -359,61 +359,70 @@ class FunASRTranscribeExecutor(BaseNodeExecutor):
             beam_size=beam_size,
         )
 
-        payload = (
-            _run_infer_with_gpu_lock(cmd, self.stage_name, str(Path(__file__).parent))
-            if device != "cpu"
-            else _run_infer(cmd, self.stage_name, str(Path(__file__).parent))
-        )
+        try:
+            payload = (
+                _run_infer_with_gpu_lock(cmd, self.stage_name, str(Path(__file__).parent))
+                if device != "cpu"
+                else _run_infer(cmd, self.stage_name, str(Path(__file__).parent))
+            )
 
-        audio_duration = payload.get("audio_duration") or 0
-        segments = build_segments_from_payload(payload, audio_duration, enable_word_timestamps)
-        funasr_metadata = {
-            "vad_model": vad_model,
-            "punc_model": punc_model,
-            "spk_model": spk_model,
-            "hotwords": _normalize_hotwords(hotwords),
-            "warnings": warnings,
-        }
+            audio_duration = payload.get("audio_duration") or 0
+            segments = build_segments_from_payload(payload, audio_duration, enable_word_timestamps)
+            funasr_metadata = {
+                "vad_model": vad_model,
+                "punc_model": punc_model,
+                "spk_model": spk_model,
+                "hotwords": _normalize_hotwords(hotwords),
+                "warnings": warnings,
+            }
 
-        transcribe_data = build_transcribe_json(
-            stage_name=self.stage_name,
-            workflow_id=self.context.workflow_id,
-            audio_file_name=os.path.basename(audio_path),
-            segments=segments,
-            audio_duration=audio_duration,
-            language=payload.get("language") or (language or "unknown"),
-            model_name=model_name,
-            device=device,
-            enable_word_timestamps=enable_word_timestamps,
-            transcribe_duration=payload.get("transcribe_duration") or 0,
-            funasr_metadata=funasr_metadata,
-        )
+            transcribe_data = build_transcribe_json(
+                stage_name=self.stage_name,
+                workflow_id=self.context.workflow_id,
+                audio_file_name=os.path.basename(audio_path),
+                segments=segments,
+                audio_duration=audio_duration,
+                language=payload.get("language") or (language or "unknown"),
+                model_name=model_name,
+                device=device,
+                enable_word_timestamps=enable_word_timestamps,
+                transcribe_duration=payload.get("transcribe_duration") or 0,
+                funasr_metadata=funasr_metadata,
+            )
 
-        workflow_short_id = self.context.workflow_id[:8]
-        segments_file = build_node_output_path(
-            task_id=self.context.workflow_id,
-            node_name=self.stage_name,
-            file_type="data",
-            filename=f"transcribe_data_{workflow_short_id}.json",
-        )
-        ensure_directory(segments_file)
-        with open(segments_file, "w", encoding="utf-8") as handle:
-            json.dump(transcribe_data, handle, ensure_ascii=False, indent=2)
+            workflow_short_id = self.context.workflow_id[:8]
+            segments_file = build_node_output_path(
+                task_id=self.context.workflow_id,
+                node_name=self.stage_name,
+                file_type="data",
+                filename=f"transcribe_data_{workflow_short_id}.json",
+            )
+            ensure_directory(segments_file)
+            with open(segments_file, "w", encoding="utf-8") as handle:
+                json.dump(transcribe_data, handle, ensure_ascii=False, indent=2)
 
-        logger.info(
-            f"[{self.stage_name}] 转录完成，segments={len(segments)}，模型={model_name}"
-        )
+            logger.info(
+                f"[{self.stage_name}] 转录完成，segments={len(segments)}，模型={model_name}"
+            )
 
-        return {
-            "segments_file": segments_file,
-            "audio_duration": audio_duration,
-            "language": payload.get("language") or (language or "unknown"),
-            "model_name": model_name,
-            "device": device,
-            "enable_word_timestamps": enable_word_timestamps,
-            "statistics": transcribe_data["statistics"],
-            "segments_count": len(segments),
-        }
+            return {
+                "segments_file": segments_file,
+                "audio_duration": audio_duration,
+                "language": payload.get("language") or (language or "unknown"),
+                "model_name": model_name,
+                "device": device,
+                "enable_word_timestamps": enable_word_timestamps,
+                "statistics": transcribe_data["statistics"],
+                "segments_count": len(segments),
+            }
+        finally:
+            # 确保临时文件被清理（无论成功或失败）
+            try:
+                if os.path.exists(output_file):
+                    os.remove(output_file)
+                    logger.debug(f"[{self.stage_name}] 已清理临时文件: {output_file}")
+            except Exception as e:
+                logger.warning(f"[{self.stage_name}] 清理临时文件失败: {e}")
 
     def get_cache_key_fields(self) -> List[str]:
         return [
