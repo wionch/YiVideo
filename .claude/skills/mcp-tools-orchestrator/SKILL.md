@@ -1,72 +1,135 @@
 ---
 name: mcp-tools-orchestrator
-description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：serena（代码符号/LSP/引用/调用链/重构影响面）、context7（版本特定的最新库文档/示例）、sequential-thinking（分步规划/结构化推理）、brave-search & exa（Web 检索/证据来源）、tavily-remote（URL 抽取/结构化提取/站点 map/crawl）、filesystem（文件读写/目录管理/批量改动）、chrome-devtools（浏览器渲染/动态页面获取）。当任务涉及：代码定位/重构、查最新 API、逐步推理、Web 研究与抽取/爬取、文件批处理时启用。
+description: >
+    【强制触发】任务包含以下任一关键词时必须启用：
+    - "官方渠道/官方文档/一手信息/Github/ModelScope/HuggingFace" → github/hf-mcp-server MCP（禁止 WebSearch/WebFetch）
+    - "模型/API/库/框架的用法/参数/样例" → context7 MCP（禁止凭记忆写代码）
+    - "代码符号/定义/引用/调用链" → serena MCP（禁止 grep/Glob）
+    - "复杂推理/多子问题/权衡分析" → sequential-thinking MCP（禁止直接给方案）
+     强制证据驱动输出，违规操作将被拒绝。
 ---
 
-# YiVideo MCP 编排器（MCP Orchestrator）
+# MCP 工具编排器
 
-> 渐进式披露：本文件只放"强制检查点 + 路由规则 + 强制约束 + 输出契约"；工具调用模板与剧本细节在 `references/` 下，需要时再加载。
-
----
-
-## 🚨 强制执行：任务接收后第一步
-
-**收到用户消息后，你必须立即执行以下检查（优先级高于任何其他操作）：**
-
-### 决策树（必须按序检查）
-
-1. **代码符号查找？**（定义/引用/调用链/影响面/入口/重构影响）
-   - ✅ **必须用**：`serena`（激活项目 → 符号定位 → 调用链/引用面）
-   - ⛔ **禁止用**：`grep` / `find` / `Glob` / `Grep`（内置工具）
-   - **示例触发词**："在哪定义"、"哪里被调用"、"影响哪些模块"、"调用链"、"入口在哪"
-
-2. **复杂推理/方案对比/多步骤问题？**（≥3 子问题/存在权衡/约束不清）
-   - ✅ **必须先用**：`sequential-thinking`（分解子问题 → 列假设 → 给出工具链）
-   - ⛔ **禁止**：直接给方案/自行分析不推理
-   - **示例触发词**："如何重构"、"方案对比"、"评估影响"、"系统化分析"
-
-3. **外部证据/最新信息/网页抽取？**
-   - ✅ **必须用**：`brave-search` / `exa` / `tavily-remote`
-   - ⛔ **禁止用**：`WebFetch` / `WebSearch`（内置工具）
-   - **示例触发词**："最新信息"、"查资料"、"找官方说明"、"抽取网页内容"
-
-4. **库/框架 API 正确性？**（版本敏感/易幻觉 API/官方推荐写法）
-   - ✅ **必须用**：`context7`（resolve library id → query-docs）
-   - ⛔ **禁止**：直接给代码示例/凭记忆写 API
-   - **示例触发词**："最新用法"、"API 怎么用"、"版本变化"、"官方写法"
-
-5. **批量文件操作/配置变更/目录管理？**
-   - ✅ **必须用**：`filesystem`（list_allowed_directories → search_files → edit_file dryRun）
-   - ⛔ **禁止**：直接用 `Read` / `Write` / `Edit`（内置工具）批量操作
-   - **示例触发词**："批量修改"、"搜索所有"、"目录结构"、"配置变更"
+> **核心职责**：根据任务特征路由到正确的 MCP 工具，强制证据驱动输出，防止盲写代码与幻觉 API。
 
 ---
 
-### ✅ 合理例外（以下情况可使用内置工具）
+## 📋 立即行动（看到这里直接执行）
 
-1. **用户明确指定工具**："用 grep 找..."、"直接给我答案，不要查文档"
-   → 遵从用户指令，但需在输出中说明 `"按用户要求使用 <工具>"`
+**这是你被触发后的第一件事：**
 
-2. **MCP 服务器不可用**：调用失败 + 无可用降级路径
-   → 使用内置工具，但必须在输出中说明 `"<MCP工具> 不可用，降级使用 <内置工具>"`
+1. **停止默认行为**：不要直接用 WebSearch/Grep/Read，先看下面的检查表
+2. **快速匹配**：在"快速触发检查"表中找到匹配项
+3. **调用 MCP 工具**：按照表中的"必须调用"列执行
+4. **输出自检段落**：完成后必须包含"MCP 工具选择自检"（见"输出契约"）
 
-3. **非代码语义的文本搜索**：在日志/文档/配置中搜索纯文本模式（非符号）
-   → 可用 `Grep`，但涉及代码符号时必须切换到 `serena`
-
-4. **快速原型/一次性脚本**（无需符号级定位）
-   → 可直接编写，但需说明 `"非生产代码，未做符号级验证"`
+**如果不确定用哪个工具 → 优先用 `sequential-thinking` 分解任务，再决定。**
 
 ---
 
-### 📋 输出验证要求（每次回答必须包含）
+## ⚡ 快速触发检查（优先级最高）
 
-在给出最终答案前，你必须在回复中包含以下段落：
+**在执行任何操作前，必须先自检：**
 
+| 用户请求是否包含...                                    | 必须调用                     | 禁止使用            |
+| ------------------------------------------------------ | ---------------------------- | ------------------- |
+| "官方渠道/官方文档/ModelScope/HuggingFace/GitHub 仓库" | `github`/`hf-mcp-server` MCP | WebSearch/WebFetch  |
+| "模型/API/库的参数/样例/用法"                          | `context7` MCP               | 凭记忆写代码        |
+| "代码符号/定义位置/调用链/影响面"                      | `serena` MCP                 | grep/find/Glob/Grep |
+| "复杂分析/多子问题/有权衡"                             | `sequential-thinking` MCP    | 直接给结论          |
+
+**违规成本**：错误的工具选择会导致幻觉 API、信息噪声、重复劳动。
+
+---
+
+## 🚨 四大铁律（违反立即拒绝）
+
+1. **禁止盲写**：代码符号问题必须先用 `serena`（符号定位 → 调用链 → 影响面）
+   ❌ **错误示例**：直接用 grep 搜索类名 → ✅ **正确做法**：`mcp__serena__find_symbol`
+
+2. **禁止幻觉 API**：库/框架用法必须先用 `context7` 或一手文档验证
+   ❌ **错误示例**：凭记忆写 `AutoModel.from_pretrained()` → ✅ **正确做法**：`mcp__context7__query-docs`
+
+3. **禁止跳跃结论**：复杂问题（≥3 子问题/存在权衡）必须先用 `sequential-thinking` 分解
+   ❌ **错误示例**：直接给优化方案 → ✅ **正确做法**：`mcp__sequential-thinking__sequentialthinking`
+
+4. **禁止无证据输出**：外部事实必须有来源链（优先官方/一手），时间敏感结论需双来源互证
+   ❌ **错误示例**：用 WebSearch 获取模型文档 → ✅ **正确做法**：`mcp__hf-mcp-server__hub_repo_details` + `mcp__hf-mcp-server__model_search`
+
+---
+
+## 路由决策图
+
+```dot
+digraph mcp_router {
+    rankdir=TB;
+    node [shape=box, style=rounded];
+
+    start [label="收到任务", shape=doublecircle];
+    q1 [label="代码符号查找？\n(定义/引用/调用链)", shape=diamond];
+    q2 [label="复杂推理？\n(≥3子问题/有权衡)", shape=diamond];
+    q3 [label="库/API 用法？\n(版本敏感/易幻觉)", shape=diamond];
+    q4 [label="外部信息？", shape=diamond];
+    q4a [label="有官方平台？\n(GitHub/HF/ModelScope)", shape=diamond];
+    q5 [label="批量文件操作？", shape=diamond];
+
+    serena [label="serena\n⛔禁 grep/Glob", style="filled", fillcolor="#ffcccc"];
+    seq [label="sequential-thinking\n⛔禁直接给方案", style="filled", fillcolor="#ffcccc"];
+    ctx7 [label="context7\n⛔禁凭记忆写代码", style="filled", fillcolor="#ffcccc"];
+    official [label="1st: github/hf/modelscope\n⛔禁通用搜索", style="filled", fillcolor="#ccffcc"];
+    web [label="2nd: brave/exa/tavily\n⛔禁 WebFetch", style="filled", fillcolor="#ffffcc"];
+    chrome [label="3rd: chrome-devtools\n(兜底渲染)", style="filled", fillcolor="#ffeecc"];
+    fs [label="filesystem\n⛔禁批量 Read/Write", style="filled", fillcolor="#ffcccc"];
+    proceed [label="继续执行", shape=box];
+
+    start -> q1;
+    q1 -> serena [label="是"];
+    q1 -> q2 [label="否"];
+    q2 -> seq [label="是"];
+    q2 -> q3 [label="否"];
+    q3 -> ctx7 [label="是"];
+    q3 -> q4 [label="否"];
+    q4 -> q4a [label="是"];
+    q4a -> official [label="是\n(优先一手)"];
+    q4a -> web [label="否\n(无官方平台)"];
+    web -> chrome [label="抽取失败", style=dashed];
+    q4 -> q5 [label="否"];
+    q5 -> fs [label="是"];
+    q5 -> proceed [label="否"];
+}
 ```
----
-**🔍 MCP 工具选择自检**
 
-- [x] 已检查决策树：命中第 X 条规则
+---
+
+## 快速参考表
+
+| 任务特征                                | 必须用                                    | 禁止用                  | 核心差异                      |
+| --------------------------------------- | ----------------------------------------- | ----------------------- | ----------------------------- |
+| 代码符号（定义/引用/调用链/影响面）     | `serena`                                  | grep/find/Glob/Grep     | 符号语义 vs 文本匹配          |
+| 复杂推理（≥3 子问题/存在权衡/约束不清） | `sequential-thinking`                     | 直接给方案/自行分析     | 结构化分解 vs 跳跃结论        |
+| 库/API 用法（版本敏感/易幻觉 API）      | `context7`                                | 凭记忆写代码            | 版本正确性 vs 幻觉            |
+| **外部信息 - 官方平台（1st 优先）**     | **`github`/`hf-mcp-server`/`modelscope`** | **通用搜索/手动拼 URL** | **官方 API（结构化）vs 噪声** |
+| **外部信息 - 通用搜索（2nd 兜底）**     | **`brave-search`/`exa`/`tavily-remote`**  | **WebFetch/WebSearch**  | **证据链 + 抽取 vs 单次获取** |
+| **外部信息 - 浏览器（3rd 兜底）**       | **`chrome-devtools`**                     | **放弃获取**            | **渲染（反爬）vs 抽取失败**   |
+| 批量文件操作（配置变更/目录管理）       | `filesystem`                              | 批量 Read/Write/Edit    | 原子性 + dryRun 预览          |
+
+**工具组合策略**：
+
+- **外部信息检索**：官方平台（github/hf/modelscope，一手来源）→ 通用搜索（brave → exa → tavily，广覆盖 → 精筛 → 抽取）→ 浏览器兜底（chrome-devtools，反爬/动态渲染）
+- **代码开发**：serena（定位）+ context7（验证 API）+ filesystem（最小改动 + dryRun）
+
+---
+
+## 输出契约（每次必须包含）
+
+### 模板
+
+```markdown
+---
+🔍 MCP 工具选择自检
+
+- [x] 已检查决策树：命中节点 <qX>（<任务特征>）
 - [x] 已选择 MCP 工具：<工具名>（理由：<简短说明>）
 - [x] 已避免违规操作：未使用 <禁止工具>
 
@@ -82,246 +145,68 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 ---
 ```
 
-⚠️ **注意**：你的最终回复必须包含 "🔍 MCP 工具选择自检" 段落，否则回答无效。
+### 实际示例
+
+**场景：用户请求"从 ModelScope 获取 FunASR 模型文档"**
+
+```markdown
+---
+🔍 MCP 工具选择自检
+
+- [x] 已检查决策树：命中节点 q4a（外部信息 - 官方平台）
+- [x] 已选择 MCP 工具：`modelscope` MCP（理由：ModelScope 是一手官方平台）
+- [x] 已避免违规操作：未使用 WebSearch/WebFetch
+
+**工具调用链：**
+1. `mcp__modelscope__search_models` - 搜索 FunASR 相关模型
+2. `mcp__hf-mcp-server__hub_repo_details` - 获取模型详细参数
+
+**关键证据来源：**
+- 外部文档：ModelScope API / 2025-02-04
+---
+```
+
+⚠️ **强制要求**：回复中必须包含上述自检段落，否则回答无效。
 
 ---
 
-## 使命
+## 容错降级路径
 
-你是"工具编排层"：根据任务类型决定 **用哪个 MCP server、按什么顺序、用什么最小输入**，以最大化正确性并减少无效调用。
-
-默认模式：
-
-1. 先规划（仅在复杂任务时，使用 sequential-thinking）
-2. 再取证（优先一手/权威来源）
-3. 交叉验证（时间敏感/高风险结论至少两来源互证）
-4. 输出可执行结果（命令/改动点/验证步骤）
-
-## 可用 MCP Servers（以当前环境为准）
-
-- serena
-- context7
-- sequential-thinking
-- brave-search
-- exa
-- tavily-remote
-- filesystem
-- chrome-devtools
-
-> 环境备注：n8n-mcp 若连接失败，编排时直接忽略，不作为依赖。
-
-## 启用条件（何时启用）
-
-当用户提出以下任一诉求时启用：
-
-- "自动调用/编排 MCP / 工作流 / agent workflow"
-- 多步骤问题：规划 + 调研 + 实现/对比/评估
-- 代码库符号级问题：定义/引用/调用链/入口/影响面
-- "查最新文档/确认 API 是否存在/避免过时示例"
-- Web 研究：需要检索、比对来源、从 URL 抽取要点、站点级整理
+| 工具失败                              | 降级方案                                                                                        | 输出说明                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `serena`                              | 1. 先调用 `activate_project`（YiVideo）<br>2. 激活后**立即重试**原操作<br>3. 仍失败 → 降级 Grep | "serena 不可用，降级到文本搜索（无符号级定位）"        |
+| `context7`                            | brave-search（官方文档）+ tavily-remote 抽取                                                    | "context7 不可用，使用 Web 检索兜底"                   |
+| `github`/`hf-mcp-server`/`modelscope` | 降级到 brave-search（"平台名 <查询>"）+ tavily 抽取官方页面                                     | "官方 MCP 不可用，降级通用搜索"                        |
+| `exa`                                 | brave-search + tavily-remote                                                                    | "exa 不可用，使用 brave + tavily 兜底"                 |
+| `tavily-remote`                       | 1. 尝试 chrome-devtools 浏览器渲染<br>2. 仍失败 → brave/exa 给出来源列表 + 手动摘要             | "通过浏览器渲染获取" 或 "未抽取原文，基于来源列表摘要" |
 
 ---
 
-## 强制硬规则（从 CLAUDE.md 继承，必须执行）
+## 特殊约束
 
-### 1) Serena 项目激活与重试（硬约束）
+### serena 项目激活（硬规则）
 
-- 若 serena 返回 `"No active project"`：**必须先调用** `mcp__serena__activate_project` 激活项目（YiVideo）。
-- 激活后：**立即重试**原始 serena 操作，**不得跳过**。
-- **严禁**在未激活项目的情况下放弃使用 serena。
+若 serena 返回 `"No active project"`：
 
-### 2) 反模式（Anti-Patterns）——严禁操作
+1. **必须先调用** `mcp__serena__activate_project`（项目名：YiVideo）
+2. 激活后**立即重试**原始 serena 操作（不得跳过）
+3. **严禁**在未激活的情况下放弃使用 serena
 
-- **盲写（Blind Coding）**：未用 serena 读取文件/符号上下文就直接产补丁。
-- **假想 API（Hallucinated APIs）**：未用 context7（或 serena/一手文档）验证就使用可能不存在的接口。
-- **跳跃结论（Jump to Solution）**：复杂问题不经 sequential-thinking 分析就给"尝试性修复"。
+### 合理例外（可使用内置工具）
 
----
+以下情况可不使用 MCP 工具：
 
-## 编排策略（核心路由规则）
-
-> 以下策略详细说明如何使用各 MCP 工具，遵循顶部决策树的强制约束。
-
-### A) 复杂度闸门：是否先用 sequential-thinking
-
-满足任一条件 → 先调用 sequential-thinking（见顶部检查点第 2 条）：
-
-- 目标 ≥ 3 个子问题，或存在权衡/约束不清
-- 需要组合：代码库 + 外部文档 + Web 研究
-- 用户要求：系统化、逐步推理、多方案对比
-
-否则跳过 sequential-thinking，直接走对应工具链。
-
-### B) 代码库事实优先：serena
-
-适用（见顶部检查点第 1 条）：
-
-- "X 在哪里定义/哪里被用？"
-- "这段逻辑的调用链/入口在哪里？"
-- "重构会影响哪些模块/哪些符号？"
-
-策略：
-
-1. 先用 serena 做符号定位、引用与调用链，收敛到具体文件/函数/入口
-2. 再给解释/改动方案/最小 diff 建议
-3. **任何涉及"仓库事实"的结论必须可追溯到具体符号与文件**
-
-### C) API/库用法正确性：context7
-
-适用（见顶部检查点第 4 条）：
-
-- 框架/库版本变化明显、易出现"幻觉 API"
-- 用户强调"最新写法/版本特定写法/官方推荐"
-
-策略：
-
-1. context7 先 resolve（包名 → library id）
-2. 再 get docs（围绕当前任务主题）
-3. 输出代码必须对齐文档，不杜撰接口；有版本差异要明确版本前提
-
-### D) Web 研究与证据链：brave-search → exa → tavily-remote
-
-适用（见顶部检查点第 3 条）：
-
-- 需要最新信息或小众信息
-- 需要多来源比对与引用证据
-- 需要从 URL 抽取结构化信息/站点级整理
-
-策略：
-
-1. brave-search：广覆盖发现候选来源（优先官方/权威/一手）
-2. exa：当 brave 噪声大、需要更高精度/研究级来源/代码证据时使用
-3. tavily-remote：当需要读取页面并抽取字段/段落，或需要 map/crawl 站点时使用
-
-交叉验证（强制）：
-
-- **时间敏感或高风险结论至少两独立来源互证**（如 brave + exa；或 brave + tavily 抽取官方页面）
-- 结论必须可回链到来源，优先官方/规范/主仓库
-
-### E) 最少调用启发式（省调用但更准）
-
-- 优先 1–2 次高信噪比调用，而不是多次浅检索
-- brave 噪声大 → 立刻切到 exa 精筛
-- 需要原文证据 → 直接 tavily-remote 抽取
-- 结果冲突 → 抓一手来源（官方文档/规范/主仓库）并解释差异
-
-### F) 浏览器渲染兜底：chrome-devtools
-
-适用：
-
-- **tavily-remote 或其他工具抽取页面内容失败**（反爬、动态渲染、JavaScript 依赖）
-- 需要与网页交互（点击、填写表单、等待元素加载）才能获取内容
-- 需要验证页面可视化状态（截图确认、元素存在性）
-
-策略（作为兜底路径）：
-
-1. **其他工具失败后启用**：当 tavily-remote `extract`/`crawl` 返回空或异常时，切换到 chrome-devtools
-2. **导航与等待**：
-   - `navigate_page` 加载目标 URL
-   - `wait_for` 等待关键文本或元素出现
-   - `take_snapshot` 获取可交互元素列表
-3. **交互获取内容**：
-   - 需要点击展开/加载更多 → `click`
-   - 需要填写搜索/过滤 → `fill`
-   - 动态内容 → `evaluate_script` 执行 JS 提取
-4. **内容提取**：
-   - `take_snapshot` 获取页面文本结构
-   - `evaluate_script` 执行 `document.body.innerText` 或特定选择器提取
-5. **验证与截图**：必要时 `take_screenshot` 保存页面状态作为证据
-
-与其他工具的配合：
-
-- **brave-search/exa** 发现目标 URL → **chrome-devtools** 渲染获取内容
-- **tavily-remote** 抽取失败 → **chrome-devtools** 作为兜底
-- 获取的内容可再通过 **filesystem** 保存供后续处理
-
-### G) 文件读写与目录管理：filesystem
-
-适用（见顶部检查点第 5 条）：
-
-- 需要对**工作区文件做内容级读写/批量读取/目录遍历/搜索**（如改配置、改脚本、批量查看日志、生成/整理输出目录）
-- 需要处理 serena 不擅长的内容（长日志、数据文件、模板/配置等）
-- 需要读取图片/音频等媒体文件以便进一步分析
-
-与 serena 的边界：
-
-- serena：符号/LSP 语义（定义/引用/调用链/影响面）
-- filesystem：字节/文本/目录级 I/O（读写、搜索、目录树、元数据）
-
-策略（先读后写，写前必预览）：
-
-1. **先确认允许的根目录**：优先调用 `list_allowed_directories`，所有操作必须限定在允许目录内（server 通过 CLI 参数或 Roots 控制访问范围）。
-2. **读操作优先**：
-    - 文本：`read_text_file`（支持 `head/tail`）或 `read_multiple_files`
-    - 目录：`list_directory` / `list_directory_with_sizes` / `directory_tree`
-    - 搜索：`search_files`
-    - 元数据：`get_file_info`
-3. **写操作只用最小变更**：
-    - 编辑现有文件：优先 `edit_file`，并**先 `dryRun=true`** 预览 diff，再正式应用（避免误改/重复应用）。
-    - 新建/覆盖：`write_file`（注意会覆盖）
-    - 目录：`create_directory`
-    - 移动/重命名：`move_file`（目标存在会失败）
-4. **需要"可审计的改动"时**：将 `edit_file` 的 dry run diff 作为证据输出，并给出回滚方式（如 `git checkout -- <file>`）。
+1. **用户明确指定**："用 grep 找..."（遵从指令，输出说明"按用户要求使用 <工具>"）
+2. **MCP 服务器不可用** 且无降级路径（输出说明"<MCP 工具> 不可用，降级使用 <内置工具>"）
+3. **非代码语义的文本搜索**：在日志/文档中搜索纯文本模式（非符号）
+4. **快速原型/一次性脚本**：无需符号级定位（输出说明"非生产代码，未做符号级验证"）
 
 ---
 
-## 容错与降级（必须执行）
+## 📚 详细参考（按需加载）
 
-- 任一 server 调用失败：
-    - 不重复无意义重试（除非用户提供新线索）
-    - 立刻切到下一条兜底路径，并在输出中说明"失败点 + 兜底方案"
-- **serena 失败** → 先尝试激活项目，仍失败 → 降级到 Grep + 说明 "serena 不可用，降级到文本搜索（无符号级定位）"
-- **context7 失败** → 降级到 brave-search（官方文档）+ tavily-remote 抽取 + 说明 "context7 不可用，使用 Web 检索兜底"
-- **exa 不可用** → brave-search + tavily-remote（抽取官方页面）兜底
-- **tavily-remote 不可用** → brave/exa 给出来源列表 + 手动摘要（明确"未抽取原文"）
-- **tavily-remote 抽取失败（反爬/动态渲染）** → chrome-devtools 浏览器渲染兜底：
-    - 使用 `navigate_page` 加载页面
-    - 使用 `wait_for` 等待内容加载
-    - 使用 `evaluate_script` 或 `take_snapshot` 提取内容
-    - 输出中注明「通过浏览器渲染获取」
+复杂场景或需要调用模板时，请阅读：
 
----
-
-## 输出约定（回答用户时必须包含）
-
-1. **MCP 工具选择自检**（见顶部"输出验证要求"）
-2. 工具链（调用了哪些 server，按顺序）
-3. 关键证据（来自代码符号/文档/网页；必要时说明来源类型）
-4. 可执行结果（命令/改动点/验证步骤）
-5. 未确定项（如有）+ 一步内如何用某个工具消除
-
----
-
-## 工作流模式（可直接复用）
-
-### 模式 1：代码开发 / 重构 / 排障（仓库为主）
-
-- 复杂 → sequential-thinking（见顶部检查点第 2 条）
-- serena：定位符号/调用链/影响面（见顶部检查点第 1 条）
-- filesystem：对定位到的文件做**最小可审计**的内容改动（`edit_file` 先 dryRun，再应用）
-- context7：核对库/框架正确用法（如涉及）（见顶部检查点第 4 条）
-- 必要时 brave/exa/tavily：补齐外部证据或抽取官方段落（见顶部检查点第 3 条）
-- 输出：最小改动建议 + 回归验证点 + **MCP 工具选择自检**
-
-### 模式 2：查最新用法（文档为主）
-
-- context7：resolve + docs（见顶部检查点第 4 条）
-- 必要时 brave/exa：找官方公告/迁移指南
-- tavily-remote：抽取关键官方页面（版本/日期/条款）
-- 输出：版本前提 + 示例代码 + 常见坑 + 验证步骤（单元测试/最小复现）+ **MCP 工具选择自检**
-
-### 模式 3：Web 研究与抽取（证据链为主）
-
-- brave-search：找候选权威来源（见顶部检查点第 3 条）
-- exa：精筛补齐
-- tavily-remote：抽取关键页面形成结构化摘要（日期/版本/条款）
-- **chrome-devtools（兜底）**：tavily-remote 抽取失败时（反爬/动态渲染），通过浏览器渲染获取内容
-    - `navigate_page` → `wait_for` → `evaluate_script`/`take_snapshot` 提取
-- 输出：结论 + 证据链 + 时间信息 + 获取方式说明 + **MCP 工具选择自检**
-
-### 模式 4：文件批处理 / 配置变更（文件系统为主）
-
-- filesystem：`list_allowed_directories` → `search_files` / `list_directory` → `read_multiple_files`（见顶部检查点第 5 条）
-- filesystem：`edit_file(dryRun=true)` 预览 diff → `edit_file(dryRun=false)` 应用
-- 如涉及代码语义：补充 serena（定位入口/调用链）
-- 输出：变更 diff + 验证步骤 + 回滚指令（git）+ **MCP 工具选择自检**
+- `@references/server-details.md`：每个 MCP server 的详细能力与调用模板
+- `@references/workflow-examples.md`：6 种工作流模式示例（代码开发/查最新用法/Web 研究/文件批处理/模型选型/GitHub 研究）
+- `@references/anti-patterns.md`：反模式案例库（盲写/幻觉 API/跳跃结论的具体案例）
