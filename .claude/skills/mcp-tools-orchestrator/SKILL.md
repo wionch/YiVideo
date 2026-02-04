@@ -1,33 +1,112 @@
 ---
-name: yivideo-mcp-orchestrator
+name: mcp-tools-orchestrator
 description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：serena（代码符号/LSP/引用/调用链/重构影响面）、context7（版本特定的最新库文档/示例）、sequential-thinking（分步规划/结构化推理）、brave-search & exa（Web 检索/证据来源）、tavily-remote（URL 抽取/结构化提取/站点 map/crawl）、filesystem（文件读写/目录管理/批量改动）、chrome-devtools（浏览器渲染/动态页面获取）。当任务涉及：代码定位/重构、查最新 API、逐步推理、Web 研究与抽取/爬取、文件批处理时启用。
 ---
 
 # YiVideo MCP 编排器（MCP Orchestrator）
 
-> 渐进式披露：本文件只放“路由规则 + 强制约束 + 输出契约”；工具调用模板与剧本细节在 `references/` 下，需要时再加载。
+> 渐进式披露：本文件只放"强制检查点 + 路由规则 + 强制约束 + 输出契约"；工具调用模板与剧本细节在 `references/` 下，需要时再加载。
+
+---
+
+## 🚨 强制执行：任务接收后第一步
+
+**收到用户消息后，你必须立即执行以下检查（优先级高于任何其他操作）：**
+
+### 决策树（必须按序检查）
+
+1. **代码符号查找？**（定义/引用/调用链/影响面/入口/重构影响）
+   - ✅ **必须用**：`serena`（激活项目 → 符号定位 → 调用链/引用面）
+   - ⛔ **禁止用**：`grep` / `find` / `Glob` / `Grep`（内置工具）
+   - **示例触发词**："在哪定义"、"哪里被调用"、"影响哪些模块"、"调用链"、"入口在哪"
+
+2. **复杂推理/方案对比/多步骤问题？**（≥3 子问题/存在权衡/约束不清）
+   - ✅ **必须先用**：`sequential-thinking`（分解子问题 → 列假设 → 给出工具链）
+   - ⛔ **禁止**：直接给方案/自行分析不推理
+   - **示例触发词**："如何重构"、"方案对比"、"评估影响"、"系统化分析"
+
+3. **外部证据/最新信息/网页抽取？**
+   - ✅ **必须用**：`brave-search` / `exa` / `tavily-remote`
+   - ⛔ **禁止用**：`WebFetch` / `WebSearch`（内置工具）
+   - **示例触发词**："最新信息"、"查资料"、"找官方说明"、"抽取网页内容"
+
+4. **库/框架 API 正确性？**（版本敏感/易幻觉 API/官方推荐写法）
+   - ✅ **必须用**：`context7`（resolve library id → query-docs）
+   - ⛔ **禁止**：直接给代码示例/凭记忆写 API
+   - **示例触发词**："最新用法"、"API 怎么用"、"版本变化"、"官方写法"
+
+5. **批量文件操作/配置变更/目录管理？**
+   - ✅ **必须用**：`filesystem`（list_allowed_directories → search_files → edit_file dryRun）
+   - ⛔ **禁止**：直接用 `Read` / `Write` / `Edit`（内置工具）批量操作
+   - **示例触发词**："批量修改"、"搜索所有"、"目录结构"、"配置变更"
+
+---
+
+### ✅ 合理例外（以下情况可使用内置工具）
+
+1. **用户明确指定工具**："用 grep 找..."、"直接给我答案，不要查文档"
+   → 遵从用户指令，但需在输出中说明 `"按用户要求使用 <工具>"`
+
+2. **MCP 服务器不可用**：调用失败 + 无可用降级路径
+   → 使用内置工具，但必须在输出中说明 `"<MCP工具> 不可用，降级使用 <内置工具>"`
+
+3. **非代码语义的文本搜索**：在日志/文档/配置中搜索纯文本模式（非符号）
+   → 可用 `Grep`，但涉及代码符号时必须切换到 `serena`
+
+4. **快速原型/一次性脚本**（无需符号级定位）
+   → 可直接编写，但需说明 `"非生产代码，未做符号级验证"`
+
+---
+
+### 📋 输出验证要求（每次回答必须包含）
+
+在给出最终答案前，你必须在回复中包含以下段落：
+
+```
+---
+**🔍 MCP 工具选择自检**
+
+- [x] 已检查决策树：命中第 X 条规则
+- [x] 已选择 MCP 工具：<工具名>（理由：<简短说明>）
+- [x] 已避免违规操作：未使用 <禁止工具>
+
+**工具调用链：**
+1. <tool_1> - <目的>
+2. <tool_2> - <目的>
+...
+
+**关键证据来源：**
+- 代码符号：<file:line> / <symbol_name>（若适用）
+- 外部文档：<来源类型> / <版本/日期>（若适用）
+- 推理过程：<sequential-thinking 分解结果>（若适用）
+---
+```
+
+⚠️ **注意**：你的最终回复必须包含 "🔍 MCP 工具选择自检" 段落，否则回答无效。
+
+---
 
 ## 使命
 
-你是“工具编排层”：根据任务类型决定 **用哪个 MCP server、按什么顺序、用什么最小输入**，以最大化正确性并减少无效调用。
+你是"工具编排层"：根据任务类型决定 **用哪个 MCP server、按什么顺序、用什么最小输入**，以最大化正确性并减少无效调用。
 
 默认模式：
 
-1. 先规划（仅在复杂任务时）
+1. 先规划（仅在复杂任务时，使用 sequential-thinking）
 2. 再取证（优先一手/权威来源）
 3. 交叉验证（时间敏感/高风险结论至少两来源互证）
 4. 输出可执行结果（命令/改动点/验证步骤）
 
 ## 可用 MCP Servers（以当前环境为准）
 
--   serena
--   context7
--   sequential-thinking
--   brave-search
--   exa
--   tavily-remote
--   filesystem
--   chrome-devtools
+- serena
+- context7
+- sequential-thinking
+- brave-search
+- exa
+- tavily-remote
+- filesystem
+- chrome-devtools
 
 > 环境备注：n8n-mcp 若连接失败，编排时直接忽略，不作为依赖。
 
@@ -35,11 +114,11 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 
 当用户提出以下任一诉求时启用：
 
--   “自动调用/编排 MCP / 工作流 / agent workflow”
--   多步骤问题：规划 + 调研 + 实现/对比/评估
--   代码库符号级问题：定义/引用/调用链/入口/影响面
--   “查最新文档/确认 API 是否存在/避免过时示例”
--   Web 研究：需要检索、比对来源、从 URL 抽取要点、站点级整理
+- "自动调用/编排 MCP / 工作流 / agent workflow"
+- 多步骤问题：规划 + 调研 + 实现/对比/评估
+- 代码库符号级问题：定义/引用/调用链/入口/影响面
+- "查最新文档/确认 API 是否存在/避免过时示例"
+- Web 研究：需要检索、比对来源、从 URL 抽取要点、站点级整理
 
 ---
 
@@ -47,50 +126,52 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 
 ### 1) Serena 项目激活与重试（硬约束）
 
--   若 serena 返回 `"No active project"`：**必须先调用** `mcp__serena__activate_project` 激活项目（YiVideo）。
--   激活后：**立即重试**原始 serena 操作，**不得跳过**。
--   **严禁**在未激活项目的情况下放弃使用 serena。
+- 若 serena 返回 `"No active project"`：**必须先调用** `mcp__serena__activate_project` 激活项目（YiVideo）。
+- 激活后：**立即重试**原始 serena 操作，**不得跳过**。
+- **严禁**在未激活项目的情况下放弃使用 serena。
 
 ### 2) 反模式（Anti-Patterns）——严禁操作
 
--   **盲写（Blind Coding）**：未用 serena 读取文件/符号上下文就直接产补丁。
--   **假想 API（Hallucinated APIs）**：未用 context7（或 serena/一手文档）验证就使用可能不存在的接口。
--   **跳跃结论（Jump to Solution）**：复杂问题不经 sequential-thinking 分析就给“尝试性修复”。
+- **盲写（Blind Coding）**：未用 serena 读取文件/符号上下文就直接产补丁。
+- **假想 API（Hallucinated APIs）**：未用 context7（或 serena/一手文档）验证就使用可能不存在的接口。
+- **跳跃结论（Jump to Solution）**：复杂问题不经 sequential-thinking 分析就给"尝试性修复"。
 
 ---
 
 ## 编排策略（核心路由规则）
 
+> 以下策略详细说明如何使用各 MCP 工具，遵循顶部决策树的强制约束。
+
 ### A) 复杂度闸门：是否先用 sequential-thinking
 
-满足任一条件 → 先调用 sequential-thinking：
+满足任一条件 → 先调用 sequential-thinking（见顶部检查点第 2 条）：
 
--   目标 ≥ 3 个子问题，或存在权衡/约束不清
--   需要组合：代码库 + 外部文档 + Web 研究
--   用户要求：系统化、逐步推理、多方案对比
+- 目标 ≥ 3 个子问题，或存在权衡/约束不清
+- 需要组合：代码库 + 外部文档 + Web 研究
+- 用户要求：系统化、逐步推理、多方案对比
 
 否则跳过 sequential-thinking，直接走对应工具链。
 
 ### B) 代码库事实优先：serena
 
-适用：
+适用（见顶部检查点第 1 条）：
 
--   “X 在哪里定义/哪里被用？”
--   “这段逻辑的调用链/入口在哪里？”
--   “重构会影响哪些模块/哪些符号？”
+- "X 在哪里定义/哪里被用？"
+- "这段逻辑的调用链/入口在哪里？"
+- "重构会影响哪些模块/哪些符号？"
 
 策略：
 
 1. 先用 serena 做符号定位、引用与调用链，收敛到具体文件/函数/入口
 2. 再给解释/改动方案/最小 diff 建议
-3. **任何涉及“仓库事实”的结论必须可追溯到具体符号与文件**
+3. **任何涉及"仓库事实"的结论必须可追溯到具体符号与文件**
 
 ### C) API/库用法正确性：context7
 
-适用：
+适用（见顶部检查点第 4 条）：
 
--   框架/库版本变化明显、易出现“幻觉 API”
--   用户强调“最新写法/版本特定写法/官方推荐”
+- 框架/库版本变化明显、易出现"幻觉 API"
+- 用户强调"最新写法/版本特定写法/官方推荐"
 
 策略：
 
@@ -100,11 +181,11 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 
 ### D) Web 研究与证据链：brave-search → exa → tavily-remote
 
-适用：
+适用（见顶部检查点第 3 条）：
 
--   需要最新信息或小众信息
--   需要多来源比对与引用证据
--   需要从 URL 抽取结构化信息/站点级整理
+- 需要最新信息或小众信息
+- 需要多来源比对与引用证据
+- 需要从 URL 抽取结构化信息/站点级整理
 
 策略：
 
@@ -114,23 +195,23 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 
 交叉验证（强制）：
 
--   **时间敏感或高风险结论至少两独立来源互证**（如 brave + exa；或 brave + tavily 抽取官方页面）
--   结论必须可回链到来源，优先官方/规范/主仓库
+- **时间敏感或高风险结论至少两独立来源互证**（如 brave + exa；或 brave + tavily 抽取官方页面）
+- 结论必须可回链到来源，优先官方/规范/主仓库
 
 ### E) 最少调用启发式（省调用但更准）
 
--   优先 1–2 次高信噪比调用，而不是多次浅检索
--   brave 噪声大 → 立刻切到 exa 精筛
--   需要原文证据 → 直接 tavily-remote 抽取
--   结果冲突 → 抓一手来源（官方文档/规范/主仓库）并解释差异
+- 优先 1–2 次高信噪比调用，而不是多次浅检索
+- brave 噪声大 → 立刻切到 exa 精筛
+- 需要原文证据 → 直接 tavily-remote 抽取
+- 结果冲突 → 抓一手来源（官方文档/规范/主仓库）并解释差异
 
 ### F) 浏览器渲染兜底：chrome-devtools
 
 适用：
 
--   **tavily-remote 或其他工具抽取页面内容失败**（反爬、动态渲染、JavaScript 依赖）
--   需要与网页交互（点击、填写表单、等待元素加载）才能获取内容
--   需要验证页面可视化状态（截图确认、元素存在性）
+- **tavily-remote 或其他工具抽取页面内容失败**（反爬、动态渲染、JavaScript 依赖）
+- 需要与网页交互（点击、填写表单、等待元素加载）才能获取内容
+- 需要验证页面可视化状态（截图确认、元素存在性）
 
 策略（作为兜底路径）：
 
@@ -150,22 +231,22 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 
 与其他工具的配合：
 
--   **brave-search/exa** 发现目标 URL → **chrome-devtools** 渲染获取内容
--   **tavily-remote** 抽取失败 → **chrome-devtools** 作为兜底
--   获取的内容可再通过 **filesystem** 保存供后续处理
+- **brave-search/exa** 发现目标 URL → **chrome-devtools** 渲染获取内容
+- **tavily-remote** 抽取失败 → **chrome-devtools** 作为兜底
+- 获取的内容可再通过 **filesystem** 保存供后续处理
 
 ### G) 文件读写与目录管理：filesystem
 
-适用：
+适用（见顶部检查点第 5 条）：
 
--   需要对**工作区文件做内容级读写/批量读取/目录遍历/搜索**（如改配置、改脚本、批量查看日志、生成/整理输出目录）
--   需要处理 serena 不擅长的内容（长日志、数据文件、模板/配置等）
--   需要读取图片/音频等媒体文件以便进一步分析
+- 需要对**工作区文件做内容级读写/批量读取/目录遍历/搜索**（如改配置、改脚本、批量查看日志、生成/整理输出目录）
+- 需要处理 serena 不擅长的内容（长日志、数据文件、模板/配置等）
+- 需要读取图片/音频等媒体文件以便进一步分析
 
 与 serena 的边界：
 
--   serena：符号/LSP 语义（定义/引用/调用链/影响面）
--   filesystem：字节/文本/目录级 I/O（读写、搜索、目录树、元数据）
+- serena：符号/LSP 语义（定义/引用/调用链/影响面）
+- filesystem：字节/文本/目录级 I/O（读写、搜索、目录树、元数据）
 
 策略（先读后写，写前必预览）：
 
@@ -180,31 +261,34 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
     - 新建/覆盖：`write_file`（注意会覆盖）
     - 目录：`create_directory`
     - 移动/重命名：`move_file`（目标存在会失败）
-4. **需要“可审计的改动”时**：将 `edit_file` 的 dry run diff 作为证据输出，并给出回滚方式（如 `git checkout -- <file>`）。
+4. **需要"可审计的改动"时**：将 `edit_file` 的 dry run diff 作为证据输出，并给出回滚方式（如 `git checkout -- <file>`）。
 
 ---
 
 ## 容错与降级（必须执行）
 
--   任一 server 调用失败：
-    -   不重复无意义重试（除非用户提供新线索）
-    -   立刻切到下一条兜底路径，并在输出中说明“失败点 + 兜底方案”
--   exa 不可用 → brave-search + tavily-remote（抽取官方页面）兜底
--   tavily-remote 不可用 → brave/exa 给出来源列表 + 手动摘要（明确"未抽取原文"）
--   **tavily-remote 抽取失败（反爬/动态渲染）→ chrome-devtools 浏览器渲染兜底**：
-    -   使用 `navigate_page` 加载页面
-    -   使用 `wait_for` 等待内容加载
-    -   使用 `evaluate_script` 或 `take_snapshot` 提取内容
-    -   输出中注明「通过浏览器渲染获取」
+- 任一 server 调用失败：
+    - 不重复无意义重试（除非用户提供新线索）
+    - 立刻切到下一条兜底路径，并在输出中说明"失败点 + 兜底方案"
+- **serena 失败** → 先尝试激活项目，仍失败 → 降级到 Grep + 说明 "serena 不可用，降级到文本搜索（无符号级定位）"
+- **context7 失败** → 降级到 brave-search（官方文档）+ tavily-remote 抽取 + 说明 "context7 不可用，使用 Web 检索兜底"
+- **exa 不可用** → brave-search + tavily-remote（抽取官方页面）兜底
+- **tavily-remote 不可用** → brave/exa 给出来源列表 + 手动摘要（明确"未抽取原文"）
+- **tavily-remote 抽取失败（反爬/动态渲染）** → chrome-devtools 浏览器渲染兜底：
+    - 使用 `navigate_page` 加载页面
+    - 使用 `wait_for` 等待内容加载
+    - 使用 `evaluate_script` 或 `take_snapshot` 提取内容
+    - 输出中注明「通过浏览器渲染获取」
 
 ---
 
 ## 输出约定（回答用户时必须包含）
 
-1. 工具链（调用了哪些 server，按顺序）
-2. 关键证据（来自代码符号/文档/网页；必要时说明来源类型）
-3. 可执行结果（命令/改动点/验证步骤）
-4. 未确定项（如有）+ 一步内如何用某个工具消除
+1. **MCP 工具选择自检**（见顶部"输出验证要求"）
+2. 工具链（调用了哪些 server，按顺序）
+3. 关键证据（来自代码符号/文档/网页；必要时说明来源类型）
+4. 可执行结果（命令/改动点/验证步骤）
+5. 未确定项（如有）+ 一步内如何用某个工具消除
 
 ---
 
@@ -212,31 +296,32 @@ description: 为 Claude Code 自动编排 YiVideo 场景下的 MCP servers：ser
 
 ### 模式 1：代码开发 / 重构 / 排障（仓库为主）
 
--   复杂 → sequential-thinking
--   serena：定位符号/调用链/影响面
--   filesystem：对定位到的文件做**最小可审计**的内容改动（`edit_file` 先 dryRun，再应用）
--   context7：核对库/框架正确用法（如涉及）
--   必要时 brave/exa/tavily：补齐外部证据或抽取官方段落
--   输出：最小改动建议 + 回归验证点
+- 复杂 → sequential-thinking（见顶部检查点第 2 条）
+- serena：定位符号/调用链/影响面（见顶部检查点第 1 条）
+- filesystem：对定位到的文件做**最小可审计**的内容改动（`edit_file` 先 dryRun，再应用）
+- context7：核对库/框架正确用法（如涉及）（见顶部检查点第 4 条）
+- 必要时 brave/exa/tavily：补齐外部证据或抽取官方段落（见顶部检查点第 3 条）
+- 输出：最小改动建议 + 回归验证点 + **MCP 工具选择自检**
 
 ### 模式 2：查最新用法（文档为主）
 
--   context7：resolve + docs
--   必要时 brave/exa：找官方公告/迁移指南
--   tavily-remote：抽取关键官方页面（版本/日期/条款）
--   输出：版本前提 + 示例代码 + 常见坑 + 验证步骤（单元测试/最小复现）
+- context7：resolve + docs（见顶部检查点第 4 条）
+- 必要时 brave/exa：找官方公告/迁移指南
+- tavily-remote：抽取关键官方页面（版本/日期/条款）
+- 输出：版本前提 + 示例代码 + 常见坑 + 验证步骤（单元测试/最小复现）+ **MCP 工具选择自检**
 
 ### 模式 3：Web 研究与抽取（证据链为主）
 
--   brave-search：找候选权威来源
--   exa：精筛补齐
--   tavily-remote：抽取关键页面形成结构化摘要（日期/版本/条款）
--   **chrome-devtools（兜底）**：tavily-remote 抽取失败时（反爬/动态渲染），通过浏览器渲染获取内容
-    -   `navigate_page` → `wait_for` → `evaluate_script`/`take_snapshot` 提取
--   输出：结论 + 证据链 + 时间信息 + 获取方式说明
+- brave-search：找候选权威来源（见顶部检查点第 3 条）
+- exa：精筛补齐
+- tavily-remote：抽取关键页面形成结构化摘要（日期/版本/条款）
+- **chrome-devtools（兜底）**：tavily-remote 抽取失败时（反爬/动态渲染），通过浏览器渲染获取内容
+    - `navigate_page` → `wait_for` → `evaluate_script`/`take_snapshot` 提取
+- 输出：结论 + 证据链 + 时间信息 + 获取方式说明 + **MCP 工具选择自检**
 
 ### 模式 4：文件批处理 / 配置变更（文件系统为主）
 
--   filesystem：`list_allowed_directories` → `search_files` / `list_directory` → `read_multiple_files`
--   filesystem：`edit_file(dryRun=true)` 预览 diff → `edit_file(dryRun=false)` 应用
--   如涉及代码语义：补充 serena（定位入口/调用链）
+- filesystem：`list_allowed_directories` → `search_files` / `list_directory` → `read_multiple_files`（见顶部检查点第 5 条）
+- filesystem：`edit_file(dryRun=true)` 预览 diff → `edit_file(dryRun=false)` 应用
+- 如涉及代码语义：补充 serena（定位入口/调用链）
+- 输出：变更 diff + 验证步骤 + 回滚指令（git）+ **MCP 工具选择自检**
