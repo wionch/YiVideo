@@ -1,9 +1,0 @@
-{
-  "general": {
-    "checkpointing": {
-      "enabled": false
-    },
-    "vimMode": false,
-    "previewFeatures": true
-  }
-}

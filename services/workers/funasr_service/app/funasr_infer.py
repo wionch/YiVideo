@@ -143,32 +143,48 @@ def _is_paraformer_en(model_name: str | None) -> bool:
 
 
 def _load_token_list_if_mismatch(model_name: str | None) -> List[str] | None:
-    """当 bpe.model vocab 小于 tokens.json 时返回 token_list，用于绕过解码越界。"""
+    """当 bpe.model vocab 小于 tokens.json 时返回 token_list，用于绕过解码越界。
+
+    也处理没有 bpe.model 的情况（如 CharTokenizer 模型），只要有 tokens.json 就返回。
+    """
     if not model_name:
         return None
     try:
         from modelscope import snapshot_download
+        from funasr.download.download_model_from_hub import name_maps_ms
     except Exception:
         return None
+
+    # 使用 FunASR 的模型名称映射解析别名（如 paraformer-en -> iic/...）
+    resolved_name = name_maps_ms.get(model_name, model_name)
+
     try:
-        model_dir = snapshot_download(model_name)
+        model_dir = snapshot_download(resolved_name)
     except Exception:
         return None
     tokens_path = os.path.join(model_dir, "tokens.json")
     bpe_path = os.path.join(model_dir, "bpe.model")
-    if not (os.path.exists(tokens_path) and os.path.exists(bpe_path)):
+
+    # 必须有 tokens.json
+    if not os.path.exists(tokens_path):
         return None
+
     try:
         with open(tokens_path, "r", encoding="utf-8") as handle:
             tokens = json.load(handle)
         if not isinstance(tokens, list) or not tokens:
             return None
-        import sentencepiece as spm
 
-        sp = spm.SentencePieceProcessor()
-        sp.load(bpe_path)
-        if len(tokens) <= sp.get_piece_size():
-            return None
+        # 如果有 bpe.model，检查词表大小是否匹配
+        if os.path.exists(bpe_path):
+            import sentencepiece as spm
+
+            sp = spm.SentencePieceProcessor()
+            sp.load(bpe_path)
+            if len(tokens) <= sp.get_piece_size():
+                return None
+        # 如果没有 bpe.model（如 CharTokenizer 模型），直接返回 tokens
+        # 这避免了 SentencePiece 解码越界问题
         return tokens
     except Exception:
         return None
@@ -234,6 +250,24 @@ def resolve_remote_code_path(
     return None
 
 
+def _needs_trust_remote_code(model_name: str | None) -> bool:
+    """检测模型是否需要 trust_remote_code=True 才能正确加载。
+
+    包括：
+    - FunASR Nano 系列模型
+    - 带说话人分离的模型 (-spk)
+    """
+    if not model_name:
+        return False
+    # FunASR Nano 系列
+    if _is_funasr_nano(model_name):
+        return True
+    # 带说话人分离的模型
+    if "-spk" in model_name.lower():
+        return True
+    return False
+
+
 def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
     start_time = time.time()
     if model_loader is None:
@@ -254,8 +288,10 @@ def run_infer(args: argparse.Namespace, model_loader=None) -> Dict[str, Any]:
             if auto_remote_code:
                 model_kwargs["remote_code"] = auto_remote_code
         if trust_remote_code and not model_kwargs.get("remote_code"):
-            # 未找到 remote_code 时关闭 trust_remote_code，避免尝试导入不存在的 model 模块
-            model_kwargs["trust_remote_code"] = False
+            # 对于需要 trust_remote_code 的模型（如 Nano、-spk 等），保持 trust_remote_code=True
+            # 让 AutoModel 自行处理模型加载；其他模型则关闭以避免导入不存在的模块
+            if not _needs_trust_remote_code(args.model_name):
+                model_kwargs["trust_remote_code"] = False
     if args.remote_code:
         model_kwargs["remote_code"] = args.remote_code
     if args.vad_model:
