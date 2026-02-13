@@ -2,7 +2,6 @@
 WService 执行器模块。
 """
 
-from .correct_subtitles_executor import WServiceCorrectSubtitlesExecutor
 from .ai_optimize_text_executor import WServiceAIOptimizeTextExecutor
 from .rebuild_subtitle_with_words_executor import WServiceRebuildSubtitleWithWordsExecutor
 from .merge_speaker_segments_executor import WServiceMergeSpeakerSegmentsExecutor
@@ -11,9 +10,9 @@ from .merge_speaker_based_subtitles_executor import WServiceMergeSpeakerBasedSub
 from .prepare_tts_segments_executor import WServicePrepareTtsSegmentsExecutor
 from .generate_subtitle_files_executor import WServiceGenerateSubtitleFilesExecutor
 from .translate_subtitles_executor import WServiceTranslateSubtitlesExecutor
+from .subtitle_segmentation_executor import WServiceSubtitleSegmentationExecutor
 
 __all__ = [
-    "WServiceCorrectSubtitlesExecutor",
     "WServiceAIOptimizeTextExecutor",
     "WServiceRebuildSubtitleWithWordsExecutor",
     "WServiceMergeSpeakerSegmentsExecutor",
@@ -22,4 +21,5 @@ __all__ = [
     "WServicePrepareTtsSegmentsExecutor",
     "WServiceGenerateSubtitleFilesExecutor",
     "WServiceTranslateSubtitlesExecutor",
+    "WServiceSubtitleSegmentationExecutor",
 ]

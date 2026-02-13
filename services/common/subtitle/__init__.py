@@ -1,11 +1,8 @@
 """
 YiVideo 字幕处理模块
 
-提供字幕校正、解析、AI提供商集成等通用字幕处理功能。
+提供字幕解析、AI提供商集成等通用字幕处理功能。
 """
-
-# 字幕校正
-from .subtitle_correction import SubtitleCorrector
 
 # 字幕解析
 from .subtitle_parser import SubtitleEntry, SRTParser, parse_srt_file, write_srt_file
@@ -13,12 +10,10 @@ from .subtitle_parser import SubtitleEntry, SRTParser, parse_srt_file, write_srt
 # AI提供商
 from .ai_providers import AIProviderFactory
 
-# 字幕校正配置
-from .subtitle_correction_config import SubtitleCorrectionConfig
+# AI提供商配置
+from .ai_providers_config import AIProvidersConfig
 
 __all__ = [
-    # 字幕校正
-    'SubtitleCorrector',
     # 字幕解析
     'SubtitleEntry',
     'SRTParser',
@@ -27,5 +22,5 @@ __all__ = [
     # AI提供商
     'AIProviderFactory',
     # 配置
-    'SubtitleCorrectionConfig',
+    'AIProvidersConfig',
 ]

@@ -2,6 +2,11 @@
 
 """
 Qwen3-ASR 转录执行器。
+
+职责范围：
+- 调用 Qwen3-ASR 模型进行语音转录
+- 返回原始 ASR 识别结果（文本、时间戳、语言等）
+- 不进行任何分句处理（交由下游 wservice.segment_subtitles 节点负责）
 """
 
 from __future__ import annotations
@@ -11,7 +16,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from services.common.base_node_executor import BaseNodeExecutor
 from services.common.config_loader import CONFIG
@@ -22,6 +27,12 @@ from services.common.path_builder import build_node_output_path, ensure_director
 from services.common.subprocess_utils import run_gpu_command
 
 logger = get_logger(__name__)
+
+
+_PARAM_RANGES = {
+    "max_model_len": (4096, 131072),
+    "gpu_memory_utilization": (0.1, 0.95),
+}
 
 
 def map_language(language: str | None) -> str | None:
@@ -41,21 +52,51 @@ def map_language(language: str | None) -> str | None:
     return lang
 
 
-def map_words(time_stamps: List[Dict[str, Any]] | None, enable: bool) -> Tuple[list, int]:
-    """将时间戳列表映射为 words 结构。"""
-    if not enable:
-        return [], 0
-    if not time_stamps:
-        return [], 0
-    words = []
-    for item in time_stamps:
-        words.append({
-            "word": item.get("text", ""),
-            "start": item.get("start", 0.0),
-            "end": item.get("end", 0.0),
-            "probability": None,
-        })
-    return words, len(words)
+def _parse_numeric_param(
+    name: str,
+    raw_value: Any,
+    default_value: Any,
+    min_value: float | None,
+    max_value: float | None,
+    cast_type: type,
+) -> Any:
+    if raw_value is None:
+        return default_value
+    if isinstance(raw_value, bool):
+        logger.warning(f"[qwen3_asr] 参数 {name} 类型无效，已回退默认值")
+        return default_value
+    try:
+        value = cast_type(raw_value)
+    except (TypeError, ValueError):
+        logger.warning(f"[qwen3_asr] 参数 {name} 类型无效，已回退默认值")
+        return default_value
+    if min_value is not None and value < min_value:
+        logger.warning(f"[qwen3_asr] 参数 {name} 超出范围，已回退默认值")
+        return default_value
+    if max_value is not None and value > max_value:
+        logger.warning(f"[qwen3_asr] 参数 {name} 超出范围，已回退默认值")
+        return default_value
+    return value
+
+
+def _resolve_audio_duration(audio_duration: float | None, time_stamps: List[Dict[str, Any]] | None) -> float:
+    """
+    解析音频时长。
+
+    优先级：
+    1. 模型返回的 audio_duration
+    2. 最后一个时间戳的 end 时间
+    3. 0.0
+    """
+    if audio_duration and audio_duration > 0:
+        return audio_duration
+    if time_stamps:
+        try:
+            last_end = float(time_stamps[-1].get("end", 0.0))
+            return last_end if last_end > 0 else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
 
 
 def build_infer_command(
@@ -66,6 +107,8 @@ def build_infer_command(
     language: str | None,
     enable_word_timestamps: bool,
     forced_aligner_model: str | None,
+    max_model_len: int | None,
+    gpu_memory_utilization: float | None,
 ) -> list[str]:
     """构建 subprocess 推理命令。"""
     infer_script = Path(__file__).resolve().parents[1] / "app" / "qwen3_asr_infer.py"
@@ -83,47 +126,11 @@ def build_infer_command(
         cmd += ["--enable_word_timestamps"]
     if forced_aligner_model:
         cmd += ["--forced_aligner_model", forced_aligner_model]
+    if max_model_len is not None:
+        cmd += ["--max_model_len", str(max_model_len)]
+    if gpu_memory_utilization is not None:
+        cmd += ["--gpu_memory_utilization", str(gpu_memory_utilization)]
     return cmd
-
-
-def build_transcribe_json(
-    stage_name: str,
-    workflow_id: str,
-    audio_file_name: str,
-    segments: List[Dict[str, Any]],
-    audio_duration: float,
-    language: str,
-    model_name: str,
-    device: str,
-    enable_word_timestamps: bool,
-    transcribe_duration: float,
-) -> Dict[str, Any]:
-    total_segments = len(segments)
-    total_words = sum(len(seg.get("words", [])) for seg in segments)
-    avg_duration = 0
-    if total_segments > 0:
-        avg_duration = sum(seg.get("end", 0) - seg.get("start", 0) for seg in segments) / total_segments
-    return {
-        "metadata": {
-            "task_name": stage_name,
-            "workflow_id": workflow_id,
-            "audio_file": audio_file_name,
-            "total_duration": audio_duration,
-            "language": language,
-            "word_timestamps_enabled": enable_word_timestamps,
-            "model_name": model_name,
-            "device": device,
-            "transcribe_method": "qwen3-asr-subprocess",
-            "created_at": time.time(),
-        },
-        "segments": segments,
-        "statistics": {
-            "total_segments": total_segments,
-            "total_words": total_words,
-            "transcribe_duration": transcribe_duration,
-            "average_segment_duration": avg_duration,
-        },
-    }
 
 
 def _read_infer_output(path: str) -> Dict[str, Any]:
@@ -131,25 +138,6 @@ def _read_infer_output(path: str) -> Dict[str, Any]:
         raise RuntimeError(f"推理输出不存在: {path}")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
-
-
-def _build_segments(text: str, time_stamps: List[Dict[str, Any]] | None, audio_duration: float, enable_words: bool):
-    words, _ = map_words(time_stamps, enable=enable_words)
-    if words:
-        start = words[0].get("start", 0.0)
-        end = words[-1].get("end", audio_duration)
-    else:
-        start = 0.0
-        end = audio_duration
-    segment = {
-        "id": 0,
-        "start": start,
-        "end": end,
-        "text": text or "",
-    }
-    if enable_words:
-        segment["words"] = words
-    return [segment]
 
 
 def _run_infer(cmd: list[str], stage_name: str, cwd: str) -> Dict[str, Any]:
@@ -165,7 +153,18 @@ def _run_infer_with_gpu_lock(cmd: list[str], stage_name: str, cwd: str) -> Dict[
 
 
 class Qwen3ASRTranscribeExecutor(BaseNodeExecutor):
-    """Qwen3-ASR 语音转录执行器。"""
+    """
+    Qwen3-ASR 语音转录执行器。
+
+    职责：
+    - 调用 Qwen3-ASR 模型进行语音转录
+    - 返回原始识别结果（text, time_stamps, language, audio_duration）
+
+    不负责：
+    - 字幕分句（交由 wservice.segment_subtitles 节点负责）
+    - 字符限制处理
+    - 读速控制
+    """
 
     def validate_input(self) -> None:
         input_data = self.get_input_data()
@@ -193,11 +192,30 @@ class Qwen3ASRTranscribeExecutor(BaseNodeExecutor):
             service_config.get("forced_aligner_model", "Qwen/Qwen3-ForcedAligner-0.6B"),
         )
         device = input_data.get("device", service_config.get("device", "cuda"))
+        max_model_len = _parse_numeric_param(
+            "max_model_len",
+            input_data.get("max_model_len", service_config.get("max_model_len")),
+            service_config.get("max_model_len"),
+            *_PARAM_RANGES["max_model_len"],
+            int,
+        )
+        gpu_memory_utilization = _parse_numeric_param(
+            "gpu_memory_utilization",
+            input_data.get("gpu_memory_utilization", service_config.get("gpu_memory_utilization")),
+            service_config.get("gpu_memory_utilization"),
+            *_PARAM_RANGES["gpu_memory_utilization"],
+            float,
+        )
 
         if device == "cpu" and backend == "vllm":
             raise ValueError("CPU 模式不支持 vllm 后端")
         if device == "cpu" and "backend" not in input_data:
             backend = "transformers"
+        if backend != "vllm":
+            if input_data.get("max_model_len") is not None or input_data.get("gpu_memory_utilization") is not None:
+                logger.warning("[qwen3_asr] 非 vLLM 后端忽略 max_model_len/gpu_memory_utilization")
+            max_model_len = None
+            gpu_memory_utilization = None
 
         task_id = self.context.workflow_id
         tmp_dir = f"/share/workflows/{task_id}/tmp"
@@ -213,6 +231,8 @@ class Qwen3ASRTranscribeExecutor(BaseNodeExecutor):
             language=language,
             enable_word_timestamps=enable_word_timestamps,
             forced_aligner_model=forced_aligner_model if enable_word_timestamps else None,
+            max_model_len=max_model_len,
+            gpu_memory_utilization=gpu_memory_utilization,
         )
 
         try:
@@ -222,46 +242,54 @@ class Qwen3ASRTranscribeExecutor(BaseNodeExecutor):
                 else _run_infer(cmd, self.stage_name, str(Path(__file__).parent))
             )
 
-            segments = _build_segments(
-                text=payload.get("text", ""),
-                time_stamps=payload.get("time_stamps"),
-                audio_duration=payload.get("audio_duration") or 0,
-                enable_words=enable_word_timestamps,
-            )
+            audio_duration = _resolve_audio_duration(payload.get("audio_duration"), payload.get("time_stamps"))
 
-            transcribe_data = build_transcribe_json(
-                stage_name=self.stage_name,
-                workflow_id=self.context.workflow_id,
-                audio_file_name=os.path.basename(audio_path),
-                segments=segments,
-                audio_duration=payload.get("audio_duration") or 0,
-                language=payload.get("language") or (language or "unknown"),
-                model_name=model_name,
-                device=device,
-                enable_word_timestamps=enable_word_timestamps,
-                transcribe_duration=payload.get("transcribe_duration") or 0,
-            )
-
+            # 保存原始转录结果
             workflow_short_id = self.context.workflow_id[:8]
-            segments_file = build_node_output_path(
+            transcribe_result_file = build_node_output_path(
                 task_id=self.context.workflow_id,
                 node_name=self.stage_name,
                 file_type="data",
-                filename=f"transcribe_data_{workflow_short_id}.json",
+                filename=f"transcribe_result_{workflow_short_id}.json",
             )
-            ensure_directory(segments_file)
-            with open(segments_file, "w", encoding="utf-8") as f:
-                json.dump(transcribe_data, f, ensure_ascii=False, indent=2)
+            ensure_directory(transcribe_result_file)
+
+            # 构建输出 JSON
+            output_json = {
+                "metadata": {
+                    "task_name": self.stage_name,
+                    "workflow_id": self.context.workflow_id,
+                    "audio_file": os.path.basename(audio_path),
+                    "model_name": model_name,
+                    "backend": backend,
+                    "device": device,
+                    "language": payload.get("language") or (language or "unknown"),
+                    "word_timestamps_enabled": enable_word_timestamps,
+                    "transcribe_method": "qwen3-asr-subprocess",
+                    "created_at": time.time(),
+                },
+                "text": payload.get("text", ""),
+                "language": payload.get("language") or (language or "unknown"),
+                "audio_duration": audio_duration,
+                "time_stamps": payload.get("time_stamps"),
+                "transcribe_duration": payload.get("transcribe_duration") or 0,
+            }
+
+            with open(transcribe_result_file, "w", encoding="utf-8") as f:
+                json.dump(output_json, f, ensure_ascii=False, indent=2)
+            logger.info(f"[{self.stage_name}] 转录结果已保存: {transcribe_result_file}")
 
             return {
-                "segments_file": segments_file,
-                "audio_duration": payload.get("audio_duration") or 0,
-                "language": payload.get("language") or (language or "unknown"),
+                "transcribe_result_file": transcribe_result_file,
+                "text": output_json["text"],
+                "language": output_json["language"],
+                "audio_duration": audio_duration,
+                "time_stamps": output_json["time_stamps"],
+                "word_timestamps_enabled": enable_word_timestamps,
                 "model_name": model_name,
+                "backend": backend,
                 "device": device,
-                "enable_word_timestamps": enable_word_timestamps,
-                "statistics": transcribe_data["statistics"],
-                "segments_count": len(segments),
+                "transcribe_duration": output_json["transcribe_duration"],
             }
         finally:
             # 确保临时文件被清理（无论成功或失败）
@@ -279,7 +307,10 @@ class Qwen3ASRTranscribeExecutor(BaseNodeExecutor):
             "model_size",
             "language",
             "enable_word_timestamps",
+            "forced_aligner_model",
+            "max_model_len",
+            "gpu_memory_utilization",
         ]
 
     def get_required_output_fields(self) -> List[str]:
-        return ["segments_file"]
+        return ["transcribe_result_file", "text"]

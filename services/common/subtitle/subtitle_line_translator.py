@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 from services.common.config_loader import get_config
 
 from .prompt_loader import PromptLoader
-from .subtitle_correction_config import SubtitleCorrectionConfig
+from .ai_providers_config import AIProvidersConfig
 from .subtitle_text_optimizer import SubtitleTextOptimizer
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,8 @@ class SubtitleLineTranslator:
         config: Optional[Dict[str, Any]] = None,
         dump_tag: Optional[str] = None
     ):
-        config_data = config or get_config().get("subtitle_correction", {})
-        self.config = SubtitleCorrectionConfig(config_data)
+        config_data = config or get_config().get("ai_providers", {})
+        self.config = AIProvidersConfig(config_data)
         self.provider_name = provider or self.config.default_provider
         self.prompt_loader = PromptLoader()
         self.dump_tag = dump_tag

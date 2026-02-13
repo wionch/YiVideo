@@ -418,7 +418,6 @@ async def get_supported_tasks():
         ],
         "wservice": [
             "wservice.generate_subtitle_files",
-            "wservice.correct_subtitles",
             "wservice.ai_optimize_text",
             "wservice.rebuild_subtitle_with_words",
             "wservice.translate_subtitles",

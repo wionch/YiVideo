@@ -26,13 +26,72 @@ redis:
     # 用于工作流状态存储
     db_state_store: 3
 
-# 2. 解码器模块配置
+# 2. AI 提供商通用配置 (新增)
+# 供字幕翻译、文本优化等AI功能使用的统一提供商配置
+ai_providers:
+    # 默认AI服务提供商
+    default_provider: deepseek
+
+    # AI服务提供商列表
+    providers:
+        # DeepSeek (deepseek-chat)
+        deepseek:
+            api_key_env: 'DEEPSEEK_API_KEY'
+            api_base_url: 'https://api.deepseek.com/chat/completions'
+            model: 'deepseek-chat'
+            max_tokens: 8000
+            temperature: 0.1
+            timeout: 300
+            enabled: true
+
+        # Google Gemini (gemini-pro)
+        gemini:
+            api_key_env: 'GEMINI_API_KEY'
+            api_base_url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
+            model: 'gemini-pro'
+            max_tokens: 8000
+            temperature: 0.1
+            timeout: 300
+            enabled: true
+
+        # 智谱AI (glm-4)
+        zhipu:
+            api_key_env: 'ZHIPU_API_KEY'
+            api_base_url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+            model: 'glm-4'
+            max_tokens: 8000
+            temperature: 0.1
+            timeout: 300
+            enabled: true
+
+        # 火山引擎 (doubao-pro-32k)
+        volcengine:
+            api_key_env: 'VOLCENGINE_API_KEY'
+            api_base_url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+            model: 'doubao-pro-32k'
+            endpoint_id: ''
+            max_tokens: 8000
+            temperature: 0.1
+            timeout: 300
+            enabled: true
+
+        # OpenAI 兼容接口
+        openai_compatible:
+            api_key_env: 'OPENAI_COMPATIBLE_API_KEY'
+            api_base_url: 'https://np.wionch.top/v1/chat/completions'
+            model: '流式抗截断/gemini-2.5-pro'
+            max_tokens: 4096
+            temperature: 0.1
+            timeout: 300
+            enabled: true
+
+# 3. 解码器模块配置
 decoder:
     # GPU解码时，一次性送入显存的帧数。更大的值可以加快解码速度，但会增加显存占用。
     # 建议值: 16, 32, 64
     batch_size: 32
 
-# 3. 字幕区域检测模块配置
+# 4. 字幕区域检测模块配置
 area_detector:
     # 为了确定字幕区域，从整个视频中均匀采样的帧数。值越大，区域定位越准，但检测耗时越长。
     # 建议值: 100 ~ 500
@@ -47,7 +106,7 @@ area_detector:
     # 建议值: 5-10 (精确字幕), 10-15 (一般场景), 15-30 (有特效字幕)
     y_padding: 10
 
-# 4. 关键帧检测模块配置
+# 5. 关键帧检测模块配置
 keyframe_detector:
     # 感知哈希(dHash)的大小。更高的值可以更精确地捕捉图像内容的细节，但也可能对微小噪点更敏感。
     # 推荐值: 8, 16
@@ -69,7 +128,7 @@ keyframe_detector:
     # 建议值: 150-300像素
     min_focus_width: 200
 
-# 5. OCR识别模块配置
+# 6. OCR识别模块配置
 ocr:
     # OCR语言设置
     lang: 'en' # 英文en 中文ch
@@ -129,13 +188,13 @@ ocr:
         # 字幕场景优化设置
         subtitle_optimized: true
 
-# 6. 后处理器模块配置
+# 7. 后处理器模块配置
 postprocessor:
     # 一条字幕被认为是有效的最小持续时间（单位：秒）。用于过滤掉因检测错误而产生的快速闪现的无效字幕。
     # 建议值: 0.1 ~ 0.5
     min_duration_seconds: 0.2
 
-# 7. 流水线控制
+# 8. 流水线控制
 pipeline:
     # true: 只处理内容变化的关键帧 (推荐，性能更好)。
     # false: 处理视频的每一帧。速度极慢，但能捕捉所有微小变化。
@@ -156,7 +215,7 @@ pipeline:
     # "pic": 帧图像保存为临时图片文件。内存占用低，磁盘I/O开销大。
     frame_cache_strategy: 'pic'
 
-# 8. LLM 服务配置
+# 9. LLM 服务配置
 llm_service:
     # 如果工作流中未指定，则使用此默认提供商
     default_provider: gemini
@@ -173,7 +232,7 @@ llm_service:
             # DeepSeek 模型的API Endpoint
             api_base_url: 'https://api.deepseek.com/chat/completions'
 
-# 9. Faster Whisper Service 配置 (新增)
+# 10. Faster Whisper Service 配置 (新增)
 faster_whisper_service:
     # === 基础 ASR 配置 ===
     # Faster Whisper ASR 模型设置
@@ -232,7 +291,7 @@ faster_whisper_service:
     # 日志级别: DEBUG, INFO, WARNING, ERROR
     log_level: 'INFO'
 
-# 9. FunASR Service 配置 (新增)
+# 11. FunASR Service 配置 (新增)
 funasr_service:
     # === 基础 ASR 配置 ===
     # FunASR 模型设置
@@ -269,7 +328,7 @@ funasr_service:
     lm_weight: null
     beam_size: null
 
-# 10. GPU锁配置
+# 12. GPU锁配置
 # 用于优化GPU资源的并发访问控制,提升系统吞吐量
 # 最近更新 (2025-12-24): 修复了锁释放竞态条件、IndexTTS服务锁泄漏、实现三层异常保护
 gpu_lock:
@@ -292,7 +351,7 @@ gpu_lock:
     max_poll_interval: 10
     # 优化建议: 可考虑降低至 5 秒以保持更高响应性
 
-# 11. GPU锁监控配置 (新增)
+# 13. GPU锁监控配置 (新增)
 # 用于主动监控GPU锁状态，自动检测和恢复死锁
 gpu_lock_monitor:
     # 监控间隔（秒）
@@ -325,7 +384,7 @@ gpu_lock_monitor:
         max_lock_age: 3600 # 最大锁持有时间
         recent_window_size: 20 # 最近统计窗口大小
 
-# 12. Audio Separator Service 配置 (新增)
+# 14. Audio Separator Service 配置 (新增)
 # 基于 UVR-MDX 和 Demucs 模型的人声/背景音分离服务
 audio_separator_service:
     # === 模型类型选择 ===
@@ -404,7 +463,7 @@ audio_separator_service:
     # 日志级别: DEBUG, INFO, WARNING, ERROR
     log_level: 'INFO'
 
-# 13. FFmpeg Service 配置 (新增)
+# 15. FFmpeg Service 配置 (新增)
 # FFmpeg视频处理服务，支持音频提取、关键帧提取和音频分割功能
 ffmpeg_service:
     # === 基础配置 ===
@@ -511,7 +570,7 @@ ffmpeg_service:
         # 是否生成处理报告
         generate_report: true
 
-# 14. Pyannote Audio Service 配置 (新增)
+# 16. Pyannote Audio Service 配置 (新增)
 # 基于 pyannote.audio 的说话人分离服务
 pyannote_audio_service:
     # === 模式配置 ===
@@ -565,7 +624,7 @@ pyannote_audio_service:
     # 是否记录详细的处理日志
     verbose_processing: false
 
-# 16. WService (字幕AI优化服务) 配置 (新增)
+# 17. WService (字幕AI优化服务) 配置 (新增)
 # WService专注于字幕处理和AI优化，从faster_whisper_service迁移了所有非GPU功能
 wservice:
     # === 基础配置 ===
@@ -626,7 +685,7 @@ wservice:
     # 文件保留时间（小时）
     file_retention_hours: 24
 
-# 15. 字幕优化器V2配置 (新增)
+# 18. 字幕优化器V2配置 (新增)
 # 基于LLM的字幕分段优化器，支持大文件分段处理和并发优化
 subtitle_optimizer:
     # === 分段配置 ===
@@ -668,155 +727,7 @@ subtitle_optimizer:
         # 温度参数（越低越保守）
         temperature: 0.1
 
-# 16. 字幕校正服务配置 (新增)
-# 基于AI的字幕校正功能，支持多个AI服务提供商进行字幕质量优化
-subtitle_correction:
-    # === 基础配置 ===
-    # 默认AI服务提供商
-    default_provider: deepseek
-
-    # === 处理配置 ===
-    # 单次处理的最大字符数（基于智能token估算优化）
-    # 注意：虽然DeepSeek支持128K tokens，但为了稳定性推荐使用较小值
-    # 系统会根据实际情况自动判断是否需要分批处理
-    max_subtitle_length: 8000
-    # AI响应的最大令牌数
-    max_tokens: 8000
-    # AI响应温度参数（0.0-2.0，越低越保守）
-    temperature: 0.1
-    # API请求超时时间（秒）
-    timeout_seconds: 600
-
-    # === 文件配置 ===
-    # 系统提示词文件路径
-    system_prompt_path: '/app/config/system_prompt/subtitle_optimization.md'
-    # 输出字幕格式
-    output_format: 'srt'
-    # 是否备份原始字幕文件
-    backup_original: true
-
-    # === 处理选项 ===
-    # 是否启用批量处理（长字幕自动分批）
-    batch_processing: true
-    # 批处理大小
-    batch_size: 5
-    # 是否保持原始时间戳（推荐启用）
-    preserve_timestamps: true
-    # 最大重试次数
-    max_retry_attempts: 3
-    # 重试延迟时间（秒）
-    retry_delay: 2.0
-
-    # === 本地合并配置 ===
-    # 是否启用本地短字幕合并预处理
-    enable_local_merge: true
-    # 短字幕的最大字符数（1个字的字幕会尝试合并）
-    local_merge_max_chars: 1
-    # 合并后每行最大字符数（超过此长度不会合并）
-    local_merge_max_line_length: 20
-
-    # === AI服务提供商配置 ===
-    providers:
-        # DeepSeek (deepseek-chat)
-        deepseek:
-            # API密钥（从环境变量 DEEPSEEK_API_KEY 读取）
-            api_key_env: 'DEEPSEEK_API_KEY'
-            # API基础URL
-            api_base_url: 'https://api.deepseek.com/chat/completions'
-            # 模型名称
-            model: 'deepseek-chat'
-            # 最大令牌数（可覆盖全局设置）
-            max_tokens: 8000
-            # 温度参数（可覆盖全局设置）
-            temperature: 0.1
-            # 请求超时时间（秒）
-            timeout: 300
-            # 是否启用此提供商
-            enabled: true
-
-        # Google Gemini (gemini-pro)
-        gemini:
-            # API密钥（从环境变量 GEMINI_API_KEY 读取）
-            api_key_env: 'GEMINI_API_KEY'
-            # API基础URL
-            api_base_url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'
-            # 模型名称
-            model: 'gemini-pro'
-            max_tokens: 8000
-            temperature: 0.1
-            timeout: 300
-            enabled: true
-
-        # 智谱AI (glm-4)
-        zhipu:
-            # API密钥（从环境变量 ZHIPU_API_KEY 读取）
-            api_key_env: 'ZHIPU_API_KEY'
-            # API基础URL
-            api_base_url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
-            # 模型名称
-            model: 'glm-4'
-            max_tokens: 8000
-            temperature: 0.1
-            timeout: 300
-            enabled: true
-
-        # 火山引擎 (doubao-pro-32k)
-        volcengine:
-            # API密钥（从环境变量 VOLCENGINE_API_KEY 读取）
-            api_key_env: 'VOLCENGINE_API_KEY'
-            # API基础URL
-            api_base_url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
-            # 模型名称
-            model: 'doubao-pro-32k'
-            # 端点ID（如果需要）
-            endpoint_id: ''
-            max_tokens: 8000
-            temperature: 0.1
-            timeout: 300
-            enabled: true
-
-        # OpenAI 兼容接口 (新增)
-        openai_compatible:
-            # API密钥（从环境变量 OPENAI_COMPATIBLE_API_KEY 读取）
-            api_key_env: 'OPENAI_COMPATIBLE_API_KEY'
-            # API基础URL (请根据你的服务商修改)
-            api_base_url: 'https://np.wionch.top/v1/chat/completions'
-            # 模型名称 (请根据你的服务商修改)
-            model: '流式抗截断/gemini-2.5-pro'
-            max_tokens: 4096
-            temperature: 0.1
-            timeout: 300
-            enabled: true
-
-    # === 质量控制 ===
-    # 是否启用结果验证
-    enable_validation: true
-    # 最小校正质量分数（0.0-1.0）
-    min_quality_score: 0.7
-    # 是否启用自动重试（质量不达标时）
-    auto_retry_on_low_quality: false
-
-    # === 性能优化 ===
-    # 是否启用响应缓存
-    enable_cache: false
-    # 缓存过期时间（小时）
-    cache_ttl_hours: 24
-    # 是否启用并发处理（多批处理）
-    enable_concurrent_batches: false
-    # 最大并发批数
-    max_concurrent_batches: 2
-
-    # === 监控配置 ===
-    # 是否启用性能监控
-    enable_monitoring: true
-    # 日志级别: DEBUG, INFO, WARNING, ERROR
-    log_level: 'INFO'
-    # 是否记录详细的处理日志
-    verbose_processing: false
-    # 是否记录API调用统计
-    log_api_stats: true
-
-# 14. IndexTTS2 文本转语音服务配置 (基于官方源码验证)
+# 19. IndexTTS2 文本转语音服务配置 (基于官方源码验证)
 indextts_service:
     # === 模型配置 ===
     model_dir: '/models/indextts'
@@ -847,3 +758,22 @@ qwen3_asr_service:
     model_size: "0.6B"
     enable_word_timestamps: true
     forced_aligner_model: "Qwen/Qwen3-ForcedAligner-0.6B"
+
+    # VAD 参数（静音检测）
+    vad_enable: false
+    vad_mode: 2  # VAD 激进程度 (0-3)
+    vad_frame_ms: 30  # VAD 帧长 (10/20/30 ms)
+    vad_min_silence_s: 0.6  # 最小静音持续时长（秒）
+
+    # 分段参数（词级时间戳分段）
+    segment_max_duration_s: 30  # 分段最大时长（秒）
+    segment_max_words: 50  # 分段最大词数
+    segment_gap_threshold_s: 0.8  # 词间隔阈值（秒）
+    segment_min_duration_s: 1.0  # 分段最小时长（秒）
+    segment_char_overflow: 0  # 允许超出最大字符数的冗余值
+
+    # 字符长度与读速参数（随语言动态调整，此处为通用默认值）
+    # segment_max_chars: 42  # 语言映射默认值（英文42，中文16，韩文16）
+    # segment_min_chars: 20  # 语言映射默认值（英文20，中文8，韩文8）
+    # segment_max_cps: 20  # 语言映射默认值（英文20，中文9，韩文12）
+

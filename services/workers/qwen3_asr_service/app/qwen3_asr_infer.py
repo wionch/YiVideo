@@ -5,7 +5,9 @@
 import argparse
 import json
 import os
+import sys
 import time
+import inspect
 
 
 class ForcedAlignEncoder(json.JSONEncoder):
@@ -35,6 +37,8 @@ def parse_args():
     parser.add_argument("--language", default=None)
     parser.add_argument("--enable_word_timestamps", action="store_true")
     parser.add_argument("--forced_aligner_model", default=None)
+    parser.add_argument("--max_model_len", type=int, default=None)
+    parser.add_argument("--gpu_memory_utilization", type=float, default=None)
     return parser.parse_args()
 
 
@@ -47,6 +51,38 @@ def build_infer_payload(text, language, time_stamps, audio_duration, transcribe_
         "transcribe_duration": transcribe_duration,
     }
 
+def _calc_audio_duration(audio, sr):
+    if not sr:
+        return None
+    try:
+        length = len(audio)
+    except TypeError:
+        return None
+    return float(length) / float(sr)
+
+def _filter_kwargs(func, kwargs):
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return kwargs, []
+    for param in signature.parameters.values():
+        if param.kind == param.VAR_KEYWORD:
+            return kwargs, []
+    filtered = {}
+    ignored = []
+    for key, value in kwargs.items():
+        if key in signature.parameters:
+            filtered[key] = value
+        else:
+            ignored.append(key)
+    return filtered, ignored
+
+def _warn_ignore_params(params):
+    if not params:
+        return
+    joined = ", ".join(params)
+    print(f"警告: 推理接口不支持参数 {joined}，已忽略", file=sys.stderr)
+
 
 def main():
     import soundfile as sf
@@ -55,6 +91,7 @@ def main():
     args = parse_args()
     start = time.time()
     audio, sr = sf.read(args.audio_path)
+    audio_duration = _calc_audio_duration(audio, sr)
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     if cuda_visible:
         print(f"CUDA_VISIBLE_DEVICES={cuda_visible}")
@@ -62,22 +99,30 @@ def main():
     if args.backend == "vllm":
         # max_model_len: 限制最大序列长度以适应 GPU 显存
         # 默认值 65536 需要 7.0 GiB KV cache，根据可用显存调整为 50000
-        model = Qwen3ASRModel.LLM(
-            model=args.model_name,
-            forced_aligner=args.forced_aligner_model if args.enable_word_timestamps else None,
-            max_model_len=50000,
-        )
+        llm_kwargs = {
+            "model": args.model_name,
+            "forced_aligner": args.forced_aligner_model if args.enable_word_timestamps else None,
+            "max_model_len": args.max_model_len if args.max_model_len else 50000,
+        }
+        if args.gpu_memory_utilization is not None:
+            llm_kwargs["gpu_memory_utilization"] = args.gpu_memory_utilization
+        llm_kwargs, ignored = _filter_kwargs(Qwen3ASRModel.LLM, llm_kwargs)
+        _warn_ignore_params(ignored)
+        model = Qwen3ASRModel.LLM(**llm_kwargs)
     else:
         model = Qwen3ASRModel.from_pretrained(
             args.model_name,
             forced_aligner=args.forced_aligner_model if args.enable_word_timestamps else None,
         )
 
-    results = model.transcribe(
-        audio=(audio, sr),
-        language=args.language,
-        return_time_stamps=args.enable_word_timestamps,
-    )
+    transcribe_kwargs = {
+        "audio": (audio, sr),
+        "language": args.language,
+        "return_time_stamps": args.enable_word_timestamps,
+    }
+    filtered_kwargs, ignored = _filter_kwargs(model.transcribe, transcribe_kwargs)
+    _warn_ignore_params(ignored)
+    results = model.transcribe(**filtered_kwargs)
 
     item = results[0]
 
@@ -113,11 +158,14 @@ def main():
                     })
             time_stamps = converted
 
+    duration = getattr(item, "duration", None)
+    if not duration or duration <= 0:
+        duration = audio_duration
     payload = build_infer_payload(
         text=item.text,
         language=item.language,
         time_stamps=time_stamps,
-        audio_duration=getattr(item, "duration", None),
+        audio_duration=duration,
         transcribe_duration=time.time() - start,
     )
 

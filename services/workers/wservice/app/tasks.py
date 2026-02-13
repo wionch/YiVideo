@@ -30,8 +30,6 @@ from services.common.subtitle.subtitle_merger import (
     create_word_level_merger,
     validate_speaker_segments
 )
-# 导入公共字幕校正模块
-from services.common.subtitle.subtitle_correction import SubtitleCorrector
 logger = get_logger('wservice_tasks')
 
 
@@ -580,20 +578,6 @@ def merge_speaker_based_subtitles(self, context: dict) -> dict:
 
 
 
-@celery_app.task(bind=True, name='wservice.correct_subtitles')
-def correct_subtitles(self, context: dict) -> dict:
-    """
-    字幕AI校正任务节点。
-    该任务已迁移到统一的 BaseNodeExecutor 框架。
-    """
-    from services.workers.wservice.executors import WServiceCorrectSubtitlesExecutor
-
-    workflow_context = WorkflowContext(**context)
-    executor = WServiceCorrectSubtitlesExecutor(self.name, workflow_context)
-    result_context = executor.execute()
-    state_manager.update_workflow_state(result_context)
-    return result_context.model_dump()
-
 
 @celery_app.task(bind=True, name='wservice.ai_optimize_text')
 def ai_optimize_text(self, context: dict) -> dict:
@@ -725,3 +709,21 @@ def prepare_tts_segments(self, context: dict) -> dict:
     result_context = executor.execute()
     state_manager.update_workflow_state(result_context)
     return result_context.model_dump()
+
+
+@celery_app.task(bind=True, name='wservice.segment_subtitles')
+def segment_subtitles(self, context: dict) -> dict:
+    """
+    字幕语义分句任务节点。
+
+    使用 PySBD + LangChain 实现语义分句和字符限制，支持词级时间戳映射。
+    该任务已迁移到统一的 BaseNodeExecutor 框架。
+    """
+    from services.workers.wservice.executors import WServiceSubtitleSegmentationExecutor
+
+    workflow_context = WorkflowContext(**context)
+    executor = WServiceSubtitleSegmentationExecutor(self.name, workflow_context)
+    result_context = executor.execute()
+    state_manager.update_workflow_state(result_context)
+    return result_context.model_dump()
+
